@@ -1,15 +1,19 @@
 [workspace]
-members = ["primitives", "script", "program"]
+members = ["primitives", "script", "program", "nori"]
 resolver = "2"
 
 [workspace.package]
 license = "MIT"
 edition = "2021"
-authors = ["xavierdmello", "ratankaliani"]
-homepage = "https://succinctlabs.github.io/op-succinct/"
-repository = "https://github.com/succinctlabs/op-succinct"
+authors = ["xavierdmello", "ratankaliani", "jk89"]
+homepage = "https://github.com/Nori-zk/nori-bridge-head"
+repository = "https://github.com/Nori-zk/nori-bridge-head"
 
 [workspace.dependencies]
+
+# nori-bridge-head
+nori-bridge-head = {path = "nori"}
+
 # sp1-helios
 sp1-helios-script = { path = "script" }
 sp1-helios-program = { path = "program" }

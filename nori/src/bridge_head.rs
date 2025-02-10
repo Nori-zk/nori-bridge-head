@@ -1,0 +1,330 @@
+use crate::{
+    proof_outputs_decoder::DecodedProofOutputs,
+    utils::{get_finality_updates, handle_nori_proof},
+};
+use alloy_primitives::{FixedBytes, B256};
+use anyhow::Result;
+use tokio::time::{sleep, Duration};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
+use helios_ethereum::consensus::Inner;
+use helios_ethereum::rpc::http_rpc::HttpRpc;
+use helios_ethereum::rpc::ConsensusRpc;
+use log::{error, info};
+use serde::{Deserialize, Serialize};
+use sp1_helios_primitives::types::ProofInputs;
+use sp1_helios_script::{get_checkpoint, get_client, get_latest_checkpoint};
+use sp1_sdk::{EnvProver, ProverClient, SP1ProvingKey, SP1Stdin};
+use std::{env, fmt, fs::File, io::Read, path::Path, str::FromStr};
+use tree_hash::TreeHash;
+
+const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
+const NB_CHECKPOINT_FILE: &str = "nb_checkpoint.json";
+
+#[derive(PartialEq)]
+pub enum NoriBridgeHeadMode {
+    Finality = 1,
+    Optimistic = 2,
+}
+
+impl FromStr for NoriBridgeHeadMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "finality" => Ok(NoriBridgeHeadMode::Finality),
+            "optimistic" => Ok(NoriBridgeHeadMode::Optimistic),
+            _ => Err(format!(
+                "Invalid value for NoriBridgeHeadMode: '{}'. Expected 'finality' or 'optimistic'.",
+                s
+            )),
+        }
+    }
+}
+
+impl fmt::Display for NoriBridgeHeadMode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            NoriBridgeHeadMode::Finality => write!(f, "Finality"),
+            NoriBridgeHeadMode::Optimistic => write!(f, "Optimistic"),
+        }
+    }
+}
+
+pub struct NoriBridgeHeadConfig {
+    bridge_mode: NoriBridgeHeadMode,
+}
+
+impl NoriBridgeHeadConfig {
+    pub fn new(bridge_mode: NoriBridgeHeadMode) -> Self {
+        Self { bridge_mode }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeCheckpoint {
+    slot_head: u64,
+    current_sync_commitee: FixedBytes<32>,
+    next_sync_committee: FixedBytes<32>,
+}
+
+pub struct NoriBridgeHead {
+    polling_interval_sec: f64,
+    slot_head: u64,
+    next_sync_committee: FixedBytes<32>,
+    current_sync_commitee: FixedBytes<32>,
+    helios_client: Inner<MainnetConsensusSpec, HttpRpc>,
+    bridge_mode: NoriBridgeHeadMode,
+    pk: SP1ProvingKey,
+    prover_client: EnvProver,
+}
+
+impl NoriBridgeHead {
+    pub async fn new(config: NoriBridgeHeadConfig) -> Self {
+        dotenv::dotenv().ok();
+
+        // Check bridge mode configuration
+        if config.bridge_mode == NoriBridgeHeadMode::Optimistic {
+            panic!("Nori bridge mode Optimistic is not currently supported.");
+        }
+
+        // Define sleep interval
+        let polling_interval_sec: f64 = env::var("NORI_HELIOS_POLLING_INTERVAL")
+            .unwrap_or_else(|_| "1.0".to_string()) // Default to 1.0 if not set
+            .parse()
+            .expect("Failed to parse NORI_HELIOS_POLLING_INTERVAL as f64.");
+
+        // Initialise slot head / commitee vars
+        let slot_head;
+        let mut next_sync_committee = FixedBytes::<32>::default();
+        let mut current_sync_commitee = FixedBytes::<32>::default();
+        let mut cold_start = false;
+
+        // Start procedure
+        if NoriBridgeHead::nb_checkpoint_exists(NB_CHECKPOINT_FILE) {
+            // Warm start procedure
+            info!("Loading nori slot checkpoint from file.");
+            let nb_checkpoint =
+                NoriBridgeHead::load_nb_checkpoint(NB_CHECKPOINT_FILE).unwrap();
+            slot_head = nb_checkpoint.slot_head;
+            next_sync_committee = nb_checkpoint.next_sync_committee;
+            current_sync_commitee = nb_checkpoint.current_sync_commitee;
+        } else {
+            // Cold start procedure
+            info!("Resorting to cold start procedure.");
+            slot_head = NoriBridgeHead::get_cold_slot_head().await;
+            cold_start = true;
+        }
+
+        // Startup info
+        info!("Starting nori bridge in '{}' mode.", config.bridge_mode);
+        info!("Starting beacon client.");
+
+        // Get beacon checkpoint
+        let helios_checkpoint = get_checkpoint(slot_head).await;
+
+        // Get the client from the beacon checkpoint
+        let helios_client = get_client(helios_checkpoint).await;
+
+        // Get sync commitee if we are cold starting (see genesis)
+        if cold_start {
+            current_sync_commitee = helios_client
+                .store
+                .current_sync_committee
+                .clone()
+                .tree_hash_root();
+        }
+
+        // Get prover client
+        let prover_client = ProverClient::from_env();
+
+        // Get pk
+        let (pk, _) = prover_client.setup(ELF);
+
+        Self {
+            polling_interval_sec,
+            slot_head,
+            next_sync_committee,
+            current_sync_commitee,
+            helios_client,
+            bridge_mode: config.bridge_mode,
+            pk,
+            prover_client,
+        }
+    }
+
+    pub async fn get_cold_slot_head() -> u64 {
+        // Get latest beacon checkpoint
+        let helios_checkpoint = get_latest_checkpoint().await;
+
+        // Get the client from the beacon checkpoint
+        let helios_client = get_client(helios_checkpoint).await;
+
+        // Get slot head from checkpoint
+        helios_client.store.finalized_header.clone().beacon().slot
+    }
+
+    pub async fn init_client(&mut self, slot: u64) {
+        // Get latest beacon checkpoint
+        let helios_checkpoint = get_checkpoint(slot).await; // This panics FIXME
+
+        // Re init helios client
+        self.helios_client = get_client(helios_checkpoint).await; // This panics FIXME
+    }
+
+    pub async fn run(&mut self) {
+        loop {
+            // Execute the process_finality_head function, log and supress errors
+            if let Err(e) = self.process_finality_head().await {
+                error!("Error processing nori bridge head update: {:?}", e);
+            }
+
+            // Sleep for the specified delay (in seconds)
+            let delay_duration = Duration::from_secs_f64(self.polling_interval_sec);
+            info!("Sleeping {} {}", self.polling_interval_sec, if self.polling_interval_sec == 1.0 { "second." } else { "seconds." });
+            sleep(delay_duration).await;
+        }
+    }
+
+    pub async fn process_finality_head(&mut self) -> Result<()> {
+        // Re-init client
+        self.init_client(self.slot_head).await;
+
+        // Get finality update
+        info!("Getting finality update.");
+        let finality_update = self
+            .helios_client
+            .rpc
+            .get_finality_update()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
+
+        // Extract latest slot
+        let latest_slot = finality_update.finalized_header.beacon().slot;
+
+        // If we have not evolved skip
+        if latest_slot <= self.slot_head {
+            info!(
+                "Nori {} bridge is up to date.",
+                self.bridge_mode.to_string()
+            );
+            return Ok(());
+        } else {
+            info!(
+                "Nori {} bridge is stale. Update initiated...",
+                self.bridge_mode.to_string()
+            );
+        }
+
+        // Get sync commitee updates
+        info!("Getting sync commitee updates.");
+        let mut sync_committee_updates = get_finality_updates(&self.helios_client).await; // This panics FIXME
+
+        // Taken from operator.rs
+        // Optimization:
+        // Skip processing update inside program if next_sync_committee is already stored in contract.
+        // We must still apply the update locally to "sync" the helios client, this is due to
+        // next_sync_committee not being stored when the helios client is bootstrapped.
+        info!("Applying sync committee optimisation.");
+        if !sync_committee_updates.is_empty() {
+            let next_sync_committee = B256::from_slice(
+                sync_committee_updates[0]
+                    .next_sync_committee
+                    .tree_hash_root()
+                    .as_ref(),
+            );
+
+            if self.next_sync_committee == next_sync_committee {
+                info!("Applying optimization, skipping sync committee update.");
+                let temp_update = sync_committee_updates.remove(0);
+
+                self.helios_client.verify_update(&temp_update).unwrap(); // Panics if not valid FIXME?
+                self.helios_client.apply_update(&temp_update);
+            }
+        }
+
+        // Create program inputs
+        info!("Building sp1 proof inputs.");
+        let mut stdin = SP1Stdin::new();
+        let expected_current_slot = self.helios_client.expected_current_slot();
+        let inputs = ProofInputs {
+            sync_committee_updates,
+            finality_update,
+            expected_current_slot,
+            store: self.helios_client.store.clone(),
+            genesis_root: self.helios_client.config.chain.genesis_root,
+            forks: self.helios_client.config.forks.clone(),
+        };
+
+        // Encode proof inputs
+        info!("Encoding sp1 proof inputs.");
+        let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
+        stdin.write_slice(&encoded_proof_inputs);
+
+        // Generate proof.
+        info!("Running sp1 proof.");
+        let proof = self.prover_client.prove(&self.pk, &stdin).plonk().run()?;
+
+        // Todo write this to the rabbit queue and other output handling
+        handle_nori_proof(&proof, latest_slot).await?;
+
+        // Update our state
+        info!("Moving nori head forward.");
+
+        // We need to extract the next sync committee out of the proof output
+        let public_values: sp1_sdk::SP1PublicValues = proof.public_values;
+        let public_values_bytes = public_values.as_slice(); // Raw bytes
+        let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes)?;
+
+        self.slot_head = latest_slot;
+        if proof_outputs.next_sync_committee_hash != FixedBytes::<32>::default() {
+            self.next_sync_committee = proof_outputs.next_sync_committee_hash; // But wait! We need to check the logic in SP1Helios.sol as this can be Zeros
+        }
+        self.current_sync_commitee = proof_outputs.sync_committee_hash;
+        self.save_nb_checkpoint();
+
+        Ok(())
+    }
+
+    // Static method to check if the checkpoint file exists
+    pub fn nb_checkpoint_exists(nb_checkpoint_location: &str) -> bool {
+        Path::new(nb_checkpoint_location).exists()
+    }
+
+    // Static method to load the checkpoint from file
+    pub fn load_nb_checkpoint(nb_checkpoint_location: &str) -> Result<NoriBridgeCheckpoint> {
+        // Open the checkpoint file
+        let mut file =
+            File::open(nb_checkpoint_location).expect("Failed to open nori checkpoint file.");
+
+        // Read the contents into a Vec<u8>
+        let mut serialized_checkpoint = Vec::new();
+        file.read_to_end(&mut serialized_checkpoint)
+            .expect("Failed to read nori checkpoint file.");
+
+        // Deserialize the checkpoint data using serde_json (not serde_cbor)
+        let nb_checkpoint: NoriBridgeCheckpoint = serde_json::from_slice(&serialized_checkpoint)
+            .expect("Failed to deserialize nori checkpoint.");
+
+        Ok(nb_checkpoint)
+    }
+
+    pub fn save_nb_checkpoint(&self) {
+        // Define the current checkpoint
+        let checkpoint = NoriBridgeCheckpoint {
+            slot_head: self.slot_head,
+            current_sync_commitee: self.current_sync_commitee,
+            next_sync_committee: self.next_sync_committee,
+        };
+
+        // Serialize the checkpoint to a byte vector
+        let serialized_nb_checkpoint =
+            serde_json::to_string(&checkpoint).expect("Failed to serialize nori checkpoint.");
+
+        // Write the serialized data to the file specified by `checkpoint_location`
+        std::fs::write(NB_CHECKPOINT_FILE, &serialized_nb_checkpoint)
+            .map_err(|e| anyhow::anyhow!("Failed to write to checkpoint file: {}", e))
+            .unwrap();
+
+        info!("Nori bridge checkpoint saved successfully.");
+    }
+}

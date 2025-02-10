@@ -15,7 +15,14 @@ pgo-data.profdata
 **/proof-with-pis.json
 **/proof-with-io.json
 
+# Environment file
 .env
 
 # Generated inputs
 /script/examples/*
+
+# Checkpoint files
+nb_checkpoint.json
+
+# Sp1 Proofs
+sp1-helios-proofs/

@@ -1,0 +1,36 @@
+[package]
+version = "0.1.0"
+name = "nori"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "nbhead"
+path = "./bin/nori_bridge_head.rs"
+
+[dependencies]
+dotenv = { workspace = true }
+sp1-sdk = { workspace = true }
+tokio = { workspace = true }
+helios-consensus-core = { workspace = true }
+helios-ethereum = { workspace = true }
+sp1-helios-primitives = { workspace = true }
+sp1-helios-script = { workspace = true}
+serde = { workspace = true }
+serde_cbor = { workspace = true }
+clap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+alloy-primitives = { workspace = true }
+alloy = { workspace = true }
+anyhow = { workspace = true }
+cargo_metadata = { workspace = true }
+reqwest = { workspace = true }
+tree_hash = { workspace = true }
+serde_json = { workspace = true }
+async-trait = "0.1.86"
+futures = "0.3.31"
+
+[build-dependencies]
+sp1-build = { workspace = true }
