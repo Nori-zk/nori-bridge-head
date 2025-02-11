@@ -1,5 +1,5 @@
 use crate::{
-    event_dispatcher::EventDispatcher,
+    event_dispatcher::{EventDispatcher, EventListener},
     proof_outputs_decoder::DecodedProofOutputs,
     utils::{get_finality_updates, handle_nori_proof},
 };
@@ -89,9 +89,9 @@ pub struct NoriBridgeHead {
 pub struct NoriBridgeHeadNoticeMessage {}
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoriBridgeHeadProofMessage {
-    slot: u64,
-    proof: SP1ProofWithPublicValues,
-    execution_state_root: FixedBytes<32>,
+    pub slot: u64,
+    pub proof: SP1ProofWithPublicValues,
+    pub execution_state_root: FixedBytes<32>,
 }
 
 async fn finality_update_job(
@@ -130,6 +130,9 @@ async fn finality_update_job(
                 .as_ref(),
         );
 
+        info!("Comparing sync comitee info");
+        info!("last_next_sync_committee {}", last_next_sync_committee);
+        info!("next_sync_committee {}", next_sync_committee);
         if last_next_sync_committee == next_sync_committee {
             // self.next_sync_committee
             info!("Applying optimization, skipping sync committee update.");
@@ -232,11 +235,28 @@ impl NoriBridgeHead {
             current_sync_commitee,
             helios_polling_client,
             bridge_mode: config.bridge_mode,
-            auto_advance_index: 0,
+            auto_advance_index: 1,
             notice_dispatcher: EventDispatcher::<NoriBridgeHeadNoticeMessage>::new(),
             proof_dispatcher: EventDispatcher::<NoriBridgeHeadProofMessage>::new(),
             job_idx: 1,
         }
+    }
+
+    /*pub fn add_proof_listener<L>(&mut self, listener: L) 
+    where 
+        L: EventListener<NoriBridgeHeadProofMessage> + 'static + Send, 
+    {
+        self.proof_dispatcher.add_listener(listener);
+    }*/
+
+    /*pub fn add_proof_listener<L>(&mut self, listener: L) 
+    where
+        L: EventListener<NoriBridgeHeadProofMessage> + 'static + Send,
+    {
+        self.proof_dispatcher.add_listener(listener); // This will handle boxing internally
+    }*/
+    pub fn add_proof_listener(&mut self, listener: Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send>) {
+        self.proof_dispatcher.add_listener(listener);
     }
 
     async fn get_cold_finality_current_head() -> u64 {
@@ -252,7 +272,9 @@ impl NoriBridgeHead {
 
     pub async fn advance(&mut self) {
         self.job_idx += 1;
+        info!("Advance called ready for job {}", self.job_idx);
         if self.next_head > self.current_head {
+            info!("Immediately trying to advance {} head", self.bridge_mode.to_string());
             // We should immediately try to process the new head.
             let result = self
                 .attempt_finality_update(self.next_head, self.job_idx)
@@ -264,6 +286,8 @@ impl NoriBridgeHead {
                 self.auto_advance_index = self.job_idx;
             }
         } else {
+            info!("Setting flag to attempt auto advance {} head on next finality update.", self.bridge_mode.to_string());
+
             // We should wait for the next detected head update.
             self.auto_advance_index = self.job_idx;
         }
@@ -271,6 +295,7 @@ impl NoriBridgeHead {
 
     pub async fn run(&mut self) {
         loop {
+            info!("In run iteration");
             match self.check_finality_next_head().await {
                 Ok(next_head) => {
                     // If we have not evolved skip
@@ -280,14 +305,15 @@ impl NoriBridgeHead {
                             self.bridge_mode.to_string()
                         );
                     } else {
-                        // we have a new head
+                        // Here if self.next_head is new_head then should not print
+                        // We have a new head
                         info!(
                             "Nori {} bridge is stale. Setting next head.",
                             self.bridge_mode.to_string()
                         );
                         self.next_head = next_head;
                         if self.auto_advance_index != 0 {
-                            info!("Auto advancing");
+                            info!("Auto advancing {} head", self.bridge_mode.to_string());
                             // Invoke attempt_finality_update
                             let result = self
                                 .attempt_finality_update(self.next_head, self.job_idx)
@@ -336,6 +362,9 @@ impl NoriBridgeHead {
 
     async fn attempt_finality_update(&mut self, slot: u64, job_idx: u64) -> Result<()> {
         self.working_head = slot; // Mark the working head as what was given by the slot
+
+        info!("{} head updater recieved a new job {}. Spawning a new worker.", self.bridge_mode.to_string(), job_idx);
+
         let last_next_sync_committee = self.next_sync_committee;
 
         // Attempt async job
@@ -348,6 +377,8 @@ impl NoriBridgeHead {
         })
         .await;
 
+        info!("Worker {} done", job_idx);
+
         // Flatten the nested result into a single Result:
         let task_result: Result<SP1ProofWithPublicValues> = spawn_result
             .map_err(|e| anyhow::anyhow!("spawn_blocking failed: {}", e)) // Map JoinError into anyhow::Error
@@ -357,6 +388,8 @@ impl NoriBridgeHead {
         if task_result.is_err() {
             return task_result.map(|_| ()); // Propagate the error as a Result<()>.
         }
+
+        info!("Retrieved valid proof from worker {}", job_idx);
 
         // Otherwise, we have a valid proof.
         if let Ok(proof) = task_result {
@@ -387,6 +420,7 @@ impl NoriBridgeHead {
                    If this task was the last auto advance task we should cancel that behaviour
                 */
                 if job_idx >= self.auto_advance_index { // gt to account for if a previous job spawned failed with an error and didnt cancel itself
+                    info!("Cancelling auto advance for job {}", self.auto_advance_index);
                     self.auto_advance_index = 0;
                 }
 

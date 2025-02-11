@@ -18,12 +18,16 @@ impl<T: std::clone::Clone> EventDispatcher<T> {
         }
     }
 
-    pub fn add_listener<L>(&mut self, listener: L) 
-    where 
+    /*pub fn add_listener<L>(&mut self, listener: L)
+    where
         L: EventListener<T> + 'static + Send,
     {
         self.listeners.push(Box::new(listener));
+    }*/
+    pub fn add_listener(&mut self, listener: Box<dyn EventListener<T> + Send>) {
+        self.listeners.push(listener);
     }
+
 
     pub async fn trigger(&mut self, data: T) -> Result<()> {
         let _futures: Vec<_> = self.listeners.iter_mut().map(|listener| {
