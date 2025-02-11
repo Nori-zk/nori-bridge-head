@@ -4440,7 +4440,7 @@ dependencies = [
 
 [[package]]
 name = "nori"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "alloy 0.1.4",
  "alloy-primitives 0.7.7",

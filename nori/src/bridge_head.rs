@@ -386,7 +386,7 @@ impl NoriBridgeHead {
                    We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
                    If this task was the last auto advance task we should cancel that behaviour
                 */
-                if job_idx == self.auto_advance_index {
+                if job_idx >= self.auto_advance_index { // gt to account for if a previous job spawned failed with an error and didnt cancel itself
                     self.auto_advance_index = 0;
                 }
 
