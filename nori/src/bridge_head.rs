@@ -307,6 +307,17 @@ impl NoriBridgeHead {
         Ok(finality_update.finalized_header.beacon().slot)
     }
 
+    pub async fn run2(&mut self) {
+        loop {
+            tokio::select! {
+                // our match branch
+                _ = tokio::time::sleep(Duration::from_secs_f64(self.polling_interval_sec))  => {
+
+                }
+            }
+        }
+    }
+
     pub async fn run(&mut self) {
         loop {
             info!("In run iteration");
