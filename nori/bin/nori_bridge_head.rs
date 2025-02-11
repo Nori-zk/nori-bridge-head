@@ -29,7 +29,7 @@ impl EventListener<NoriBridgeHeadProofMessage> for ProofListener {
 
         // Acquire lock and call advance()
         let mut bridge = self.bridge_head.lock().await; // Correctly await the lock
-        bridge.advance().await;
+        bridge.advance().await; // what about using rx and tx to advance the head?
 
         Ok(())
     }
@@ -51,7 +51,48 @@ async fn main() -> Result<()> {
     bridge_head.lock().await.add_proof_listener(Box::new(proof_listener));
 
     // Start the bridge head
-    bridge_head.lock().await.run().await;
+    bridge_head.lock().await.run().await; // think this will stop any consumer running wont it...! how could we tell the bridge head to advance??
+
+    /*
+        Need to think about this the run routine will block the main thread whatever we do unless we do something like the job manager aka we allow it to
+
+        what really needs to happen here
+
+        we have the message system which need to run actively it can consume messages for which we need to do things with our nori_bridge like tell it to advance!
+
+        we need to run our run loop in a spawned thread in order to not block the main thread. in which case all the state it touches needs to be threadsafe
+
+        main thread for message consumption to call advance!
+        polling worker -> with threadsafe state
+        job system for worker tasks.... which are managed by the polling worker
+
+        what state needs mutex's on it? 
+
+        run:
+        next_head (read)
+        current_head (read)
+        auto_advance_index
+        job_idx (read)
+        auto_advance_index (read)
+
+        advance:
+        job_idx (read write)
+        next_head (read)
+        current_head (read)
+        auto_advance_index (read)
+
+        and both call...
+        attempt_finality_update
+        ....which has
+        working_head (read / write)
+        next_sync_committee (read / write)
+        current_head (read / write)
+        auto_advance_index (read / write)
+        current_sync_commitee (read/write but we can remove this!)
+
+
+
+     */
 
     Ok(())
 }

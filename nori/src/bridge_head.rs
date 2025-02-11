@@ -405,7 +405,7 @@ impl NoriBridgeHead {
         // Otherwise, we have a valid proof.
         if let Ok(proof) = task_result {
             // Check if our result is still relevant after the computation, if our working_head has advanced then we are working on a more recent head in another thread.
-            if self.working_head == slot {
+            if self.working_head == slot { // could move this to a job_id check vs auto_advance_index if we really wanted to skip what we've got in place with advance being called.
                 // Update our state
                 info!("Moving nori head forward.");
 
