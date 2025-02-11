@@ -1,7 +1,7 @@
+use rand::Rng;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
-use rand::Rng;
 
 // Struct to hold job status and channel to receive result
 struct Job {
@@ -20,9 +20,13 @@ impl JobManager {
     }
 
     // Create a new job that will complete after random time
-    fn create_job(&mut self, id: u64) {
+    async fn create_job(&mut self, id: u64) {
+        // Random delay before creating the job
+        let delay = Duration::from_secs(rand::thread_rng().gen_range(1..=3));
+        sleep(delay).await;
+
         let (tx, rx) = mpsc::channel(1);
-        
+
         let job = Job { rx };
         self.jobs.insert(id, job);
 
@@ -58,18 +62,18 @@ impl JobManager {
 #[tokio::main]
 async fn main() {
     let mut manager = JobManager::new();
-    
+
     // Create N random jobs
     let n = 5;
     for i in 0..n {
-        manager.create_job(i);
+        manager.create_job(i).await;
     }
 
     // Main loop: check jobs forever
     loop {
         sleep(Duration::from_secs(1)).await;
         manager.check_jobs().await;
-        
+
         if manager.jobs.is_empty() {
             println!("All jobs completed!");
             break;
