@@ -293,6 +293,20 @@ impl NoriBridgeHead {
         }
     }
 
+    async fn check_finality_next_head(&self) -> Result<u64> {
+        // Get finality slot head
+        info!("Checking finality slot head.");
+        let finality_update: FinalityUpdate<MainnetConsensusSpec> = self
+            .helios_polling_client
+            .rpc
+            .get_finality_update()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
+
+        // Extract latest slot
+        Ok(finality_update.finalized_header.beacon().slot)
+    }
+
     pub async fn run(&mut self) {
         loop {
             info!("In run iteration");
@@ -344,20 +358,6 @@ impl NoriBridgeHead {
             );
             sleep(delay_duration).await;
         }
-    }
-
-    async fn check_finality_next_head(&self) -> Result<u64> {
-        // Get finality slot head
-        info!("Checking finality slot head.");
-        let finality_update: FinalityUpdate<MainnetConsensusSpec> = self
-            .helios_polling_client
-            .rpc
-            .get_finality_update()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
-
-        // Extract latest slot
-        Ok(finality_update.finalized_header.beacon().slot)
     }
 
     async fn attempt_finality_update(&mut self, slot: u64, job_idx: u64) -> Result<()> {
