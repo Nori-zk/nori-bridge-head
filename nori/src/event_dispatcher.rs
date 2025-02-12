@@ -3,9 +3,11 @@ use anyhow::{Result, Context};
 use futures::future::join_all;
 
 #[async_trait]
-pub trait EventListener<T: Clone> {
+pub trait EventListener<T: Clone>: Send + Sync {
     async fn on_event(&mut self, data: T) -> Result<()>;
 }
+
+// Delete below
 
 pub struct EventDispatcher<T: Clone> {
     listeners: Vec<Box<dyn EventListener<T> + Send>>

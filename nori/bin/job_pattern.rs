@@ -49,10 +49,14 @@ impl JobManager {
 
         let description_clone = description.clone();
 
+        
         tokio::spawn(async move {
             let delay = Duration::from_secs(rand::thread_rng().gen_range(1..=5));
             sleep(delay).await;
-            let result = format!("Job {} ({}) completed!", id, description);
+            let blocking_result = tokio::task::spawn_blocking(move || {
+                1000
+            }).await.unwrap();
+            let result: String = format!("Job {} ({}) completed! Some blocking junk output {}", id, description, blocking_result);
             let _ = tx.send(result).await;
         });
 
