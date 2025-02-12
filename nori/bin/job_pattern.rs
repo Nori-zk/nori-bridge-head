@@ -3,93 +3,135 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
-// Job struct to hold the channel to receive results
+enum Command {
+    CreateJob { id: u64, description: String },
+}
+
 struct Job {
     rx: mpsc::Receiver<String>,
 }
 
-// JobManager struct that manages all jobs
-pub struct JobManager {
+struct JobManager {
     jobs: HashMap<u64, Job>,
+    receiver: mpsc::Receiver<Command>,
+    last_job_count: usize,
 }
 
 impl JobManager {
-    // Constructor to create a new JobManager
-    pub fn new() -> Self {
-        Self {
-            jobs: HashMap::new(),
+    async fn run(mut self) {
+        loop {
+            // Try to receive a new command without blocking
+            match self.receiver.try_recv() {
+                Ok(cmd) => match cmd {
+                    Command::CreateJob { id, description } => {
+                        self.create_job(id, description).await;
+                    }
+                },
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // No new commands, that's fine
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    // Channel closed, but we'll keep running to finish existing jobs
+                }
+            }
+
+            // Check for completed jobs
+            self.check_jobs().await;
+
+            // Yield to other tasks instead of sleeping
+            tokio::task::yield_now().await;
         }
     }
 
-    // Create a new job that will complete after a random time
-    pub async fn create_job(&mut self, id: u64) {
+    async fn create_job(&mut self, id: u64, description: String) {
         let (tx, rx) = mpsc::channel(1);
+        self.jobs.insert(id, Job { rx });
 
-        let job = Job { rx };
-        self.jobs.insert(id, job);
+        let description_clone = description.clone();
 
-        // Spawn the job's async task
         tokio::spawn(async move {
-            let duration = Duration::from_secs(rand::thread_rng().gen_range(1..=5));
-            sleep(duration).await;
-            let result = format!("Job {} completed!", id);
+            let delay = Duration::from_secs(rand::thread_rng().gen_range(1..=5));
+            sleep(delay).await;
+            let result = format!("Job {} ({}) completed!", id, description);
             let _ = tx.send(result).await;
         });
 
-        println!("Created job {}", id);
+        println!(
+            "JobManager: Created job {} with description '{}'",
+            id, description_clone
+        );
     }
 
-    // Check all jobs for completion
-    pub async fn check_jobs(&mut self) {
+    async fn check_jobs(&mut self) {
         let mut completed = Vec::new();
-
-        for (id, job) in self.jobs.iter_mut() {
+        for (&id, job) in self.jobs.iter_mut() {
             if let Ok(result) = job.rx.try_recv() {
                 println!("{}", result);
-                completed.push(*id);
+                completed.push(id);
             }
         }
-
-        // Remove completed jobs
         for id in completed {
             self.jobs.remove(&id);
         }
-    }
 
-    // Check if there are no remaining jobs
-    pub fn is_empty(&self) -> bool {
-        self.jobs.is_empty()
-    }
-
-    // Run the job manager (waits for all jobs to complete)
-    pub async fn run(&mut self) {
-        // Main loop: check jobs until all are completed
-        loop {
-            sleep(Duration::from_secs(1)).await;
-            self.check_jobs().await;
-
-            if self.is_empty() {
-                println!("All jobs completed!");
-                break;
-            }
+        let current_count = self.jobs.len();
+        if current_count != self.last_job_count {
+            println!("Jobs still running: {}", current_count);
+            self.last_job_count = current_count;
         }
     }
+}
+
+#[derive(Clone)]
+struct JobManagerHandle {
+    sender: mpsc::Sender<Command>,
+}
+
+impl JobManagerHandle {
+    async fn create_job(
+        &self,
+        id: u64,
+        description: String,
+    ) -> Result<(), mpsc::error::SendError<Command>> {
+        self.sender
+            .send(Command::CreateJob { id, description })
+            .await
+    }
+}
+
+fn spawn_job_manager() -> JobManagerHandle {
+    let (tx, rx) = mpsc::channel(32);
+    let manager = JobManager {
+        jobs: HashMap::new(),
+        receiver: rx,
+        last_job_count: 0,
+    };
+    tokio::spawn(manager.run());
+    JobManagerHandle { sender: tx }
 }
 
 #[tokio::main]
 async fn main() {
-    let mut manager = JobManager::new();
+    let manager_handle = spawn_job_manager();
 
-    // Create N random jobs
-    let n = 5;
-    for i in 0..n {
-        // Move the delay here before job creation
-        let delay = Duration::from_secs(rand::thread_rng().gen_range(1..=3));
-        sleep(delay).await;
-
-        manager.create_job(i).await;
+    // Create initial batch of jobs
+    for i in 0..5 {
+        let description = format!("Task for job {}", i);
+        if let Err(e) = manager_handle.create_job(i, description).await {
+            eprintln!("Failed to create job {}: {}", i, e);
+        }
     }
 
-    // Call the run method to start the waiting/checking process
-    manager.run().await;
+    // Add more jobs
+    for i in 5..8 {
+        let description = format!("Late task for job {}", i);
+        if let Err(e) = manager_handle.create_job(i, description).await {
+            eprintln!("Failed to create job {}: {}", i, e);
+        }
+    }
+
+    // Keep the program running to see all jobs complete
+    println!("Waiting for exit");
+    sleep(Duration::from_secs(10)).await;
+    println!("Exiting");
 }

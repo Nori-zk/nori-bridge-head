@@ -90,6 +90,13 @@ async fn main() -> Result<()> {
         auto_advance_index (read / write)
         current_sync_commitee (read/write but we can remove this!)
 
+        will also need to send the proof message to the main thread in order to invoke the dispatcher.... 
+        
+        so we will need need job engines for the proof worker, proof dispatcher and notice dispatcher....
+
+        main loop thread will need job engine,
+        main thread will need proof dispatcher engine/notice dispatcher engine??
+
 
 
      */
