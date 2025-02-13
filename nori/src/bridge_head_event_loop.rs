@@ -10,9 +10,9 @@ use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sp1_helios_script::{get_checkpoint, get_client, get_latest_checkpoint};
 use sp1_sdk::SP1ProofWithPublicValues;
-use tokio::time::Instant;
 use std::{collections::HashMap, default, env, fs::File, io::Read, path::Path, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
+use tokio::time::Instant;
 use tree_hash::TreeHash;
 
 const NB_CHECKPOINT_FILE: &str = "nb_checkpoint.json";
@@ -52,13 +52,12 @@ struct ProverJob {
     rx: mpsc::Receiver<ProverJobOutput>,
 }
 
-
 pub enum NoriBridgeEventLoopCommand {
     Advance,
     AddProofListener {
         listener: Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>,
     },
-    Shutdown
+    Shutdown,
 }
 pub struct NoriBridgeHeadEventLoopConfig {}
 
@@ -68,7 +67,8 @@ pub struct NoriBridgeHeadEventLoopConfig {}
     }
 }*/
 
-pub struct BridgeHeadEventLoop { // <'a>
+pub struct BridgeHeadEventLoop {
+    // <'a>
     polling_interval_sec: f64,
 
     current_head: u64,
@@ -86,12 +86,14 @@ pub struct BridgeHeadEventLoop { // <'a>
 
     //notice_dispatcher: EventDispatcher<NoriBridgeHeadNoticeMessage>,
     //proof_dispatcher: EventDispatcher<NoriBridgeHeadProofMessage>,
-    proof_listeners: Vec<Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>,
+    proof_listeners:
+        Vec<Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>,
 
     command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
 }
 
-impl BridgeHeadEventLoop { // <'a: 'static> <'a>
+impl BridgeHeadEventLoop {
+    // <'a: 'static> <'a>
     // new
     pub async fn new(command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>) -> Self {
         dotenv::dotenv().ok();
@@ -187,6 +189,20 @@ impl BridgeHeadEventLoop { // <'a: 'static> <'a>
             };
             tx.send(prover_job_output).await.unwrap();
         });
+
+        /*
+           Need to carefully deactivate auto_advance, but lets think about this....
+           We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
+           If this task was the last auto advance task we should cancel that behaviour
+        */
+        if job_idx >= self.auto_advance_index {
+            // gt to account for if a previous job spawned failed with an error and didnt cancel itself
+            info!(
+                "Cancelling auto advance for job {}",
+                self.auto_advance_index
+            );
+            self.auto_advance_index = 0;
+        }
     }
 
     // handle prover job output
@@ -216,20 +232,6 @@ impl BridgeHeadEventLoop { // <'a: 'static> <'a>
             }
             // Save the checkpoint
             self.save_nb_checkpoint();
-
-            /*
-               Need to carefully deactivate auto_advance, but lets think about this....
-               We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
-               If this task was the last auto advance task we should cancel that behaviour
-            */
-            if job_idx >= self.auto_advance_index {
-                // gt to account for if a previous job spawned failed with an error and didnt cancel itself
-                info!(
-                    "Cancelling auto advance for job {}",
-                    self.auto_advance_index
-                );
-                self.auto_advance_index = 0;
-            }
 
             self.trigger_proof_listeners(NoriBridgeHeadProofMessage {
                 slot,
@@ -370,7 +372,7 @@ impl BridgeHeadEventLoop { // <'a: 'static> <'a>
                         } else {
                             info!("Nori bridge is stale. Setting next head");
                             self.next_head = next_head;
-                            if self.auto_advance_index != 0 && self.working_head != self.next_head {
+                            if self.auto_advance_index != 0 {
                                 // Invoke a job
                                 self.create_prover_job(self.next_head, self.job_idx);
                             }
