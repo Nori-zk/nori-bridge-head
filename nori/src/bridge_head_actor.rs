@@ -38,6 +38,11 @@ impl BridgeHeadActor {
         self.event_loop_tx.send(NoriBridgeEventLoopCommand::AddProofListener { listener: wrapped_listener }).await?;
         Ok(())
     }
+
+    pub async fn shutdown(&mut self) -> Result<()> {
+        self.event_loop_tx.send(NoriBridgeEventLoopCommand::Shutdown).await?;
+        Ok(())
+    }
 }
 
 // Todo add advance and add event listener to this interface

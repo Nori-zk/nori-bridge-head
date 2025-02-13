@@ -10,6 +10,7 @@ use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sp1_helios_script::{get_checkpoint, get_client, get_latest_checkpoint};
 use sp1_sdk::SP1ProofWithPublicValues;
+use tokio::time::Instant;
 use std::{collections::HashMap, default, env, fs::File, io::Read, path::Path, sync::Arc};
 use tokio::sync::{mpsc, Mutex};
 use tree_hash::TreeHash;
@@ -57,6 +58,7 @@ pub enum NoriBridgeEventLoopCommand {
     AddProofListener {
         listener: Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>,
     },
+    Shutdown
 }
 pub struct NoriBridgeHeadEventLoopConfig {}
 
@@ -324,6 +326,8 @@ impl BridgeHeadEventLoop { // <'a: 'static> <'a>
 
     // loop
     pub async fn run_loop(mut self) {
+        let mut last_check_time = Instant::now(); // Store last execution time
+
         // Check helios for the next finality head
 
         // check our current head vs the next head
@@ -342,6 +346,9 @@ impl BridgeHeadEventLoop { // <'a: 'static> <'a>
                         // Do something with this listener
                         self.proof_listeners.push(listener); // Arc<Mutex<dyn EventListener<NoriBridgeHeadProofMessage>>>
                     }
+                    NoriBridgeEventLoopCommand::Shutdown => {
+                        break;
+                    }
                 },
                 Err(mpsc::error::TryRecvError::Empty) => {
                     // No new commands, that's fine
@@ -352,31 +359,33 @@ impl BridgeHeadEventLoop { // <'a: 'static> <'a>
             }
 
             // Check state of the head
-            match self.check_finality_next_head().await {
-                Ok(next_head) => {
-                    // Have the helios finality head moved forwards
-                    if next_head <= self.current_head {
-                        info!("Nori bridge is up to date.");
-                    } else {
-                        info!("Nori bridge is stale. Setting next head");
-                        self.next_head = next_head;
-                        if self.auto_advance_index != 0 {
-                            // Invoke a job
-                            self.create_prover_job(self.next_head, self.job_idx);
+            let now = Instant::now(); // Capture the current time at the start of the loop
+            if now.duration_since(last_check_time).as_secs_f64() >= self.polling_interval_sec {
+                match self.check_finality_next_head().await {
+                    Ok(next_head) => {
+                        // Have the helios finality head moved forwards
+                        if next_head <= self.current_head {
+                            info!("Nori bridge is up to date.");
+                        } else {
+                            info!("Nori bridge is stale. Setting next head");
+                            self.next_head = next_head;
+                            if self.auto_advance_index != 0 && self.working_head != self.next_head {
+                                // Invoke a job
+                                self.create_prover_job(self.next_head, self.job_idx);
+                            }
                         }
                     }
+                    Err(e) => {
+                        error!("Error checking finality slot head: {}", e);
+                    }
                 }
-                Err(e) => {
-                    error!("Error checking finality slot head: {}", e);
-                }
+                last_check_time = now; // Update last check time after performing the check
             }
 
             // Check the status of the prover jobs
             if let Err(e) = self.check_prover_jobs().await {
                 error!("Prover job check failed: {}", e);
             }
-
-            // Think about sleeping because we dont want to hammer the RPC (TODO later...maybe)
 
             // Yield to other tasks instead of sleeping
             tokio::task::yield_now().await;

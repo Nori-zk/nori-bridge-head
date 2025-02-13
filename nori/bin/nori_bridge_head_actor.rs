@@ -67,10 +67,19 @@ async fn main() -> Result<()> {
 
     info!("Waiting for exit.");
 
-    // Wait for ctrl + c
+    // Wait for ctrl-c
     ctrl_c()
         .await
         .expect("Failed to listen for shutdown signal");
+
+    info!("Shutdown signal received");
+
+    // Get lock again to send shutdown command
+    let mut bridge_head_guard = bridge_head.lock().await;
+    bridge_head_guard.shutdown().await?;
+    drop(bridge_head_guard);
+
+    info!("Shutdown command issued. Exiting... Hopefully...");
 
     Ok(())
 }
