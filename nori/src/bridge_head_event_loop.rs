@@ -196,6 +196,7 @@ impl BridgeHeadEventLoop { // <'a: 'static> <'a>
         proof: SP1ProofWithPublicValues,
         job_idx: u64,
     ) -> Result<()> {
+        info!("Handling prover job output {}", job_idx);
         // Check if our result is still relevant after the computation, if our working_head has advanced then we are working on a more recent head in another thread.
         if self.working_head == slot {
             // could move this to a job_id check vs auto_advance_index if we really wanted to skip what we've got in place with advance being called.
@@ -271,7 +272,7 @@ impl BridgeHeadEventLoop { // <'a: 'static> <'a>
         // Extract jobs
         for (&job_idx, job) in self.prover_jobs.iter_mut() {
             if let Ok(result) = job.rx.try_recv() {
-                // println!("{}", result);
+                info!("A job finished {}", job_idx);
                 results.push(ProverJobOutputWithJob {
                     job_idx,
                     proof: result.proof,
