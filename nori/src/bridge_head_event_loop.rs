@@ -55,7 +55,7 @@ struct ProverJob {
 pub enum NoriBridgeEventLoopCommand {
     Advance,
     AddProofListener {
-        listener: Arc<Mutex<dyn EventListener<NoriBridgeHeadProofMessage>>>,
+        listener: Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>,
     },
 }
 pub struct NoriBridgeHeadEventLoopConfig {}
@@ -84,7 +84,7 @@ pub struct BridgeHeadEventLoop { // <'a>
 
     //notice_dispatcher: EventDispatcher<NoriBridgeHeadNoticeMessage>,
     //proof_dispatcher: EventDispatcher<NoriBridgeHeadProofMessage>,
-    proof_listeners: Vec<Arc<Mutex<dyn EventListener<NoriBridgeHeadProofMessage>  + Send + Sync>>>, // notice_dispatcher
+    proof_listeners: Vec<Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>,
 
     command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
 }
