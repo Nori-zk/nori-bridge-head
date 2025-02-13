@@ -1,3 +1,4 @@
+use std::process;
 use std::sync::Arc;
 use log::info;
 use tokio::sync::{mpsc::Sender, Mutex};
@@ -41,6 +42,7 @@ impl BridgeHeadActor {
 
     pub async fn shutdown(&mut self) -> Result<()> {
         self.event_loop_tx.send(NoriBridgeEventLoopCommand::Shutdown).await?;
+        process::exit(1);
         Ok(())
     }
 }
