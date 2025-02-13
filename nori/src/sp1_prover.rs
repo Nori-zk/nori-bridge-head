@@ -75,17 +75,21 @@ pub async fn finality_update_job(
     info!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
 
-    let mut stdin = SP1Stdin::new();
-    stdin.write_slice(&encoded_proof_inputs);
-
-    // Generate proof.
-    info!("Running sp1 proof.");
-    // Note to self do this in a blocking thread....
-
-    // Get prover client and pk
-    let prover_client = ProverClient::from_env();
-    let (pk, _) = prover_client.setup(ELF);
-    let proof = prover_client.prove(&pk, &stdin).plonk().run()?;
+    let proof: SP1ProofWithPublicValues = tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
+        let mut stdin = SP1Stdin::new();
+        stdin.write_slice(&encoded_proof_inputs);
+    
+        // Generate proof.
+        info!("Running sp1 proof.");
+    
+        // Get prover client and pk
+        let prover_client = ProverClient::from_env();
+        let (pk, _) = prover_client.setup(ELF);
+        let proof = prover_client.prove(&pk, &stdin).plonk().run()?;
+    
+        Ok(proof) // Explicitly return proof
+    }).await??; // Await the blocking task and propagate errors properly
+    
 
     Ok(proof)
 }
