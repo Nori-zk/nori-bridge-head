@@ -7,7 +7,9 @@ use crate::{bridge_head_event_loop::{BridgeHeadEventLoop, NoriBridgeEventLoopCom
 use anyhow::Result;
 
 pub struct BridgeHeadActor {
-    event_loop_tx: Sender<NoriBridgeEventLoopCommand>
+    event_loop_tx: Sender<NoriBridgeEventLoopCommand>,
+    loop_running: bool,
+    proof_listeners_buffer: Vec<Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>
 }
 
 impl BridgeHeadActor {
@@ -15,15 +17,22 @@ impl BridgeHeadActor {
         // This is stupid
         let event_loop_tx: Sender<NoriBridgeEventLoopCommand> = mpsc::channel(1).0;
         Self {
-            event_loop_tx
+            event_loop_tx,
+            loop_running: false,
+            proof_listeners_buffer: Vec::new()
         }
     }
 
     pub async fn run(&mut self) {
         let (tx, rx) = mpsc::channel(1);
-        let mut event_loop = BridgeHeadEventLoop::new(rx).await;
+        let event_loop = BridgeHeadEventLoop::new(rx).await;
         self.event_loop_tx = tx;
         tokio::spawn(event_loop.run_loop());
+        self.loop_running = true;
+        for listener in self.proof_listeners_buffer.iter() {
+            self.event_loop_tx.send(NoriBridgeEventLoopCommand::AddProofListener { listener: listener.clone() }).await.unwrap();
+        }
+        self.proof_listeners_buffer.clear();
     }
 
     pub async fn advance(&mut self) -> Result<()> {
@@ -33,10 +42,13 @@ impl BridgeHeadActor {
 
     pub async fn add_proof_listener(&mut self, listener: impl EventListener<NoriBridgeHeadProofMessage> + Send + Sync + 'static,) -> Result<()> {
         let boxed_listener: Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync> = Box::new(listener);
-        info!("Boxed listener");
         let wrapped_listener = Arc::new(Mutex::new(boxed_listener));
-        info!("Wrapped listener");
-        self.event_loop_tx.send(NoriBridgeEventLoopCommand::AddProofListener { listener: wrapped_listener }).await?;
+        if !self.loop_running {
+            self.proof_listeners_buffer.push(wrapped_listener);
+        }
+        else {
+            self.event_loop_tx.send(NoriBridgeEventLoopCommand::AddProofListener { listener: wrapped_listener }).await?;
+        }
         Ok(())
     }
 

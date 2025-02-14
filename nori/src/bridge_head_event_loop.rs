@@ -25,18 +25,13 @@ pub struct NoriBridgeCheckpoint {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoriBridgeHeadNoticeMessage {}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoriBridgeHeadProofMessage {
     pub slot: u64,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
 }
-
-struct ProverJobArgument {
-    slot: u64,
-    last_next_sync_committee: FixedBytes<32>,
-} // TX
-
 struct ProverJobOutput {
     proof: SP1ProofWithPublicValues,
     slot: u64,
@@ -61,40 +56,26 @@ pub enum NoriBridgeEventLoopCommand {
 }
 pub struct NoriBridgeHeadEventLoopConfig {}
 
-/*impl NoriBridgeHeadEventLoopConfig {
-    pub fn new() -> Self {
-        Self {}
-    }
-}*/
-
 pub struct BridgeHeadEventLoop {
-    // <'a>
     polling_interval_sec: f64,
-
     current_head: u64,
     next_head: u64,
     working_head: u64,
+    last_beacon_finality_head_checked: u64,
     auto_advance_index: u64,
     job_idx: u64,
     next_sync_committee: FixedBytes<32>,
-
+    bootstrap: bool,
     prover_jobs: HashMap<u64, ProverJob>,
-
-    //current_sync_commitee: FixedBytes<32>,
     helios_polling_client: Inner<MainnetConsensusSpec, HttpRpc>,
     //bridge_mode: NoriBridgeHeadMode,
-
     //notice_dispatcher: EventDispatcher<NoriBridgeHeadNoticeMessage>,
-    //proof_dispatcher: EventDispatcher<NoriBridgeHeadProofMessage>,
     proof_listeners:
         Vec<Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>,
-
     command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
 }
 
 impl BridgeHeadEventLoop {
-    // <'a: 'static> <'a>
-    // new
     pub async fn new(command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>) -> Self {
         dotenv::dotenv().ok();
 
@@ -109,6 +90,7 @@ impl BridgeHeadEventLoop {
         let mut next_sync_committee = FixedBytes::<32>::default();
 
         // Start procedure
+        let bootstrap: bool;
         if BridgeHeadEventLoop::nb_checkpoint_exists(NB_CHECKPOINT_FILE) {
             // Warm start procedure
             info!("Loading nori slot checkpoint from file.");
@@ -116,10 +98,12 @@ impl BridgeHeadEventLoop {
                 BridgeHeadEventLoop::load_nb_checkpoint(NB_CHECKPOINT_FILE).unwrap();
             current_head = nb_checkpoint.slot_head;
             next_sync_committee = nb_checkpoint.next_sync_committee;
+            bootstrap = false;
         } else {
             // Cold start procedure
             info!("Resorting to cold start procedure.");
             current_head = BridgeHeadEventLoop::get_cold_finality_current_head().await;
+            bootstrap = true;
         }
 
         // Startup info
@@ -137,17 +121,14 @@ impl BridgeHeadEventLoop {
             current_head,
             next_head: current_head,
             working_head: current_head,
-
+            last_beacon_finality_head_checked: u64::default(),
             auto_advance_index: 1,
             job_idx: 1,
-
             next_sync_committee,
-
+            bootstrap,
             helios_polling_client,
-
             proof_listeners: vec![],
             prover_jobs: HashMap::new(),
-
             command_receiver,
         }
     }
@@ -163,14 +144,14 @@ impl BridgeHeadEventLoop {
         helios_client.store.finalized_header.clone().beacon().slot
     }
 
-    // create prover job
+    // Create prover job
     fn create_prover_job(&mut self, slot: u64, job_idx: u64) {
-        self.working_head = slot; // Mark the working head as what was given by the slot
-
         info!(
             "Nori head updater recieved a new job {}. Spawning a new worker.",
             job_idx
         );
+
+        self.working_head = slot; // Mark the working head as what was given by the slot
 
         let last_next_sync_committee = self.next_sync_committee;
         let slot_clone = slot;
@@ -196,23 +177,24 @@ impl BridgeHeadEventLoop {
            If this task was the last auto advance task we should cancel that behaviour
         */
         if job_idx >= self.auto_advance_index {
+            // Do we need the if... this should always be true CHECKME
             // gt to account for if a previous job spawned failed with an error and didnt cancel itself
             info!(
-                "Cancelling auto advance for job {}",
+                "Cancelling auto advance for job '{}'.",
                 self.auto_advance_index
             );
             self.auto_advance_index = 0;
         }
     }
 
-    // handle prover job output
+    // Handle prover job output
     async fn handle_prover_output(
         &mut self,
         slot: u64,
         proof: SP1ProofWithPublicValues,
         job_idx: u64,
     ) -> Result<()> {
-        info!("Handling prover job output {}", job_idx);
+        info!("Handling prover job output '{}'.", job_idx);
         // Check if our result is still relevant after the computation, if our working_head has advanced then we are working on a more recent head in another thread.
         if self.working_head == slot {
             // could move this to a job_id check vs auto_advance_index if we really wanted to skip what we've got in place with advance being called.
@@ -231,19 +213,28 @@ impl BridgeHeadEventLoop {
                 // But wait! We need to check the logic in SP1Helios.sol as this can be Zeros
             }
             // Save the checkpoint
+            info!("Saving checkpoint.");
             self.save_nb_checkpoint();
 
+            info!("Triggering proof listeners");
             self.trigger_proof_listeners(NoriBridgeHeadProofMessage {
                 slot,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
             })
             .await?;
+
+            if self.next_head == self.current_head {
+                info!(
+                    "Nori bridge head is up to date. Current head is '{}'.",
+                    self.current_head
+                );
+            }
         }
         Ok(())
     }
 
-    // I heart the CCP
+    // Invoke proof listeners
     async fn trigger_proof_listeners(&mut self, payload: NoriBridgeHeadProofMessage) -> Result<()> {
         use futures::future::join_all;
 
@@ -274,7 +265,7 @@ impl BridgeHeadEventLoop {
         // Extract jobs
         for (&job_idx, job) in self.prover_jobs.iter_mut() {
             if let Ok(result) = job.rx.try_recv() {
-                info!("A job finished {}", job_idx);
+                info!("Job '{}' finished", job_idx);
                 results.push(ProverJobOutputWithJob {
                     job_idx,
                     proof: result.proof,
@@ -301,9 +292,9 @@ impl BridgeHeadEventLoop {
     // advance
     async fn advance(&mut self) {
         self.job_idx += 1;
-        info!("Advance called ready for job {}", self.job_idx);
+        info!("Advance called ready for job '{}'.", self.job_idx);
         if self.next_head > self.current_head {
-            info!("Immediately trying to advance");
+            info!("Immediately trying to advance.");
             // We should immediately try to create a new proof
             self.create_prover_job(self.next_head, self.job_idx);
         } else {
@@ -315,7 +306,7 @@ impl BridgeHeadEventLoop {
 
     async fn check_finality_next_head(&self) -> Result<u64> {
         // Get finality slot head
-        info!("Checking finality slot head.");
+        info!("Polling helios finality slot head.");
         let finality_update: FinalityUpdate<MainnetConsensusSpec> = self
             .helios_polling_client
             .rpc
@@ -329,16 +320,23 @@ impl BridgeHeadEventLoop {
 
     // loop
     pub async fn run_loop(mut self) {
-        let mut last_check_time = Instant::now(); // Store last execution time
+        // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
+        // that happened while this process was offline
 
-        // Check helios for the next finality head
+        // This could be useful in the future be lets be careful. If there is nothing to invoke advance the it would not auto emit
+        /*let offline_finality_update_next_head = self.check_finality_next_head().await.unwrap(); // Panic if the rpc is down.
+        if self.current_head < offline_finality_update_next_head || self.bootstrap {
+            // Immediately spawn a sp1-prover job to update the bridge based on the checkpoint head value
+            self.create_prover_job(self.next_head, self.job_idx);
+        }*/
+        info!("Event loop started. Launching a proof job defensively.");
+        self.create_prover_job(self.next_head, self.job_idx);
 
-        // check our current head vs the next head
-        // --> Do nothing if the head is up to date (listening for commands and listening for job updates)
+        // Store last execution time before main loop
+        let mut last_check_time = Instant::now();
+
         loop {
             // Read the command_receiver which gets messages from the parent thread
-
-            // Try to receive a new command without blocking
             match self.command_receiver.try_recv() {
                 Ok(cmd) => match cmd {
                     NoriBridgeEventLoopCommand::Advance => {
@@ -366,16 +364,31 @@ impl BridgeHeadEventLoop {
             if now.duration_since(last_check_time).as_secs_f64() >= self.polling_interval_sec {
                 match self.check_finality_next_head().await {
                     Ok(next_head) => {
-                        // Have the helios finality head moved forwards
-                        if next_head <= self.current_head {
-                            info!("Nori bridge is up to date.");
-                        } else {
-                            info!("Nori bridge is stale. Setting next head");
-                            self.next_head = next_head;
-                            if self.auto_advance_index != 0 {
-                                // Invoke a job
-                                self.create_prover_job(self.next_head, self.job_idx);
+                        // Maybe store the last_beacon_finality_head_checked so we can mute some of the prints
+
+                        // Only run if the RPC didnt give us an old value
+                        if next_head >= self.last_beacon_finality_head_checked {
+                            // Have the helios finality head moved forwards
+                            if next_head <= self.current_head {
+                                if self.last_beacon_finality_head_checked != next_head {
+                                    info!(
+                                        "Nori bridge head is up to date. Current head is '{}'.",
+                                        self.current_head
+                                    );
+                                }
+                            } else {
+                                // Update next head
+                                self.next_head = next_head;
+                                // Print a notice of the update.
+                                if self.last_beacon_finality_head_checked != next_head {
+                                    info!("Helios beacon finality slot change detected. Nori bridge head is stale. Current head is: '{}' Working head is '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.working_head, self.next_head);
+                                }
+                                if self.auto_advance_index != 0 {
+                                    // Invoke a job
+                                    self.create_prover_job(self.next_head, self.job_idx);
+                                }
                             }
+                            self.last_beacon_finality_head_checked = next_head;
                         }
                     }
                     Err(e) => {

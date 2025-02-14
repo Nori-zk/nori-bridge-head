@@ -36,7 +36,6 @@ pub async fn finality_update_job(
     // Skip processing update inside program if next_sync_committee is already stored in contract.
     // We must still apply the update locally to "sync" the helios client, this is due to
     // next_sync_committee not being stored when the helios client is bootstrapped.
-    info!("Applying sync committee optimisation.");
     if !sync_committee_updates.is_empty() {
         let next_sync_committee = B256::from_slice(
             sync_committee_updates[0]
@@ -45,11 +44,7 @@ pub async fn finality_update_job(
                 .as_ref(),
         );
 
-        info!("Comparing sync comitee info");
-        info!("last_next_sync_committee {}", last_next_sync_committee);
-        info!("next_sync_committee {}", next_sync_committee);
         if last_next_sync_committee == next_sync_committee {
-            // self.next_sync_committee
             info!("Applying optimization, skipping sync committee update.");
             let temp_update = sync_committee_updates.remove(0);
 
@@ -84,7 +79,7 @@ pub async fn finality_update_job(
     
         // Get prover client and pk
         let prover_client = ProverClient::from_env();
-        let (pk, _) = prover_client.setup(ELF);
+        let (pk, _) = prover_client.setup(ELF); // FIXME this is expensive! What about a persistant thread pool.
         let proof = prover_client.prove(&pk, &stdin).plonk().run()?;
     
         Ok(proof) // Explicitly return proof
