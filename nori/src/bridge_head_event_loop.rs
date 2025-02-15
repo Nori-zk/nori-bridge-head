@@ -1,12 +1,12 @@
 use crate::sp1_prover::finality_update_job;
 use crate::{event_dispatcher::EventListener, proof_outputs_decoder::DecodedProofOutputs};
 use alloy_primitives::FixedBytes;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::FinalityUpdate;
 use helios_ethereum::rpc::ConsensusRpc;
 use helios_ethereum::{consensus::Inner, rpc::http_rpc::HttpRpc};
-use log::{error, info};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use sp1_helios_script::{get_checkpoint, get_client, get_latest_checkpoint};
 use sp1_sdk::SP1ProofWithPublicValues;
@@ -16,6 +16,7 @@ use tokio::time::Instant;
 use tree_hash::TreeHash;
 
 const NB_CHECKPOINT_FILE: &str = "nb_checkpoint.json";
+const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
 
 #[derive(Serialize, Deserialize)]
 pub struct NoriBridgeCheckpoint {
@@ -23,8 +24,27 @@ pub struct NoriBridgeCheckpoint {
     next_sync_committee: FixedBytes<32>,
 }
 
+pub enum NoriNoticeMessageType {
+    Started,
+}
+
+/*
+    timestamp
+    notice_type
+
+    current_head: u64,
+    next_head: u64,
+    working_head: u64,
+    last_beacon_finality_head_checked: u64
+
+    last_job_duration: f64,
+    seconds_till_next_finality_transition //last_finality_transition_instant: Instant, (time to next finality transition)
+*/
+
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeMessage {}
+pub struct NoriBridgeHeadNoticeBaseMessage {
+    current_slot: u64,
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoriBridgeHeadProofMessage {
@@ -44,7 +64,10 @@ struct ProverJobOutputWithJob {
 }
 
 struct ProverJob {
-    rx: mpsc::Receiver<ProverJobOutput>,
+    rx: mpsc::Receiver<Result<ProverJobOutput, Error>>,
+    start_instant: Instant,
+    slot: u64,
+    next_sync_committee: FixedBytes<32>,
 }
 
 pub enum NoriBridgeEventLoopCommand {
@@ -64,6 +87,8 @@ pub struct BridgeHeadEventLoop {
     last_beacon_finality_head_checked: u64,
     auto_advance_index: u64,
     job_idx: u64,
+    last_job_duration: f64,
+    last_finality_transition_instant: Instant,
     next_sync_committee: FixedBytes<32>,
     bootstrap: bool,
     prover_jobs: HashMap<u64, ProverJob>,
@@ -124,6 +149,8 @@ impl BridgeHeadEventLoop {
             last_beacon_finality_head_checked: u64::default(),
             auto_advance_index: 1,
             job_idx: 1,
+            last_job_duration: 0.0,
+            last_finality_transition_instant: Instant::now(),
             next_sync_committee,
             bootstrap,
             helios_polling_client,
@@ -145,7 +172,7 @@ impl BridgeHeadEventLoop {
     }
 
     // Create prover job
-    fn create_prover_job(&mut self, slot: u64, job_idx: u64) {
+    fn create_prover_job(&mut self, slot: u64, job_idx: u64, next_sync_committee: FixedBytes<32>) {
         info!(
             "Nori head updater recieved a new job {}. Spawning a new worker.",
             job_idx
@@ -153,22 +180,30 @@ impl BridgeHeadEventLoop {
 
         self.working_head = slot; // Mark the working head as what was given by the slot
 
-        let last_next_sync_committee = self.next_sync_committee;
+        //let last_next_sync_committee = self.next_sync_committee;
         let slot_clone = slot;
 
         let (tx, rx) = mpsc::channel(1);
-        self.prover_jobs.insert(job_idx, ProverJob { rx });
+        self.prover_jobs.insert(
+            job_idx,
+            ProverJob {
+                rx,
+                start_instant: Instant::now(),
+                next_sync_committee,
+                slot,
+            },
+        );
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
-            let proof = finality_update_job(slot_clone, last_next_sync_committee)
+            let proof = finality_update_job(slot_clone, next_sync_committee)
                 .await
                 .unwrap();
             let prover_job_output = ProverJobOutput {
                 slot: slot_clone,
                 proof,
             };
-            tx.send(prover_job_output).await.unwrap();
+            tx.send(Ok(prover_job_output)).await.unwrap();
         });
 
         /*
@@ -257,21 +292,35 @@ impl BridgeHeadEventLoop {
         Ok(())
     }
 
-    // handler prover jobs
+    // Handler prover jobs
     async fn check_prover_jobs(&mut self) -> Result<()> {
         let mut completed = Vec::new();
         let mut results: Vec<ProverJobOutputWithJob> = Vec::new();
+        let mut failed: Vec<u64> = Vec::new();
 
         // Extract jobs
         for (&job_idx, job) in self.prover_jobs.iter_mut() {
             if let Ok(result) = job.rx.try_recv() {
-                info!("Job '{}' finished", job_idx);
-                results.push(ProverJobOutputWithJob {
-                    job_idx,
-                    proof: result.proof,
-                    slot: result.slot,
-                });
-                completed.push(job_idx);
+                match result {
+                    Ok(result_data) => {
+                        self.last_job_duration = Instant::now()
+                            .duration_since(job.start_instant)
+                            .as_secs_f64();
+                        info!(
+                            "Job '{}' finished in {} seconds.",
+                            job_idx, self.last_job_duration
+                        );
+                        results.push(ProverJobOutputWithJob {
+                            job_idx,
+                            proof: result.proof,
+                            slot: result.slot,
+                        });
+                        completed.push(job_idx);
+                    }
+                    Err(err) => {
+                        
+                    }
+                }
             }
         }
 
@@ -279,6 +328,15 @@ impl BridgeHeadEventLoop {
         for result in results.iter_mut() {
             self.handle_prover_output(result.slot, result.proof.clone(), result.job_idx)
                 .await?;
+        }
+
+        // Process failed jobs
+        for job_idx in failed {
+            // If our current job failed restart it...
+            if self.job_idx == job_idx {
+                let job: &ProverJob = self.prover_jobs.get(&job_idx).unwrap();
+                self.create_prover_job(job.slot, job_idx, job.next_sync_committee);
+            }
         }
 
         // Cleanup hash map
@@ -294,11 +352,39 @@ impl BridgeHeadEventLoop {
         self.job_idx += 1;
         info!("Advance called ready for job '{}'.", self.job_idx);
         if self.next_head > self.current_head {
-            info!("Immediately trying to advance.");
+            // TODO think about the time until the next transition
+            if self.last_job_duration != 0.0 {
+                // If we have data on the last job time
+
+                let seconds_since_last_transition = Instant::now()
+                    .duration_since(self.last_finality_transition_instant)
+                    .as_secs_f64();
+
+                if self.last_job_duration > TYPICAL_FINALITY_TRANSITION_TIME {
+                    warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will definitely not be able to catch up.", self.last_job_duration, TYPICAL_FINALITY_TRANSITION_TIME);
+                } else if self.last_job_duration > TYPICAL_FINALITY_TRANSITION_TIME * 0.8 {
+                    warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will take a while to catch up.", self.last_job_duration, TYPICAL_FINALITY_TRANSITION_TIME);
+                }
+
+                info!(
+                    "Expected time to next finality transition is {} seconds.",
+                    TYPICAL_FINALITY_TRANSITION_TIME - seconds_since_last_transition
+                );
+
+                if seconds_since_last_transition > 0.5 * TYPICAL_FINALITY_TRANSITION_TIME {
+                    warn!("We are within 50% of the typical finality transition time away from the next finality transition. Strategically waiting for the next finality transition in order to try to catch up more quickly. Note this will cause latency for current transactions in the bridge.");
+                    // We should wait for the next detected head update.
+                    self.auto_advance_index = self.job_idx;
+                }
+            }
+
             // We should immediately try to create a new proof
-            self.create_prover_job(self.next_head, self.job_idx);
+            if self.auto_advance_index != self.job_idx {
+                info!("Immediately trying to advance.");
+                self.create_prover_job(self.next_head, self.job_idx, self.next_sync_committee);
+            }
         } else {
-            info!("Setting flag to attempt auto advance head on next finality update.");
+            info!("Setting flag to attempt auto advance head on next finality update, as nori bridge is currently up to date.");
             // We should wait for the next detected head update.
             self.auto_advance_index = self.job_idx;
         }
@@ -330,7 +416,7 @@ impl BridgeHeadEventLoop {
             self.create_prover_job(self.next_head, self.job_idx);
         }*/
         info!("Event loop started. Launching a proof job defensively.");
-        self.create_prover_job(self.next_head, self.job_idx);
+        self.create_prover_job(self.next_head, self.job_idx, self.next_sync_committee);
 
         // Store last execution time before main loop
         let mut last_check_time = Instant::now();
@@ -364,8 +450,6 @@ impl BridgeHeadEventLoop {
             if now.duration_since(last_check_time).as_secs_f64() >= self.polling_interval_sec {
                 match self.check_finality_next_head().await {
                     Ok(next_head) => {
-                        // Maybe store the last_beacon_finality_head_checked so we can mute some of the prints
-
                         // Only run if the RPC didnt give us an old value
                         if next_head >= self.last_beacon_finality_head_checked {
                             // Have the helios finality head moved forwards
@@ -377,17 +461,30 @@ impl BridgeHeadEventLoop {
                                     );
                                 }
                             } else {
-                                // Update next head
-                                self.next_head = next_head;
-                                // Print a notice of the update.
+                                // Next head is greater than the (current head and the last_beacon_finality_head_checked)
                                 if self.last_beacon_finality_head_checked != next_head {
+                                    // We have a transition!
+                                    // Update next head
+                                    self.next_head = next_head;
+                                    // Print the head change detection
+                                    self.last_finality_transition_instant = Instant::now();
                                     info!("Helios beacon finality slot change detected. Nori bridge head is stale. Current head is: '{}' Working head is '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.working_head, self.next_head);
-                                }
-                                if self.auto_advance_index != 0 {
-                                    // Invoke a job
-                                    self.create_prover_job(self.next_head, self.job_idx);
+                                    // Auto advance if nessesary
+                                    if self.auto_advance_index != 0 {
+                                        info!(
+                                            "Auto advance invoking job due to finality transition."
+                                        );
+                                        // Invoke a job
+                                        self.create_prover_job(
+                                            self.next_head,
+                                            self.job_idx,
+                                            self.next_sync_committee,
+                                        );
+                                    }
                                 }
                             }
+
+                            // Update the last head we have checked
                             self.last_beacon_finality_head_checked = next_head;
                         }
                     }

@@ -67,10 +67,13 @@ pub async fn finality_update_job(
     };
 
     // Encode proof inputs
+    // TODO make a peristant thread pool
     info!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
 
     let proof: SP1ProofWithPublicValues = tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
+        panic!("Test panic");
+
         let mut stdin = SP1Stdin::new();
         stdin.write_slice(&encoded_proof_inputs);
     
