@@ -1,7 +1,15 @@
+use crate::notice_messages::{
+    get_nori_notice_message_type, NoriBridgeHeadMessageExtension, NoriBridgeHeadNoticeBaseMessage,
+    NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
+};
 use crate::sp1_prover::finality_update_job;
-use crate::{event_dispatcher::NoriBridgeEventListener, proof_outputs_decoder::DecodedProofOutputs};
+use crate::{
+    event_dispatcher::NoriBridgeEventListener, proof_outputs_decoder::DecodedProofOutputs,
+};
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
+use chrono::{SecondsFormat, Utc};
+use futures::future::join_all;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::FinalityUpdate;
 use helios_ethereum::rpc::ConsensusRpc;
@@ -52,8 +60,18 @@ struct ProverJob {
 /// Event loop commands
 pub enum NoriBridgeEventLoopCommand {
     Advance,
-    AddProofListener {
-        listener: Arc<Mutex<Box<dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>,
+    AddListener {
+        listener: Arc<
+            Mutex<
+                Box<
+                    dyn NoriBridgeEventListener<
+                            NoriBridgeHeadProofMessage,
+                            NoriBridgeHeadNoticeMessage,
+                        > + Send
+                        + Sync,
+                >,
+            >,
+        >,
     },
 }
 
@@ -74,8 +92,19 @@ pub struct BridgeHeadEventLoop {
     helios_polling_client: Inner<MainnetConsensusSpec, HttpRpc>,
     //bridge_mode: NoriBridgeHeadMode,
     //notice_dispatcher: EventDispatcher<NoriBridgeHeadNoticeMessage>,
-    proof_listeners:
-        Vec<Arc<Mutex<Box<dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>,
+    proof_listeners: Vec<
+        Arc<
+            Mutex<
+                Box<
+                    dyn NoriBridgeEventListener<
+                            NoriBridgeHeadProofMessage,
+                            NoriBridgeHeadNoticeMessage,
+                        > + Send
+                        + Sync,
+                >,
+            >,
+        >,
+    >,
     command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
 }
 
@@ -175,8 +204,7 @@ impl BridgeHeadEventLoop {
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
-            let proof_result = finality_update_job(slot_clone, next_sync_committee)
-                .await;
+            let proof_result = finality_update_job(slot_clone, next_sync_committee).await;
 
             match proof_result {
                 Ok(proof) => {
@@ -238,7 +266,7 @@ impl BridgeHeadEventLoop {
             self.save_nb_checkpoint();
 
             info!("Triggering proof listeners");
-            self.trigger_proof_listeners(NoriBridgeHeadProofMessage {
+            self.trigger_listeners_with_proof(NoriBridgeHeadProofMessage {
                 slot,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
@@ -255,10 +283,11 @@ impl BridgeHeadEventLoop {
         Ok(())
     }
 
-    // Invoke proof listeners
-    async fn trigger_proof_listeners(&mut self, payload: NoriBridgeHeadProofMessage) -> Result<()> {
-        use futures::future::join_all;
-
+    //  Emit proofs
+    async fn trigger_listeners_with_proof(
+        &mut self,
+        payload: NoriBridgeHeadProofMessage,
+    ) -> Result<()> {
         let futures = self
             .proof_listeners
             .iter()
@@ -274,6 +303,69 @@ impl BridgeHeadEventLoop {
 
         let results = join_all(futures).await;
         results.into_iter().collect::<Result<()>>()?;
+
+        // Handle results without propagating errors
+        /*for (idx, result) in results.into_iter().enumerate() {
+            if let Err(e) = result {
+                // Log error but don't return early
+                error!("Error dispatching proof event to listener {}: {:?}", idx, e);
+            }
+        }*/
+
+        Ok(())
+    }
+
+    // Emit notices
+    async fn trigger_listeners_with_notice(
+        &mut self,
+        extension: NoriBridgeHeadMessageExtension,
+    ) -> Result<()> {
+        let now = Utc::now();
+        let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
+        let message_type = get_nori_notice_message_type(&extension);
+        let base_message = NoriBridgeHeadNoticeBaseMessage {
+            timestamp: iso_string,
+            message_type,
+            current_head: self.current_head,
+            next_head: self.next_head,
+            working_head: self.working_head,
+            last_beacon_finality_head_checked: self.last_beacon_finality_head_checked,
+            last_job_duration_seconds: self.last_job_duration_sec,
+            time_until_next_finality_transition_seconds: Instant::now()
+                .duration_since(self.last_finality_transition_instant)
+                .as_secs_f64(),
+        };
+        let full_message = NoriBridgeHeadNoticeMessage {
+            base: base_message,
+            extension,
+        };
+        warn!("Triggering listeners with notice!!!!!");
+        let futures = self
+            .proof_listeners
+            .iter()
+            .map(|listener| {
+                let listener = listener.clone();
+                let payload_clone = full_message.clone();
+                async move {
+                    let mut listener_lock = listener.lock().await;
+                    listener_lock.on_notice(payload_clone).await
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let results = join_all(futures).await;
+
+        warn!("Trigged listeners with notice!!!!!");
+
+        results.into_iter().collect::<Result<()>>()?;
+
+        // Handle results without propagating errors
+        /*for (idx, result) in results.into_iter().enumerate() {
+            if let Err(e) = result {
+                // Log error but don't return early
+                error!("Error dispatching notice event to listener {}: {:?}", idx, e);
+            }
+        }*/
 
         Ok(())
     }
@@ -397,6 +489,8 @@ impl BridgeHeadEventLoop {
         // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
         // that happened while this process was offline
 
+        let _ = self.trigger_listeners_with_notice(NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeStarted(NoriBridgeHeadNoticeStarted {})).await;
+
         // This could be useful in the future be lets be careful. If there is nothing to invoke advance the it would not auto emit
         /*let offline_finality_update_next_head = self.check_finality_next_head().await.unwrap(); // Panic if the rpc is down.
         if self.current_head < offline_finality_update_next_head || self.bootstrap {
@@ -417,7 +511,7 @@ impl BridgeHeadEventLoop {
                         // deal with advance invocation
                         self.advance().await;
                     }
-                    NoriBridgeEventLoopCommand::AddProofListener { listener } => {
+                    NoriBridgeEventLoopCommand::AddListener { listener } => {
                         // Do something with this listener
                         self.proof_listeners.push(listener); // Arc<Mutex<dyn EventListener<NoriBridgeHeadProofMessage>>>
                     }
