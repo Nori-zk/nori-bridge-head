@@ -8,6 +8,6 @@ publish = ["kellnr"]
 
 [dependencies]
 serde = { workspace = true }
-helios-consensus-core = { workspace = true, registry = "kellr" }
+helios-consensus-core = { workspace = true, registry = "kellnr" }
 alloy-sol-types = { workspace = true }
 alloy-primitives = { workspace = true }
