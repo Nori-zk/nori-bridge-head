@@ -1,5 +1,5 @@
 use crate::sp1_prover::finality_update_job;
-use crate::{event_dispatcher::EventListener, proof_outputs_decoder::DecodedProofOutputs};
+use crate::{event_dispatcher::NoriBridgeEventListener, proof_outputs_decoder::DecodedProofOutputs};
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
@@ -114,7 +114,7 @@ struct ProverJob {
 pub enum NoriBridgeEventLoopCommand {
     Advance,
     AddProofListener {
-        listener: Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>,
+        listener: Arc<Mutex<Box<dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>,
     },
     Shutdown,
 }
@@ -137,7 +137,7 @@ pub struct BridgeHeadEventLoop {
     //bridge_mode: NoriBridgeHeadMode,
     //notice_dispatcher: EventDispatcher<NoriBridgeHeadNoticeMessage>,
     proof_listeners:
-        Vec<Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>,
+        Vec<Arc<Mutex<Box<dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>,
     command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
 }
 
@@ -329,7 +329,7 @@ impl BridgeHeadEventLoop {
                 let payload_clone = payload.clone();
                 async move {
                     let mut listener_lock = listener.lock().await;
-                    listener_lock.on_event(payload_clone).await
+                    listener_lock.on_proof(payload_clone).await
                 }
             })
             .collect::<Vec<_>>();

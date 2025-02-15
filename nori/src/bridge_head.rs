@@ -3,13 +3,13 @@ use std::sync::Arc;
 use log::info;
 use tokio::sync::{mpsc::Sender, Mutex};
 use tokio::sync::mpsc;
-use crate::{bridge_head_event_loop::{BridgeHeadEventLoop, NoriBridgeEventLoopCommand, NoriBridgeHeadProofMessage}, event_dispatcher::EventListener};
+use crate::{bridge_head_event_loop::{BridgeHeadEventLoop, NoriBridgeEventLoopCommand, NoriBridgeHeadProofMessage}, event_dispatcher::NoriBridgeEventListener};
 use anyhow::Result;
 
 pub struct BridgeHead {
     event_loop_tx: Sender<NoriBridgeEventLoopCommand>,
     loop_running: bool,
-    proof_listeners_buffer: Vec<Arc<Mutex<Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>
+    proof_listeners_buffer: Vec<Arc<Mutex<Box<dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>>
 }
 
 impl BridgeHead {
@@ -40,8 +40,8 @@ impl BridgeHead {
         Ok(())
     }
 
-    pub async fn add_proof_listener(&mut self, listener: impl EventListener<NoriBridgeHeadProofMessage> + Send + Sync + 'static,) -> Result<()> {
-        let boxed_listener: Box<dyn EventListener<NoriBridgeHeadProofMessage> + Send + Sync> = Box::new(listener);
+    pub async fn add_proof_listener(&mut self, listener: impl NoriBridgeEventListener<NoriBridgeHeadProofMessage> + Send + Sync + 'static,) -> Result<()> {
+        let boxed_listener: Box<dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage> + Send + Sync> = Box::new(listener);
         let wrapped_listener = Arc::new(Mutex::new(boxed_listener));
         if !self.loop_running {
             self.proof_listeners_buffer.push(wrapped_listener);

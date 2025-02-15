@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use log::info;
 use nori::{
     bridge_head::BridgeHead, bridge_head_event_loop::NoriBridgeHeadProofMessage,
-    event_dispatcher::EventListener, utils::{enable_logging_from_cargo_run, handle_nori_proof},
+    event_dispatcher::NoriBridgeEventListener, utils::{enable_logging_from_cargo_run, handle_nori_proof},
 };
 use std::sync::Arc;
 use tokio::{signal::ctrl_c, sync::Mutex};
@@ -19,8 +19,8 @@ impl ProofListener {
 }
 
 #[async_trait]
-impl EventListener<NoriBridgeHeadProofMessage> for ProofListener {
-    async fn on_event(&mut self, data: NoriBridgeHeadProofMessage) -> Result<()> {
+impl NoriBridgeEventListener<NoriBridgeHeadProofMessage> for ProofListener {
+    async fn on_proof(&mut self, data: NoriBridgeHeadProofMessage) -> Result<()> {
         println!("Got proof message: {}", data.slot);
 
         // Acquire lock and call advance()

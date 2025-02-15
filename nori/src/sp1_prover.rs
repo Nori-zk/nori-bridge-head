@@ -2,7 +2,7 @@ use alloy_primitives::{FixedBytes, B256};use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use sp1_helios_primitives::types::ProofInputs;
 use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1Stdin};
-use anyhow::{bail, Result};
+use anyhow::{bail, Error, Result};
 use tree_hash::TreeHash;
 use crate::external::{get_finality_updates,get_checkpoint, get_client};
 
@@ -13,10 +13,10 @@ pub async fn finality_update_job(
     last_next_sync_committee: FixedBytes<32>,
 ) -> Result<SP1ProofWithPublicValues> {
     // Get latest beacon checkpoint
-    let helios_checkpoint = get_checkpoint(slot).await?; // This panics FIXME
+    let helios_checkpoint = get_checkpoint(slot).await?;
 
     // Re init helios client
-    let mut heliod_update_client = get_client(helios_checkpoint).await?; // This panics FIXME
+    let mut heliod_update_client = get_client(helios_checkpoint).await?;
 
     // Get finality update
     info!("Getting finality update.");
@@ -28,7 +28,7 @@ pub async fn finality_update_job(
 
     // Get sync commitee updates
     info!("Getting sync commitee updates.");
-    let mut sync_committee_updates = get_finality_updates(&heliod_update_client).await?; // This panics FIXME
+    let mut sync_committee_updates = get_finality_updates(&heliod_update_client).await?;
 
     // Taken from operator.rs
     // Optimization:
@@ -47,7 +47,7 @@ pub async fn finality_update_job(
             info!("Applying optimization, skipping sync committee update.");
             let temp_update = sync_committee_updates.remove(0);
 
-            heliod_update_client.verify_update(&temp_update).unwrap(); // Panics if not valid FIXME?
+            heliod_update_client.verify_update(&temp_update).map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
             heliod_update_client.apply_update(&temp_update);
         }
     }
