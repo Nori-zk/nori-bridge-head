@@ -6,7 +6,7 @@ use anyhow::{bail, Error, Result};
 use tree_hash::TreeHash;
 use crate::external::{get_finality_updates,get_checkpoint, get_client};
 
-const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
+pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
 
 pub async fn finality_update_job(
     slot: u64,
