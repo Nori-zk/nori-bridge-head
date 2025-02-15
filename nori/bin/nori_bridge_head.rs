@@ -7,6 +7,7 @@ use nori::{
 };
 use std::sync::Arc;
 use tokio::{signal::ctrl_c, sync::Mutex};
+use std::process;
 
 pub struct ProofListener {
     bridge_head: Arc<Mutex<BridgeHead>>, // Use Arc<Mutex<NoriBridgeHead>> for shared ownership
@@ -72,14 +73,5 @@ async fn main() -> Result<()> {
         .await
         .expect("Failed to listen for shutdown signal");
 
-    info!("Shutdown signal received");
-
-    // Get lock again to send shutdown command
-    let mut bridge_head_guard = bridge_head.lock().await;
-    bridge_head_guard.shutdown().await?;
-    drop(bridge_head_guard);
-
-    info!("Shutdown command issued. Exiting... Hopefully...");
-
-    Ok(())
+    process::exit(1);
 }

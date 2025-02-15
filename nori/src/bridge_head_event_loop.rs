@@ -116,7 +116,6 @@ pub enum NoriBridgeEventLoopCommand {
     AddProofListener {
         listener: Arc<Mutex<Box<dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage> + Send + Sync>>>,
     },
-    Shutdown,
 }
 
 /// Bridge Head
@@ -482,9 +481,6 @@ impl BridgeHeadEventLoop {
                     NoriBridgeEventLoopCommand::AddProofListener { listener } => {
                         // Do something with this listener
                         self.proof_listeners.push(listener); // Arc<Mutex<dyn EventListener<NoriBridgeHeadProofMessage>>>
-                    }
-                    NoriBridgeEventLoopCommand::Shutdown => {
-                        break;
                     }
                 },
                 Err(mpsc::error::TryRecvError::Empty) => {
