@@ -45,7 +45,12 @@ SOURCE_CHAIN_ID=1
 [registries.kellnr]
 index = "sparse+https://crate.nori.it.com/api/v1/crates/"
 credential-provider = ["cargo:token"]
-token = "yourauthtoken"
+```
+
+4. Cargo login - paste your token
+
+```
+cargo login --registry kellnr
 ```
 
 4. `cd nori`
