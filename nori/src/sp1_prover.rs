@@ -9,15 +9,6 @@ use tree_hash::TreeHash;
 
 pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
 
-/*
-Panic example
-
-[2025-02-14T17:33:31Z INFO  nori::bridge_head_event_loop] Cancelling auto advance for job '2'.
-thread 'tokio-runtime-worker' panicked at /home/code/nori/nori-bridge-head/script/src/lib.rs:109:40:
-called `Result::unwrap()` on an `Err` value: could not fetch bootstrap: rpc error on method: bootstrap, message: status: 404, message: LC bootstrap unavailable
-
-*/
-
 pub async fn finality_update_job(
     slot: u64,
     last_next_sync_committee: FixedBytes<32>,
