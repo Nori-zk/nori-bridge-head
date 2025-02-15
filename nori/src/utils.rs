@@ -11,21 +11,6 @@ use sp1_helios_script::MAX_REQUEST_LIGHT_CLIENT_UPDATES;
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::{env, fs, path::Path};
 
-pub async fn get_finality_updates(
-    client: &Inner<MainnetConsensusSpec, HttpRpc>,
-) -> Vec<Update<MainnetConsensusSpec>> {
-    let period =
-        calc_sync_period::<MainnetConsensusSpec>(client.store.finalized_header.beacon().slot);
-
-    let updates = client
-        .rpc
-        .get_updates(period, MAX_REQUEST_LIGHT_CLIENT_UPDATES)
-        .await
-        .unwrap();
-
-    updates.clone()
-}
-
 pub async fn handle_nori_proof(proof: &SP1ProofWithPublicValues, latest_block: u64) -> Result<()> {
     // Create directory to save the proofs
     let proof_path = format!("./sp1-helios-proofs");

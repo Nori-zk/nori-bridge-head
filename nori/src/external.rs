@@ -16,6 +16,24 @@ use tree_hash::TreeHash;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 use anyhow::{Result, Error};
 
+pub async fn get_finality_updates(
+    client: &Inner<MainnetConsensusSpec, HttpRpc>,
+) -> Result<Vec<Update<MainnetConsensusSpec>>> {
+    let period = calc_sync_period::<MainnetConsensusSpec>(client.store.finalized_header.beacon().slot);
+
+    // Handling the result and converting errors to anyhow::Error
+    let updates_result = client
+        .rpc
+        .get_updates(period, MAX_REQUEST_LIGHT_CLIENT_UPDATES)
+        .await
+        .map_err(|e| Error::msg(e.to_string())); // Convert error to anyhow::Error
+
+    match updates_result {
+        Ok(updates) => Ok(updates.clone()), // Clone the updates if the result is Ok
+        Err(e) => Err(e),                   // Propagate error if it's an Err
+    }
+}
+
 /// Fetch updates for client
 pub async fn get_updates(
     client: &Inner<MainnetConsensusSpec, HttpRpc>,

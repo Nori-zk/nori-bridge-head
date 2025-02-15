@@ -1,11 +1,10 @@
 use alloy_primitives::{FixedBytes, B256};use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use sp1_helios_primitives::types::ProofInputs;
-use sp1_helios_script::{get_checkpoint, get_client};
 use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1Stdin};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use tree_hash::TreeHash;
-use crate::utils::get_finality_updates;
+use crate::external::{get_finality_updates,get_checkpoint, get_client};
 
 const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
 
@@ -14,10 +13,10 @@ pub async fn finality_update_job(
     last_next_sync_committee: FixedBytes<32>,
 ) -> Result<SP1ProofWithPublicValues> {
     // Get latest beacon checkpoint
-    let helios_checkpoint = get_checkpoint(slot).await; // This panics FIXME
+    let helios_checkpoint = get_checkpoint(slot).await?; // This panics FIXME
 
     // Re init helios client
-    let mut heliod_update_client = get_client(helios_checkpoint).await; // This panics FIXME
+    let mut heliod_update_client = get_client(helios_checkpoint).await?; // This panics FIXME
 
     // Get finality update
     info!("Getting finality update.");
@@ -29,7 +28,7 @@ pub async fn finality_update_job(
 
     // Get sync commitee updates
     info!("Getting sync commitee updates.");
-    let mut sync_committee_updates = get_finality_updates(&heliod_update_client).await; // This panics FIXME
+    let mut sync_committee_updates = get_finality_updates(&heliod_update_client).await?; // This panics FIXME
 
     // Taken from operator.rs
     // Optimization:
@@ -72,22 +71,19 @@ pub async fn finality_update_job(
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
 
     let proof: SP1ProofWithPublicValues = tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
-        panic!("Test panic");
-
+        // Setup prover client
+        info!("Setting up prover client.");
         let mut stdin = SP1Stdin::new();
         stdin.write_slice(&encoded_proof_inputs);
-    
-        // Generate proof.
-        info!("Running sp1 proof.");
-    
-        // Get prover client and pk
         let prover_client = ProverClient::from_env();
         let (pk, _) = prover_client.setup(ELF); // FIXME this is expensive! What about a persistant thread pool.
+
+        // Generate proof.
+        info!("Running sp1 proof.");
         let proof = prover_client.prove(&pk, &stdin).plonk().run()?;
-    
+        
         Ok(proof) // Explicitly return proof
     }).await??; // Await the blocking task and propagate errors properly
-    
 
     Ok(proof)
 }

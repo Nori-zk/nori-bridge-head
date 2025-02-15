@@ -196,14 +196,21 @@ impl BridgeHeadEventLoop {
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
-            let proof = finality_update_job(slot_clone, next_sync_committee)
-                .await
-                .unwrap();
-            let prover_job_output = ProverJobOutput {
-                slot: slot_clone,
-                proof,
-            };
-            tx.send(Ok(prover_job_output)).await.unwrap();
+            let proof_result = finality_update_job(slot_clone, next_sync_committee)
+                .await;
+
+            match proof_result {
+                Ok(proof) => {
+                    let prover_job_output = ProverJobOutput {
+                        slot: slot_clone,
+                        proof,
+                    };
+                    tx.send(Ok(prover_job_output)).await.unwrap();
+                }
+                Err(err) => {
+                    tx.send(Err(err)).await.unwrap();
+                }
+            }
         });
 
         /*
@@ -312,13 +319,15 @@ impl BridgeHeadEventLoop {
                         );
                         results.push(ProverJobOutputWithJob {
                             job_idx,
-                            proof: result.proof,
-                            slot: result.slot,
+                            proof: result_data.proof,
+                            slot: result_data.slot,
                         });
                         completed.push(job_idx);
                     }
                     Err(err) => {
-                        
+                        // Handle the error case if the inner Result is Err
+                        error!("Job '{}' failed with error: {}", job_idx, err);
+                        failed.push(job_idx);
                     }
                 }
             }
