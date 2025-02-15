@@ -4,10 +4,9 @@ name = "sp1-helios-primitives"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-publish = ["kellnr"]
 
 [dependencies]
 serde = { workspace = true }
-helios-consensus-core = { version = "0.7.0", registry = "kellnr" }
+helios-consensus-core = { workspace = true }
 alloy-sol-types = { workspace = true }
 alloy-primitives = { workspace = true }
