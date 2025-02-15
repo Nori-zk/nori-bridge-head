@@ -1,13 +1,5 @@
 use anyhow::Result;
-use helios_consensus_core::{
-    calc_sync_period, consensus_spec::MainnetConsensusSpec, types::Update,
-};
-use helios_ethereum::{
-    consensus::Inner,
-    rpc::{http_rpc::HttpRpc, ConsensusRpc},
-};
 use log::info;
-use sp1_helios_script::MAX_REQUEST_LIGHT_CLIENT_UPDATES;
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::{env, fs, path::Path};
 

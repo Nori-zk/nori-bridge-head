@@ -1,15 +1,17 @@
 use crate::notice_messages::{
-    get_nori_notice_message_type, NoriBridgeHeadMessageExtension, NoriBridgeHeadNoticeBaseMessage,
-    NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
+    get_nori_notice_message_type, NoriBridgeHeadMessageExtension,
+    NoriBridgeHeadNoticeAdvanceRequested, NoriBridgeHeadNoticeBaseMessage,
+    NoriBridgeHeadNoticeFinalityTransitionDetected, NoriBridgeHeadNoticeHeadAdvanced,
+    NoriBridgeHeadNoticeJobCreated, NoriBridgeHeadNoticeJobFailed,
+    NoriBridgeHeadNoticeJobSucceeded, NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
 };
 use crate::sp1_prover::finality_update_job;
 use crate::{
-    event_dispatcher::NoriBridgeEventListener, proof_outputs_decoder::DecodedProofOutputs,
+    event_handler::NoriBridgeEventListener, proof_outputs_decoder::DecodedProofOutputs,
 };
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
-use futures::future::join_all;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::FinalityUpdate;
 use helios_ethereum::rpc::ConsensusRpc;
@@ -18,10 +20,9 @@ use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use sp1_helios_script::{get_checkpoint, get_client, get_latest_checkpoint};
 use sp1_sdk::SP1ProofWithPublicValues;
-use std::{collections::HashMap, default, env, fs::File, io::Read, path::Path, sync::Arc};
-use tokio::sync::{mpsc, Mutex};
+use std::{collections::HashMap, env, fs::File, io::Read, path::Path};
+use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tree_hash::TreeHash;
 
 const NB_CHECKPOINT_FILE: &str = "nb_checkpoint.json";
 const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
@@ -60,19 +61,6 @@ struct ProverJob {
 /// Event loop commands
 pub enum NoriBridgeEventLoopCommand {
     Advance,
-    AddListener {
-        listener: Arc<
-            Mutex<
-                Box<
-                    dyn NoriBridgeEventListener<
-                            NoriBridgeHeadProofMessage,
-                            NoriBridgeHeadNoticeMessage,
-                        > + Send
-                        + Sync,
-                >,
-            >,
-        >,
-    },
 }
 
 /// Bridge Head
@@ -87,29 +75,25 @@ pub struct BridgeHeadEventLoop {
     last_job_duration_sec: f64,
     last_finality_transition_instant: Instant,
     next_sync_committee: FixedBytes<32>,
-    bootstrap: bool,
     prover_jobs: HashMap<u64, ProverJob>,
     helios_polling_client: Inner<MainnetConsensusSpec, HttpRpc>,
-    //bridge_mode: NoriBridgeHeadMode,
-    //notice_dispatcher: EventDispatcher<NoriBridgeHeadNoticeMessage>,
-    proof_listeners: Vec<
-        Arc<
-            Mutex<
-                Box<
-                    dyn NoriBridgeEventListener<
-                            NoriBridgeHeadProofMessage,
-                            NoriBridgeHeadNoticeMessage,
-                        > + Send
-                        + Sync,
-                >,
-            >,
-        >,
+    event_listener: Box<
+        dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+            + Send
+            + Sync,
     >,
     command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
 }
 
 impl BridgeHeadEventLoop {
-    pub async fn new(command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>) -> Self {
+    pub async fn new(
+        command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
+        proof_listener: Box<
+            dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+                + Send
+                + Sync,
+        >,
+    ) -> Self {
         dotenv::dotenv().ok();
 
         // Define sleep interval
@@ -160,13 +144,14 @@ impl BridgeHeadEventLoop {
             last_job_duration_sec: 0.0,
             last_finality_transition_instant: Instant::now(),
             next_sync_committee,
-            bootstrap,
             helios_polling_client,
-            proof_listeners: vec![],
+            event_listener: proof_listener,
             prover_jobs: HashMap::new(),
             command_receiver,
         }
     }
+
+    /// Utilities
 
     async fn get_cold_finality_current_head() -> u64 {
         // Get latest beacon checkpoint
@@ -179,8 +164,113 @@ impl BridgeHeadEventLoop {
         helios_client.store.finalized_header.clone().beacon().slot
     }
 
+    async fn check_finality_next_head(&self) -> Result<u64> {
+        // Get finality slot head
+        info!("Polling helios finality slot head.");
+        let finality_update: FinalityUpdate<MainnetConsensusSpec> = self
+            .helios_polling_client
+            .rpc
+            .get_finality_update()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
+
+        // Extract latest slot
+        Ok(finality_update.finalized_header.beacon().slot)
+    }
+
+    // Static method to check if the checkpoint file exists
+    fn nb_checkpoint_exists(nb_checkpoint_location: &str) -> bool {
+        Path::new(nb_checkpoint_location).exists()
+    }
+
+    // Static method to load the checkpoint from file
+    fn load_nb_checkpoint(nb_checkpoint_location: &str) -> Result<NoriBridgeCheckpoint> {
+        // Open the checkpoint file
+        let mut file =
+            File::open(nb_checkpoint_location).expect("Failed to open nori checkpoint file.");
+
+        // Read the contents into a Vec<u8>
+        let mut serialized_checkpoint = Vec::new();
+        file.read_to_end(&mut serialized_checkpoint)
+            .expect("Failed to read nori checkpoint file.");
+
+        // Deserialize the checkpoint data using serde_json (not serde_cbor)
+        let nb_checkpoint: NoriBridgeCheckpoint = serde_json::from_slice(&serialized_checkpoint)
+            .expect("Failed to deserialize nori checkpoint.");
+
+        Ok(nb_checkpoint)
+    }
+
+    fn save_nb_checkpoint(&self) {
+        // Define the current checkpoint
+        let checkpoint = NoriBridgeCheckpoint {
+            slot_head: self.current_head,
+            next_sync_committee: self.next_sync_committee,
+        };
+
+        // Serialize the checkpoint to a byte vector
+        let serialized_nb_checkpoint =
+            serde_json::to_string(&checkpoint).expect("Failed to serialize nori checkpoint.");
+
+        // Write the serialized data to the file specified by `checkpoint_location`
+        std::fs::write(NB_CHECKPOINT_FILE, &serialized_nb_checkpoint)
+            .map_err(|e| anyhow::anyhow!("Failed to write to checkpoint file: {}", e))
+            .unwrap();
+
+        info!("Nori bridge checkpoint saved successfully.");
+    }
+
+    /// Event dispatchers
+
+    //  Emit proofs
+    async fn trigger_listener_with_proof(
+        &mut self,
+        payload: NoriBridgeHeadProofMessage,
+    ) -> Result<()> {
+        let _ = self.event_listener.as_mut().on_proof(payload).await;
+
+        Ok(())
+    }
+
+    // Emit notices
+    async fn trigger_listener_with_notice(
+        &mut self,
+        extension: NoriBridgeHeadMessageExtension,
+    ) -> Result<()> {
+        let now = Utc::now();
+        let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
+        let message_type = get_nori_notice_message_type(&extension);
+        let base_message = NoriBridgeHeadNoticeBaseMessage {
+            timestamp: iso_string,
+            message_type,
+            current_head: self.current_head,
+            next_head: self.next_head,
+            working_head: self.working_head,
+            last_beacon_finality_head_checked: self.last_beacon_finality_head_checked,
+            last_job_duration_seconds: self.last_job_duration_sec,
+            time_until_next_finality_transition_seconds: Instant::now()
+                .duration_since(self.last_finality_transition_instant)
+                .as_secs_f64(),
+        };
+        let full_message = NoriBridgeHeadNoticeMessage {
+            base: base_message,
+            extension,
+        };
+
+        let _ = self.event_listener.as_mut().on_notice(full_message).await;
+
+        Ok(())
+    }
+
+    /// Jobs
+
     // Create prover job
-    fn create_prover_job(&mut self, slot: u64, job_idx: u64, next_sync_committee: FixedBytes<32>) {
+    async fn create_prover_job(
+        &mut self,
+        slot: u64,
+        job_idx: u64,
+        next_sync_committee: FixedBytes<32>,
+    ) {
         info!(
             "Nori head updater recieved a new job {}. Spawning a new worker.",
             job_idx
@@ -234,6 +324,14 @@ impl BridgeHeadEventLoop {
             );
             self.auto_advance_index = 0;
         }
+
+        let _ = self
+            .trigger_listener_with_notice(
+                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobCreated(
+                    NoriBridgeHeadNoticeJobCreated { slot, job_idx },
+                ),
+            )
+            .await;
     }
 
     // Handle prover job output
@@ -244,16 +342,30 @@ impl BridgeHeadEventLoop {
         job_idx: u64,
     ) -> Result<()> {
         info!("Handling prover job output '{}'.", job_idx);
+
+        // Extract the next sync committee out of the proof output
+        let public_values: sp1_sdk::SP1PublicValues = proof.clone().public_values;
+        let public_values_bytes = public_values.as_slice(); // Raw bytes
+        let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes)?;
+
+        // Notify of a succesful job
+        let _ = self
+            .trigger_listener_with_notice(
+                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobSucceeded(
+                    NoriBridgeHeadNoticeJobSucceeded {
+                        slot,
+                        job_idx,
+                        next_sync_committee: self.next_sync_committee,
+                    },
+                ),
+            )
+            .await;
+
         // Check if our result is still relevant after the computation, if our working_head has advanced then we are working on a more recent head in another thread.
         if self.working_head == slot {
             // could move this to a job_id check vs auto_advance_index if we really wanted to skip what we've got in place with advance being called.
             // Update our state
             info!("Moving nori head forward.");
-
-            // Extract the next sync committee out of the proof output
-            let public_values: sp1_sdk::SP1PublicValues = proof.clone().public_values;
-            let public_values_bytes = public_values.as_slice(); // Raw bytes
-            let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes)?;
 
             // Update head and next_sync_committee based on the proof outputs
             self.current_head = slot;
@@ -266,12 +378,26 @@ impl BridgeHeadEventLoop {
             self.save_nb_checkpoint();
 
             info!("Triggering proof listeners");
-            self.trigger_listeners_with_proof(NoriBridgeHeadProofMessage {
-                slot,
-                proof,
-                execution_state_root: proof_outputs.execution_state_root,
-            })
-            .await?;
+            // Emit proof
+            let _ = self
+                .trigger_listener_with_proof(NoriBridgeHeadProofMessage {
+                    slot,
+                    proof,
+                    execution_state_root: proof_outputs.execution_state_root,
+                })
+                .await;
+
+            // Notify of head advance
+            let _ = self
+                .trigger_listener_with_notice(
+                    NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeHeadAdvanced(
+                        NoriBridgeHeadNoticeHeadAdvanced {
+                            slot,
+                            next_sync_committee: self.next_sync_committee,
+                        },
+                    ),
+                )
+                .await;
 
             if self.next_head == self.current_head {
                 info!(
@@ -283,98 +409,11 @@ impl BridgeHeadEventLoop {
         Ok(())
     }
 
-    //  Emit proofs
-    async fn trigger_listeners_with_proof(
-        &mut self,
-        payload: NoriBridgeHeadProofMessage,
-    ) -> Result<()> {
-        let futures = self
-            .proof_listeners
-            .iter()
-            .map(|listener| {
-                let listener = listener.clone();
-                let payload_clone = payload.clone();
-                async move {
-                    let mut listener_lock = listener.lock().await;
-                    listener_lock.on_proof(payload_clone).await
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let results = join_all(futures).await;
-        results.into_iter().collect::<Result<()>>()?;
-
-        // Handle results without propagating errors
-        /*for (idx, result) in results.into_iter().enumerate() {
-            if let Err(e) = result {
-                // Log error but don't return early
-                error!("Error dispatching proof event to listener {}: {:?}", idx, e);
-            }
-        }*/
-
-        Ok(())
-    }
-
-    // Emit notices
-    async fn trigger_listeners_with_notice(
-        &mut self,
-        extension: NoriBridgeHeadMessageExtension,
-    ) -> Result<()> {
-        let now = Utc::now();
-        let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
-        let message_type = get_nori_notice_message_type(&extension);
-        let base_message = NoriBridgeHeadNoticeBaseMessage {
-            timestamp: iso_string,
-            message_type,
-            current_head: self.current_head,
-            next_head: self.next_head,
-            working_head: self.working_head,
-            last_beacon_finality_head_checked: self.last_beacon_finality_head_checked,
-            last_job_duration_seconds: self.last_job_duration_sec,
-            time_until_next_finality_transition_seconds: Instant::now()
-                .duration_since(self.last_finality_transition_instant)
-                .as_secs_f64(),
-        };
-        let full_message = NoriBridgeHeadNoticeMessage {
-            base: base_message,
-            extension,
-        };
-        warn!("Triggering listeners with notice!!!!!");
-        let futures = self
-            .proof_listeners
-            .iter()
-            .map(|listener| {
-                let listener = listener.clone();
-                let payload_clone = full_message.clone();
-                async move {
-                    let mut listener_lock = listener.lock().await;
-                    listener_lock.on_notice(payload_clone).await
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let results = join_all(futures).await;
-
-        warn!("Trigged listeners with notice!!!!!");
-
-        results.into_iter().collect::<Result<()>>()?;
-
-        // Handle results without propagating errors
-        /*for (idx, result) in results.into_iter().enumerate() {
-            if let Err(e) = result {
-                // Log error but don't return early
-                error!("Error dispatching notice event to listener {}: {:?}", idx, e);
-            }
-        }*/
-
-        Ok(())
-    }
-
     // Handler prover jobs
     async fn check_prover_jobs(&mut self) -> Result<()> {
         let mut completed = Vec::new();
         let mut results: Vec<ProverJobOutputWithJob> = Vec::new();
-        let mut failed: Vec<u64> = Vec::new();
+        let mut failed: Vec<(u64, String)> = Vec::new();
 
         // Extract jobs
         for (&job_idx, job) in self.prover_jobs.iter_mut() {
@@ -397,8 +436,9 @@ impl BridgeHeadEventLoop {
                     }
                     Err(err) => {
                         // Handle the error case if the inner Result is Err
+                        let message = format!("Job '{}' failed with error: {}", job_idx, err);
                         error!("Job '{}' failed with error: {}", job_idx, err);
-                        failed.push(job_idx);
+                        failed.push((job_idx, message));
                     }
                 }
             }
@@ -411,12 +451,30 @@ impl BridgeHeadEventLoop {
         }
 
         // Process failed jobs
-        for job_idx in failed {
+        for failed_job in failed.clone() {
             // If our current job failed restart it...
-            if self.job_idx == job_idx {
-                let job: &ProverJob = self.prover_jobs.get(&job_idx).unwrap();
-                self.create_prover_job(job.slot, job_idx, job.next_sync_committee);
+            if self.job_idx == failed_job.0 {
+                let job: &ProverJob = self.prover_jobs.get(&failed_job.0).unwrap();
+                let _ = self
+                    .create_prover_job(job.slot, failed_job.0, job.next_sync_committee)
+                    .await;
             }
+        }
+
+        // Emit job failure notices
+        for failed_job in failed.clone() {
+            let job: &ProverJob = self.prover_jobs.get(&failed_job.0).unwrap();
+            let _ = self
+                .trigger_listener_with_notice(
+                    NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobFailed(
+                        NoriBridgeHeadNoticeJobFailed {
+                            slot: job.slot,
+                            job_idx: failed_job.0,
+                            message: failed_job.1,
+                        },
+                    ),
+                )
+                .await;
         }
 
         // Cleanup hash map
@@ -426,6 +484,8 @@ impl BridgeHeadEventLoop {
 
         Ok(())
     }
+
+    /// Commands
 
     // advance
     async fn advance(&mut self) {
@@ -461,35 +521,37 @@ impl BridgeHeadEventLoop {
             // We should immediately try to create a new proof
             if self.auto_advance_index != self.job_idx {
                 info!("Immediately trying to advance.");
-                self.create_prover_job(self.next_head, self.job_idx, self.next_sync_committee);
+                let _ = self
+                    .create_prover_job(self.next_head, self.job_idx, self.next_sync_committee)
+                    .await;
             }
         } else {
             info!("Setting flag to attempt auto advance head on next finality update, as nori bridge is currently up to date.");
             // We should wait for the next detected head update.
             self.auto_advance_index = self.job_idx;
         }
+        let _ = self
+            .trigger_listener_with_notice(
+                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeAdvanceRequested(
+                    NoriBridgeHeadNoticeAdvanceRequested {},
+                ),
+            )
+            .await;
     }
 
-    async fn check_finality_next_head(&self) -> Result<u64> {
-        // Get finality slot head
-        info!("Polling helios finality slot head.");
-        let finality_update: FinalityUpdate<MainnetConsensusSpec> = self
-            .helios_polling_client
-            .rpc
-            .get_finality_update()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
+    /// Event loop
 
-        // Extract latest slot
-        Ok(finality_update.finalized_header.beacon().slot)
-    }
-
-    // loop
     pub async fn run_loop(mut self) {
         // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
         // that happened while this process was offline
 
-        let _ = self.trigger_listeners_with_notice(NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeStarted(NoriBridgeHeadNoticeStarted {})).await;
+        let _ = self
+            .trigger_listener_with_notice(
+                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeStarted(
+                    NoriBridgeHeadNoticeStarted {},
+                ),
+            )
+            .await;
 
         // This could be useful in the future be lets be careful. If there is nothing to invoke advance the it would not auto emit
         /*let offline_finality_update_next_head = self.check_finality_next_head().await.unwrap(); // Panic if the rpc is down.
@@ -498,7 +560,9 @@ impl BridgeHeadEventLoop {
             self.create_prover_job(self.next_head, self.job_idx);
         }*/
         info!("Event loop started. Launching a proof job defensively.");
-        self.create_prover_job(self.next_head, self.job_idx, self.next_sync_committee);
+        let _ = self
+            .create_prover_job(self.next_head, self.job_idx, self.next_sync_committee)
+            .await;
 
         // Store last execution time before main loop
         let mut last_check_time = Instant::now();
@@ -510,10 +574,6 @@ impl BridgeHeadEventLoop {
                     NoriBridgeEventLoopCommand::Advance => {
                         // deal with advance invocation
                         self.advance().await;
-                    }
-                    NoriBridgeEventLoopCommand::AddListener { listener } => {
-                        // Do something with this listener
-                        self.proof_listeners.push(listener); // Arc<Mutex<dyn EventListener<NoriBridgeHeadProofMessage>>>
                     }
                 },
                 Err(mpsc::error::TryRecvError::Empty) => {
@@ -554,12 +614,24 @@ impl BridgeHeadEventLoop {
                                             "Auto advance invoking job due to finality transition."
                                         );
                                         // Invoke a job
-                                        self.create_prover_job(
-                                            self.next_head,
-                                            self.job_idx,
-                                            self.next_sync_committee,
-                                        );
+                                        let _ = self
+                                            .create_prover_job(
+                                                self.next_head,
+                                                self.job_idx,
+                                                self.next_sync_committee,
+                                            )
+                                            .await;
                                     }
+                                    // Notify of transition
+                                    let _ = self
+                                    .trigger_listener_with_notice(
+                                        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeFinalityTransitionDetected(
+                                            NoriBridgeHeadNoticeFinalityTransitionDetected {
+                                                slot: next_head
+                                            },
+                                        ),
+                                    )
+                                    .await;
                                 }
                             }
 
@@ -582,47 +654,5 @@ impl BridgeHeadEventLoop {
             // Yield to other tasks instead of sleeping
             tokio::task::yield_now().await;
         }
-    }
-
-    // Static method to check if the checkpoint file exists
-    fn nb_checkpoint_exists(nb_checkpoint_location: &str) -> bool {
-        Path::new(nb_checkpoint_location).exists()
-    }
-
-    // Static method to load the checkpoint from file
-    fn load_nb_checkpoint(nb_checkpoint_location: &str) -> Result<NoriBridgeCheckpoint> {
-        // Open the checkpoint file
-        let mut file =
-            File::open(nb_checkpoint_location).expect("Failed to open nori checkpoint file.");
-
-        // Read the contents into a Vec<u8>
-        let mut serialized_checkpoint = Vec::new();
-        file.read_to_end(&mut serialized_checkpoint)
-            .expect("Failed to read nori checkpoint file.");
-
-        // Deserialize the checkpoint data using serde_json (not serde_cbor)
-        let nb_checkpoint: NoriBridgeCheckpoint = serde_json::from_slice(&serialized_checkpoint)
-            .expect("Failed to deserialize nori checkpoint.");
-
-        Ok(nb_checkpoint)
-    }
-
-    fn save_nb_checkpoint(&self) {
-        // Define the current checkpoint
-        let checkpoint = NoriBridgeCheckpoint {
-            slot_head: self.current_head,
-            next_sync_committee: self.next_sync_committee,
-        };
-
-        // Serialize the checkpoint to a byte vector
-        let serialized_nb_checkpoint =
-            serde_json::to_string(&checkpoint).expect("Failed to serialize nori checkpoint.");
-
-        // Write the serialized data to the file specified by `checkpoint_location`
-        std::fs::write(NB_CHECKPOINT_FILE, &serialized_nb_checkpoint)
-            .map_err(|e| anyhow::anyhow!("Failed to write to checkpoint file: {}", e))
-            .unwrap();
-
-        info!("Nori bridge checkpoint saved successfully.");
     }
 }
