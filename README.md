@@ -31,3 +31,22 @@ SOURCE_CHAIN_ID=1
 ## Execution
 
 `cargo run --bin nbhead`
+
+## How to publish to private registry
+
+1. Get an account at crate.nori.it.com from your administrator
+2. Create an auth token
+3. Create a .cargo/config.toml
+
+```
+# Example .cargo/config.toml
+# The index needs to point to the host where your Kellnr instance runs
+# The token is the authentication token for the user configured in Kellnr
+[registries.kellnr]
+index = "sparse+https://crate.nori.it.com/api/v1/crates/"
+credential-provider = ["cargo:token"]
+token = "yourauthtoken"
+```
+
+4. `cd nori`
+5. `cargo publish --registry kellnr`
