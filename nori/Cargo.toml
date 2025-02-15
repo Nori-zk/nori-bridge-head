@@ -36,6 +36,7 @@ serde_json = { workspace = true }
 async-trait = "0.1.86"
 futures = "0.3.31"
 rand = "0.9.0"
+chrono = "0.4.39"
 
 [build-dependencies]
 sp1-build = { workspace = true }

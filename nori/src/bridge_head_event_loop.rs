@@ -24,28 +24,68 @@ pub struct NoriBridgeCheckpoint {
     next_sync_committee: FixedBytes<32>,
 }
 
+/// Base notice message types
+#[derive(Serialize, Deserialize)]
 pub enum NoriNoticeMessageType {
     Started,
+    Warning,
+    JobCreated,
+    JobSucceeded,
+    JobFailed,
+    FinalityTransitionDetected,
+    AdvanceRequested,
+    HeadAdvanced,
 }
 
-/*
-    timestamp
-    notice_type
-
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeHeadNoticeBaseMessage {
+    timestamp: String,
+    message_type: NoriNoticeMessageType,
     current_head: u64,
     next_head: u64,
     working_head: u64,
-    last_beacon_finality_head_checked: u64
+    last_beacon_finality_head_checked: u64,
+    last_job_duration_seconds: f64,
+    time_until_next_finality_transition_seconds: f64
+}
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeHeadNoticeStarted {}
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeHeadNoticeWarning {
+    message: String
+}
+#[derive(Serialize, Deserialize)]
+pub struct  NoriBridgeHeadNoticeJobCreated {
+    slot: u64,
+    job_idx: u64
+}
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeHeadNoticeJobSucceeded {
+    slot: u64,
+    job_idx: u64,
+    next_sync_committee: FixedBytes<32>
+}
+#[derive(Serialize, Deserialize)]
+pub struct  NoriBridgeHeadNoticeJobFailed {
+    slot: u64,
+    job_idx: u64,
+    message: String
+}
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeHeadNoticeFinalityTransitionDetected {
+    slot: u64
+}
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeHeadNoticeAdvanceRequested {
 
-    last_job_duration: f64,
-    seconds_till_next_finality_transition //last_finality_transition_instant: Instant, (time to next finality transition)
-*/
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeBaseMessage {
-    current_slot: u64,
+}
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeHeadNoticeHeadAdvanced {
+    slot: u64,
+    next_sync_committee: FixedBytes<32>
 }
 
+/// Proof types
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoriBridgeHeadProofMessage {
     pub slot: u64,
@@ -70,6 +110,7 @@ struct ProverJob {
     next_sync_committee: FixedBytes<32>,
 }
 
+/// Event loop commands
 pub enum NoriBridgeEventLoopCommand {
     Advance,
     AddProofListener {
@@ -77,8 +118,8 @@ pub enum NoriBridgeEventLoopCommand {
     },
     Shutdown,
 }
-pub struct NoriBridgeHeadEventLoopConfig {}
 
+/// Bridge Head
 pub struct BridgeHeadEventLoop {
     polling_interval_sec: f64,
     current_head: u64,
@@ -87,7 +128,7 @@ pub struct BridgeHeadEventLoop {
     last_beacon_finality_head_checked: u64,
     auto_advance_index: u64,
     job_idx: u64,
-    last_job_duration: f64,
+    last_job_duration_sec: f64,
     last_finality_transition_instant: Instant,
     next_sync_committee: FixedBytes<32>,
     bootstrap: bool,
@@ -149,7 +190,7 @@ impl BridgeHeadEventLoop {
             last_beacon_finality_head_checked: u64::default(),
             auto_advance_index: 1,
             job_idx: 1,
-            last_job_duration: 0.0,
+            last_job_duration_sec: 0.0,
             last_finality_transition_instant: Instant::now(),
             next_sync_committee,
             bootstrap,
@@ -310,12 +351,12 @@ impl BridgeHeadEventLoop {
             if let Ok(result) = job.rx.try_recv() {
                 match result {
                     Ok(result_data) => {
-                        self.last_job_duration = Instant::now()
+                        self.last_job_duration_sec = Instant::now()
                             .duration_since(job.start_instant)
                             .as_secs_f64();
                         info!(
                             "Job '{}' finished in {} seconds.",
-                            job_idx, self.last_job_duration
+                            job_idx, self.last_job_duration_sec
                         );
                         results.push(ProverJobOutputWithJob {
                             job_idx,
@@ -362,17 +403,17 @@ impl BridgeHeadEventLoop {
         info!("Advance called ready for job '{}'.", self.job_idx);
         if self.next_head > self.current_head {
             // TODO think about the time until the next transition
-            if self.last_job_duration != 0.0 {
+            if self.last_job_duration_sec != 0.0 {
                 // If we have data on the last job time
 
                 let seconds_since_last_transition = Instant::now()
                     .duration_since(self.last_finality_transition_instant)
                     .as_secs_f64();
 
-                if self.last_job_duration > TYPICAL_FINALITY_TRANSITION_TIME {
-                    warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will definitely not be able to catch up.", self.last_job_duration, TYPICAL_FINALITY_TRANSITION_TIME);
-                } else if self.last_job_duration > TYPICAL_FINALITY_TRANSITION_TIME * 0.8 {
-                    warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will take a while to catch up.", self.last_job_duration, TYPICAL_FINALITY_TRANSITION_TIME);
+                if self.last_job_duration_sec > TYPICAL_FINALITY_TRANSITION_TIME {
+                    warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will definitely not be able to catch up.", self.last_job_duration_sec, TYPICAL_FINALITY_TRANSITION_TIME);
+                } else if self.last_job_duration_sec > TYPICAL_FINALITY_TRANSITION_TIME * 0.8 {
+                    warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will take a while to catch up.", self.last_job_duration_sec, TYPICAL_FINALITY_TRANSITION_TIME);
                 }
 
                 info!(
