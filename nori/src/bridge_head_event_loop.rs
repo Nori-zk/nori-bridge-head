@@ -85,6 +85,26 @@ pub struct NoriBridgeHeadNoticeHeadAdvanced {
     next_sync_committee: FixedBytes<32>
 }
 
+#[derive(Serialize, Deserialize)]
+pub enum NoriBridgeHeadMessageExtension {
+    NoriBridgeHeadNoticeStarted(NoriBridgeHeadNoticeStarted),
+    NoriBridgeHeadNoticeWarning(NoriBridgeHeadNoticeWarning),
+    NoriBridgeHeadNoticeJobCreated(NoriBridgeHeadNoticeJobCreated),
+    NoriBridgeHeadNoticeJobSucceeded(NoriBridgeHeadNoticeJobSucceeded),
+    NoriBridgeHeadNoticeJobFailed(NoriBridgeHeadNoticeJobFailed),
+    NoriBridgeHeadNoticeFinalityTransitionDetected(NoriBridgeHeadNoticeFinalityTransitionDetected),
+    NoriBridgeHeadNoticeAdvanceRequested(NoriBridgeHeadNoticeAdvanceRequested),
+    NoriBridgeHeadNoticeHeadAdvanced(NoriBridgeHeadNoticeHeadAdvanced)    
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct NoriBridgeHeadMessage {
+    base: NoriBridgeHeadNoticeBaseMessage,
+    extension: NoriBridgeHeadMessageExtension
+}
+
+
+
 /// Proof types
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoriBridgeHeadProofMessage {

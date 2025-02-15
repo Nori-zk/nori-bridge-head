@@ -9,10 +9,6 @@ authors.workspace = true
 name = "nbhead"
 path = "./bin/nori_bridge_head.rs"
 
-[[bin]]
-name = "asyncjobs"
-path = "./bin/job_pattern.rs"
-
 [dependencies]
 dotenv = { workspace = true }
 sp1-sdk = { workspace = true }

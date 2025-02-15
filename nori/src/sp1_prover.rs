@@ -1,12 +1,22 @@
-use alloy_primitives::{FixedBytes, B256};use helios_ethereum::rpc::ConsensusRpc;
+use crate::external::{get_checkpoint, get_client, get_finality_updates};
+use alloy_primitives::{FixedBytes, B256};
+use anyhow::{bail, Error, Result};
+use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use sp1_helios_primitives::types::ProofInputs;
 use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1Stdin};
-use anyhow::{bail, Error, Result};
 use tree_hash::TreeHash;
-use crate::external::{get_finality_updates,get_checkpoint, get_client};
 
 pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
+
+/*
+Panic example
+
+[2025-02-14T17:33:31Z INFO  nori::bridge_head_event_loop] Cancelling auto advance for job '2'.
+thread 'tokio-runtime-worker' panicked at /home/code/nori/nori-bridge-head/script/src/lib.rs:109:40:
+called `Result::unwrap()` on an `Err` value: could not fetch bootstrap: rpc error on method: bootstrap, message: status: 404, message: LC bootstrap unavailable
+
+*/
 
 pub async fn finality_update_job(
     slot: u64,
@@ -47,14 +57,16 @@ pub async fn finality_update_job(
             info!("Applying optimization, skipping sync committee update.");
             let temp_update = sync_committee_updates.remove(0);
 
-            heliod_update_client.verify_update(&temp_update).map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
+            heliod_update_client
+                .verify_update(&temp_update)
+                .map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
             heliod_update_client.apply_update(&temp_update);
         }
     }
 
     // Create program inputs
     info!("Building sp1 proof inputs.");
-    
+
     let expected_current_slot = heliod_update_client.expected_current_slot();
     let inputs = ProofInputs {
         sync_committee_updates,
@@ -70,20 +82,22 @@ pub async fn finality_update_job(
     info!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
 
-    let proof: SP1ProofWithPublicValues = tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
-        // Setup prover client
-        info!("Setting up prover client.");
-        let mut stdin = SP1Stdin::new();
-        stdin.write_slice(&encoded_proof_inputs);
-        let prover_client = ProverClient::from_env();
-        let (pk, _) = prover_client.setup(ELF); // FIXME this is expensive! What about a persistant thread pool.
+    let proof: SP1ProofWithPublicValues =
+        tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
+            // Setup prover client
+            info!("Setting up prover client.");
+            let mut stdin = SP1Stdin::new();
+            stdin.write_slice(&encoded_proof_inputs);
+            let prover_client = ProverClient::from_env();
+            let (pk, _) = prover_client.setup(ELF); // FIXME this is expensive! What about a persistant thread pool.
 
-        // Generate proof.
-        info!("Running sp1 proof.");
-        let proof = prover_client.prove(&pk, &stdin).plonk().run()?;
-        
-        Ok(proof) // Explicitly return proof
-    }).await??; // Await the blocking task and propagate errors properly
+            // Generate proof.
+            info!("Running sp1 proof.");
+            let proof = prover_client.prove(&pk, &stdin).plonk().run()?;
+
+            Ok(proof) // Explicitly return proof
+        })
+        .await??; // Await the blocking task and propagate errors properly
 
     Ok(proof)
 }
