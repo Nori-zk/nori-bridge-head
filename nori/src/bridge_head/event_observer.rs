@@ -4,30 +4,30 @@ use anyhow::{Context, Result};
 use log::info;
 use tokio::sync::Mutex;
 use crate::utils::handle_nori_proof;
-use super::{api::BridgeHead, event_loop::NoriBridgeHeadProofMessage, notice_messages::{NoriBridgeHeadNoticeMessage, NoriBridgeHeadMessageExtension}};
+use super::{api::{BridgeHead, NoriBridgeHeadProofMessage}, event_handle::NoriBridgeHeadHandle, notice_messages::{NoriBridgeHeadMessageExtension, NoriBridgeHeadNoticeMessage}};
 
-/// Trait
+/// Observer trait
 #[async_trait]
-pub trait NoriBridgeHeadEventProducer: Send + Sync {
+pub trait NoriBridgeHeadEventObserver: Send + Sync {
     async fn on_proof(&mut self, proof_job_data: NoriBridgeHeadProofMessage) -> Result<()>;
     async fn on_notice(&mut self, notice_data: NoriBridgeHeadNoticeMessage) -> Result<()>;
 }
 
-/// Example event handler
+/// Example event observer
 
-pub struct ExampleEventHandler {
-    bridge_head: Arc<Mutex<BridgeHead>>, // Use Arc<Mutex<NoriBridgeHead>> for shared ownership
+pub struct ExampleEventObserver {
+    bridge_head: NoriBridgeHeadHandle,
 }
 
-impl ExampleEventHandler {
-    pub fn new(bridge_head: Arc<Mutex<BridgeHead>>) -> Self {
+impl ExampleEventObserver {
+    pub fn new(bridge_head: NoriBridgeHeadHandle) -> Self {
         Self { bridge_head }
     }
 }
 
 #[async_trait]
-impl NoriBridgeHeadEventProducer
-    for ExampleEventHandler
+impl NoriBridgeHeadEventObserver
+    for ExampleEventObserver
 {
     async fn on_proof(&mut self, proof_data: NoriBridgeHeadProofMessage) -> Result<()> {
         println!("PROOF| {}", proof_data.slot);
@@ -35,9 +35,7 @@ impl NoriBridgeHeadEventProducer
         info!("Saving Nori sp1 proof");
         handle_nori_proof(&proof_data.proof, proof_data.slot).await?;
 
-        // Acquire lock and call advance()
-        let mut bridge = self.bridge_head.lock().await;
-        bridge.advance().await?;
+        self.bridge_head.advance().await;
 
         Ok(())
     }

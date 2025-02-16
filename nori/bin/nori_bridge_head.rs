@@ -1,14 +1,8 @@
 use anyhow::Result;
 use log::info;
-use nori::{
-    bridge_head::BridgeHead,
-    event_handler:: ExampleEventHandler,
-    utils::enable_logging_from_cargo_run,
-};
+use nori::{bridge_head::{api::BridgeHead, event_observer::ExampleEventObserver}, utils::enable_logging_from_cargo_run};
 use std::process;
-use std::sync::Arc;
-use tokio::{signal::ctrl_c, sync::Mutex};
-
+use tokio::signal::ctrl_c;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,29 +11,18 @@ async fn main() -> Result<()> {
 
     info!("Starting");
 
-    let bridge_head = Arc::new(Mutex::new(BridgeHead::new().await));
+    let (bridge_head_handle, bridge_head) = BridgeHead::new().await;
 
     info!("Inited bridge head");
 
-    // Create the ProofListener
-    let proof_listener = ExampleEventHandler::new(bridge_head.clone());
+    let bridge_head_observer = ExampleEventObserver::new(bridge_head_handle);
 
-    info!("Inited proof listener");
+    info!("Inited bridge head observer");
 
-    // Add the ProofListener as a boxed listener
-    let mut bridge_head_guard = bridge_head.lock().await;
-
-    info!("Locked bridge head");
-
-    info!("Starting nori event loop.");
+    info!("Starting nori event loop, with observer.");
 
     // Start the event loop
-    bridge_head_guard.run(proof_listener).await;
-
-    info!("Adding proof listener");
-
-       // Drop the guard
-    drop(bridge_head_guard);
+    tokio::spawn(bridge_head.run(Box::new(bridge_head_observer)));
 
     info!("Waiting for exit.");
 

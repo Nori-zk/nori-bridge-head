@@ -1,2 +1,2 @@
-pub mod event_loop;
 pub mod api;
+pub mod event_observer;
