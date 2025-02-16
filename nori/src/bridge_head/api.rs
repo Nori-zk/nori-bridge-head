@@ -23,9 +23,9 @@ impl BridgeHead {
         }
     }
 
-    pub async fn run(&mut self, listener: impl NoriBridgeHeadEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage> + Send + Sync + 'static) {
+    pub async fn run(&mut self, listener: impl NoriBridgeHeadEventProducer + Send + Sync + 'static) {
         if !self.loop_running {
-            let boxed_listener: Box<dyn NoriBridgeHeadEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage> + Send + Sync> = Box::new(listener);
+            let boxed_listener: Box<dyn NoriBridgeHeadEventProducer + Send + Sync> = Box::new(listener);
             let (tx, rx) = mpsc::channel(1);
             let event_loop = BridgeHeadEventLoop::new(rx, boxed_listener).await;
             self.event_loop_tx = tx;

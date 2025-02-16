@@ -8,9 +8,9 @@ use super::{api::BridgeHead, event_loop::NoriBridgeHeadProofMessage, notice_mess
 
 /// Trait
 #[async_trait]
-pub trait NoriBridgeHeadEventProducer<T: Clone, Q: Clone>: Send + Sync {
-    async fn on_proof(&mut self, proof_job_data: T) -> Result<()>;
-    async fn on_notice(&mut self, notice_data: Q) -> Result<()>;
+pub trait NoriBridgeHeadEventProducer: Send + Sync {
+    async fn on_proof(&mut self, proof_job_data: NoriBridgeHeadProofMessage) -> Result<()>;
+    async fn on_notice(&mut self, notice_data: NoriBridgeHeadNoticeMessage) -> Result<()>;
 }
 
 /// Example event handler
@@ -26,7 +26,7 @@ impl ExampleEventHandler {
 }
 
 #[async_trait]
-impl NoriBridgeHeadEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+impl NoriBridgeHeadEventProducer
     for ExampleEventHandler
 {
     async fn on_proof(&mut self, proof_data: NoriBridgeHeadProofMessage) -> Result<()> {

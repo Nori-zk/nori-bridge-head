@@ -1,5 +1,19 @@
+use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
+use super::event_handler::NoriBridgeHeadEventProducer;
+use super::notice_messages::{
+    get_nori_notice_message_type, NoriBridgeHeadMessageExtension,
+    NoriBridgeHeadNoticeAdvanceRequested, NoriBridgeHeadNoticeBaseMessage,
+    NoriBridgeHeadNoticeFinalityTransitionDetected, NoriBridgeHeadNoticeHeadAdvanced,
+    NoriBridgeHeadNoticeJobCreated, NoriBridgeHeadNoticeJobFailed,
+    NoriBridgeHeadNoticeJobSucceeded, NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
+};
+use crate::beacon_finality_change_detector::api::BeaconFinalityChangeEventListener;
+use crate::helios::{get_client_latest_finality_head, get_latest_finality_head};
+use crate::proof_outputs_decoder::DecodedProofOutputs;
+use crate::sp1_prover::finality_update_job;
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
+use async_trait::async_trait;
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::{consensus::Inner, rpc::http_rpc::HttpRpc};
@@ -10,20 +24,6 @@ use sp1_sdk::SP1ProofWithPublicValues;
 use std::{collections::HashMap, env};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use crate::beacon_finality_change_detector::api::BeaconFinalityChangeEventListener;
-use crate::helios::{get_client_latest_finality_head, get_latest_finality_head};
-use crate::sp1_prover::finality_update_job;
-use crate::proof_outputs_decoder::DecodedProofOutputs;
-use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::notice_messages::{
-    get_nori_notice_message_type, NoriBridgeHeadMessageExtension,
-    NoriBridgeHeadNoticeAdvanceRequested, NoriBridgeHeadNoticeBaseMessage,
-    NoriBridgeHeadNoticeFinalityTransitionDetected, NoriBridgeHeadNoticeHeadAdvanced,
-    NoriBridgeHeadNoticeJobCreated, NoriBridgeHeadNoticeJobFailed,
-    NoriBridgeHeadNoticeJobSucceeded, NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
-};
-use super::event_handler::NoriBridgeHeadEventProducer;
-use async_trait::async_trait;
 
 const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
 
@@ -33,7 +33,7 @@ pub struct NoriBridgeHeadProofMessage {
     pub slot: u64,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
-    pub next_sync_committee: FixedBytes<32>
+    pub next_sync_committee: FixedBytes<32>,
 }
 struct ProverJobOutput {
     proof: SP1ProofWithPublicValues,
@@ -72,22 +72,14 @@ pub struct BridgeHeadEventLoop {
     next_sync_committee: FixedBytes<32>,
     prover_jobs: HashMap<u64, ProverJob>,
     helios_polling_client: Inner<MainnetConsensusSpec, HttpRpc>,
-    event_listener: Box<
-        dyn NoriBridgeHeadEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
-            + Send
-            + Sync,
-    >,
+    event_listener: Box<dyn NoriBridgeHeadEventProducer + Send + Sync>,
     command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
 }
 
 impl BridgeHeadEventLoop {
     pub async fn new(
         command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
-        listener: Box<
-            dyn NoriBridgeHeadEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
-                + Send
-                + Sync,
-        >,
+        listener: Box<dyn NoriBridgeHeadEventProducer + Send + Sync>,
     ) -> Self {
         dotenv::dotenv().ok();
 
@@ -303,7 +295,7 @@ impl BridgeHeadEventLoop {
                     slot,
                     proof,
                     execution_state_root: proof_outputs.execution_state_root,
-                    next_sync_committee: proof_outputs.next_sync_committee_hash
+                    next_sync_committee: proof_outputs.next_sync_committee_hash,
                 })
                 .await;
 
@@ -578,12 +570,9 @@ impl BridgeHeadEventLoop {
     }
 }
 
-
 // BeaconFinalityChangeEventListener
 
 #[async_trait]
 impl BeaconFinalityChangeEventListener for BridgeHeadEventLoop {
-    async fn on_beacon_change(&mut self, slot: u64) {
-        
-    }
+    async fn on_beacon_change(&mut self, slot: u64) {}
 }
