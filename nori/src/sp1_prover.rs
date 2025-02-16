@@ -1,4 +1,4 @@
-use crate::external::{get_checkpoint, get_client, get_finality_updates};
+use crate::helios::{get_checkpoint, get_client, get_finality_updates};
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{bail, Error, Result};
 use helios_ethereum::rpc::ConsensusRpc;

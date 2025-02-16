@@ -3,11 +3,12 @@ use async_trait::async_trait;
 use anyhow::{Context, Result};
 use log::info;
 use tokio::sync::Mutex;
-use crate::{bridge_head::BridgeHead, bridge_head_event_loop::NoriBridgeHeadProofMessage, notice_messages::{NoriBridgeHeadMessageExtension, NoriBridgeHeadNoticeMessage}, utils::handle_nori_proof};
+use crate::{bridge_head::notice_messages::NoriBridgeHeadMessageExtension, utils::handle_nori_proof};
+use super::{api::BridgeHead, event_loop::NoriBridgeHeadProofMessage, notice_messages::NoriBridgeHeadNoticeMessage};
 
 /// Trait
 #[async_trait]
-pub trait NoriBridgeRabbitEventProducer<T: Clone, Q: Clone>: Send + Sync {
+pub trait NoriBridgeHeadEventProducer<T: Clone, Q: Clone>: Send + Sync {
     async fn on_proof(&mut self, proof_job_data: T) -> Result<()>;
     async fn on_notice(&mut self, notice_data: Q) -> Result<()>;
 }
@@ -25,7 +26,7 @@ impl ExampleEventHandler {
 }
 
 #[async_trait]
-impl NoriBridgeRabbitEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+impl NoriBridgeHeadEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
     for ExampleEventHandler
 {
     async fn on_proof(&mut self, proof_data: NoriBridgeHeadProofMessage) -> Result<()> {

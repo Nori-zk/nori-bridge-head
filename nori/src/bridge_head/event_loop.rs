@@ -1,14 +1,14 @@
-use crate::notice_messages::{
+use super::notice_messages::{
     get_nori_notice_message_type, NoriBridgeHeadMessageExtension,
     NoriBridgeHeadNoticeAdvanceRequested, NoriBridgeHeadNoticeBaseMessage,
     NoriBridgeHeadNoticeFinalityTransitionDetected, NoriBridgeHeadNoticeHeadAdvanced,
     NoriBridgeHeadNoticeJobCreated, NoriBridgeHeadNoticeJobFailed,
     NoriBridgeHeadNoticeJobSucceeded, NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
 };
+use crate::bridge_head::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
+use crate::helios::{get_client_latest_finality_head, get_latest_finality_head};
 use crate::sp1_prover::finality_update_job;
-use crate::{
-    event_handler::NoriBridgeRabbitEventProducer, proof_outputs_decoder::DecodedProofOutputs,
-};
+use crate::proof_outputs_decoder::DecodedProofOutputs;
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
@@ -24,14 +24,9 @@ use std::{collections::HashMap, env, fs::File, io::Read, path::Path};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-const NB_CHECKPOINT_FILE: &str = "nb_checkpoint.json";
-const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
+use super::event_handler::NoriBridgeHeadEventProducer;
 
-#[derive(Serialize, Deserialize)]
-pub struct NoriBridgeCheckpoint {
-    slot_head: u64,
-    next_sync_committee: FixedBytes<32>,
-}
+const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
 
 /// Proof types
 #[derive(Serialize, Deserialize, Clone)]
@@ -79,7 +74,7 @@ pub struct BridgeHeadEventLoop {
     prover_jobs: HashMap<u64, ProverJob>,
     helios_polling_client: Inner<MainnetConsensusSpec, HttpRpc>,
     event_listener: Box<
-        dyn NoriBridgeRabbitEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+        dyn NoriBridgeHeadEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
             + Send
             + Sync,
     >,
@@ -90,7 +85,7 @@ impl BridgeHeadEventLoop {
     pub async fn new(
         command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
         listener: Box<
-            dyn NoriBridgeRabbitEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+            dyn NoriBridgeHeadEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
                 + Send
                 + Sync,
         >,
@@ -108,17 +103,16 @@ impl BridgeHeadEventLoop {
         let mut next_sync_committee = FixedBytes::<32>::default();
 
         // Start procedure
-        if BridgeHeadEventLoop::nb_checkpoint_exists(NB_CHECKPOINT_FILE) {
+        if nb_checkpoint_exists() {
             // Warm start procedure
             info!("Loading nori slot checkpoint from file.");
-            let nb_checkpoint =
-                BridgeHeadEventLoop::load_nb_checkpoint(NB_CHECKPOINT_FILE).unwrap();
+            let nb_checkpoint = load_nb_checkpoint().unwrap();
             current_head = nb_checkpoint.slot_head;
             next_sync_committee = nb_checkpoint.next_sync_committee;
         } else {
             // Cold start procedure
             info!("Resorting to cold start procedure.");
-            current_head = BridgeHeadEventLoop::get_cold_finality_current_head().await;
+            current_head = get_latest_finality_head().await.unwrap();
         }
 
         // Startup info
@@ -149,75 +143,6 @@ impl BridgeHeadEventLoop {
         }
     }
 
-    /// Utilities
-
-    async fn get_cold_finality_current_head() -> u64 {
-        // Get latest beacon checkpoint
-        let helios_checkpoint = get_latest_checkpoint().await;
-
-        // Get the client from the beacon checkpoint
-        let helios_client = get_client(helios_checkpoint).await;
-
-        // Get slot head from checkpoint
-        helios_client.store.finalized_header.clone().beacon().slot
-    }
-
-    async fn check_finality_next_head(&self) -> Result<u64> {
-        // Get finality slot head
-        info!("Polling helios finality slot head.");
-        let finality_update: FinalityUpdate<MainnetConsensusSpec> = self
-            .helios_polling_client
-            .rpc
-            .get_finality_update()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
-
-        // Extract latest slot
-        Ok(finality_update.finalized_header.beacon().slot)
-    }
-
-    // Static method to check if the checkpoint file exists
-    fn nb_checkpoint_exists(nb_checkpoint_location: &str) -> bool {
-        Path::new(nb_checkpoint_location).exists()
-    }
-
-    // Static method to load the checkpoint from file
-    fn load_nb_checkpoint(nb_checkpoint_location: &str) -> Result<NoriBridgeCheckpoint> {
-        // Open the checkpoint file
-        let mut file =
-            File::open(nb_checkpoint_location).expect("Failed to open nori checkpoint file.");
-
-        // Read the contents into a Vec<u8>
-        let mut serialized_checkpoint = Vec::new();
-        file.read_to_end(&mut serialized_checkpoint)
-            .expect("Failed to read nori checkpoint file.");
-
-        // Deserialize the checkpoint data using serde_json (not serde_cbor)
-        let nb_checkpoint: NoriBridgeCheckpoint = serde_json::from_slice(&serialized_checkpoint)
-            .expect("Failed to deserialize nori checkpoint.");
-
-        Ok(nb_checkpoint)
-    }
-
-    fn save_nb_checkpoint(&self) {
-        // Define the current checkpoint
-        let checkpoint = NoriBridgeCheckpoint {
-            slot_head: self.current_head,
-            next_sync_committee: self.next_sync_committee,
-        };
-
-        // Serialize the checkpoint to a byte vector
-        let serialized_nb_checkpoint =
-            serde_json::to_string(&checkpoint).expect("Failed to serialize nori checkpoint.");
-
-        // Write the serialized data to the file specified by `checkpoint_location`
-        std::fs::write(NB_CHECKPOINT_FILE, &serialized_nb_checkpoint)
-            .map_err(|e| anyhow::anyhow!("Failed to write to checkpoint file: {}", e))
-            .unwrap();
-
-        info!("Nori bridge checkpoint saved successfully.");
-    }
-
     /// Event dispatchers
 
     //  Emit proofs
@@ -226,7 +151,6 @@ impl BridgeHeadEventLoop {
         payload: NoriBridgeHeadProofMessage,
     ) -> Result<()> {
         let _ = self.event_listener.as_mut().on_proof(payload).await;
-
         Ok(())
     }
 
@@ -254,9 +178,7 @@ impl BridgeHeadEventLoop {
             base: base_message,
             extension,
         };
-
         let _ = self.event_listener.as_mut().on_notice(full_message).await;
-
         Ok(())
     }
 
@@ -373,7 +295,7 @@ impl BridgeHeadEventLoop {
             }
             // Save the checkpoint
             info!("Saving checkpoint.");
-            self.save_nb_checkpoint();
+            save_nb_checkpoint(self.current_head, self.next_sync_committee);
 
             info!("Triggering proof listeners");
             // Emit proof
@@ -586,7 +508,8 @@ impl BridgeHeadEventLoop {
             // Check state of the head
             let now = Instant::now(); // Capture the current time at the start of the loop
             if now.duration_since(last_check_time).as_secs_f64() >= self.polling_interval_sec {
-                match self.check_finality_next_head().await {
+                info!("Polling helios finality slot head.");
+                match get_client_latest_finality_head(&self.helios_polling_client).await {
                     Ok(next_head) => {
                         // Only run if the RPC didnt give us an old value
                         if next_head >= self.last_beacon_finality_head_checked {

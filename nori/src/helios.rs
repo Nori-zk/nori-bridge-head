@@ -2,7 +2,7 @@ use alloy_primitives::B256;
 use helios_consensus_core::{
     calc_sync_period,
     consensus_spec::MainnetConsensusSpec,
-    types::{BeaconBlock, Update},
+    types::{BeaconBlock, FinalityUpdate, Update},
 };
 use helios_ethereum::rpc::ConsensusRpc;
 use helios_ethereum::{
@@ -15,6 +15,29 @@ use tokio::sync::{mpsc::channel, watch};
 use tree_hash::TreeHash;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 use anyhow::{Result, Error};
+
+pub async fn get_latest_finality_head() -> Result<u64> {
+    // Get latest beacon checkpoint
+    let latest_checkpoint = get_latest_checkpoint().await?;
+
+    // Get the client from the beacon checkpoint
+    let helios_client = get_client(latest_checkpoint).await?;
+
+    // Get slot head from checkpoint
+    Ok(helios_client.store.finalized_header.clone().beacon().slot)
+}
+
+pub async fn get_client_latest_finality_head(client: &Inner<MainnetConsensusSpec, HttpRpc>) -> Result<u64> {
+    // Get finality slot head
+    let finality_update: FinalityUpdate<MainnetConsensusSpec> = client
+        .rpc
+        .get_finality_update()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
+
+    // Extract latest slot
+    Ok(finality_update.finalized_header.beacon().slot)
+}
 
 pub async fn get_finality_updates(
     client: &Inner<MainnetConsensusSpec, HttpRpc>,
