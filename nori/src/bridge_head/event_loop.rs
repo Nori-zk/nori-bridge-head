@@ -1,3 +1,20 @@
+use alloy_primitives::FixedBytes;
+use anyhow::{Error, Result};
+use chrono::{SecondsFormat, Utc};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
+use helios_ethereum::{consensus::Inner, rpc::http_rpc::HttpRpc};
+use log::{error, info, warn};
+use serde::{Deserialize, Serialize};
+use sp1_helios_script::{get_checkpoint, get_client};
+use sp1_sdk::SP1ProofWithPublicValues;
+use std::{collections::HashMap, env};
+use tokio::sync::mpsc;
+use tokio::time::Instant;
+use crate::beacon_finality_change_detector::api::BeaconFinalityChangeEventListener;
+use crate::helios::{get_client_latest_finality_head, get_latest_finality_head};
+use crate::sp1_prover::finality_update_job;
+use crate::proof_outputs_decoder::DecodedProofOutputs;
+use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
 use super::notice_messages::{
     get_nori_notice_message_type, NoriBridgeHeadMessageExtension,
     NoriBridgeHeadNoticeAdvanceRequested, NoriBridgeHeadNoticeBaseMessage,
@@ -5,26 +22,8 @@ use super::notice_messages::{
     NoriBridgeHeadNoticeJobCreated, NoriBridgeHeadNoticeJobFailed,
     NoriBridgeHeadNoticeJobSucceeded, NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
 };
-use crate::bridge_head::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use crate::helios::{get_client_latest_finality_head, get_latest_finality_head};
-use crate::sp1_prover::finality_update_job;
-use crate::proof_outputs_decoder::DecodedProofOutputs;
-use alloy_primitives::FixedBytes;
-use anyhow::{Error, Result};
-use chrono::{SecondsFormat, Utc};
-use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use helios_consensus_core::types::FinalityUpdate;
-use helios_ethereum::rpc::ConsensusRpc;
-use helios_ethereum::{consensus::Inner, rpc::http_rpc::HttpRpc};
-use log::{error, info, warn};
-use serde::{Deserialize, Serialize};
-use sp1_helios_script::{get_checkpoint, get_client, get_latest_checkpoint};
-use sp1_sdk::SP1ProofWithPublicValues;
-use std::{collections::HashMap, env, fs::File, io::Read, path::Path};
-use tokio::sync::mpsc;
-use tokio::time::Instant;
-
 use super::event_handler::NoriBridgeHeadEventProducer;
+use async_trait::async_trait;
 
 const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
 
@@ -576,5 +575,15 @@ impl BridgeHeadEventLoop {
             // Yield to other tasks instead of sleeping
             tokio::task::yield_now().await;
         }
+    }
+}
+
+
+// BeaconFinalityChangeEventListener
+
+#[async_trait]
+impl BeaconFinalityChangeEventListener for BridgeHeadEventLoop {
+    async fn on_beacon_change(&mut self, slot: u64) {
+        
     }
 }

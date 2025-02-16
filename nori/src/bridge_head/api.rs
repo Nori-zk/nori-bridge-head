@@ -2,6 +2,8 @@ use log::warn;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc;
 use anyhow::Result;
+use crate::beacon_finality_change_detector::event_loop::FinalityChangeDetectorEventLoop;
+
 use super::event_handler::NoriBridgeHeadEventProducer;
 use super::event_loop::{BridgeHeadEventLoop, NoriBridgeEventLoopCommand, NoriBridgeHeadProofMessage};
 use super::notice_messages::NoriBridgeHeadNoticeMessage;
@@ -27,6 +29,13 @@ impl BridgeHead {
             let (tx, rx) = mpsc::channel(1);
             let event_loop = BridgeHeadEventLoop::new(rx, boxed_listener).await;
             self.event_loop_tx = tx;
+
+            // this event loop needs to go into the beacon event loop as an argument.... and it can call spawn within the loop
+            // and then i can put it into the event loop below??
+
+            //let boxed_listener= Box::new(event_loop);
+            //let beacon_change_event_loop = FinalityChangeDetectorEventLoop::new(boxed_listener); // this about the run methods... although we would need to enforce that the trait had a run method too
+
             tokio::spawn(event_loop.run_loop());
             self.loop_running = true;
         }

@@ -8,6 +8,7 @@ use super::event_loop::FinalityChangeDetectorEventLoop;
 #[async_trait]
 pub trait BeaconFinalityChangeEventListener {
     async fn on_beacon_change(&mut self, slot: u64) {}
+    // run method goes here...
 }
 
 pub struct FinalityChangeDetector {}

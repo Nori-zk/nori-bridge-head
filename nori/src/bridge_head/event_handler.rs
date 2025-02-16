@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use anyhow::{Context, Result};
 use log::info;
 use tokio::sync::Mutex;
-use crate::{bridge_head::notice_messages::NoriBridgeHeadMessageExtension, utils::handle_nori_proof};
-use super::{api::BridgeHead, event_loop::NoriBridgeHeadProofMessage, notice_messages::NoriBridgeHeadNoticeMessage};
+use crate::utils::handle_nori_proof;
+use super::{api::BridgeHead, event_loop::NoriBridgeHeadProofMessage, notice_messages::{NoriBridgeHeadNoticeMessage, NoriBridgeHeadMessageExtension}};
 
 /// Trait
 #[async_trait]
