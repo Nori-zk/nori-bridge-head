@@ -7,7 +7,7 @@ use crate::{bridge_head::BridgeHead, bridge_head_event_loop::NoriBridgeHeadProof
 
 /// Trait
 #[async_trait]
-pub trait NoriBridgeEventListener<T: Clone, Q: Clone>: Send + Sync {
+pub trait NoriBridgeRabbitEventProducer<T: Clone, Q: Clone>: Send + Sync {
     async fn on_proof(&mut self, proof_job_data: T) -> Result<()>;
     async fn on_notice(&mut self, notice_data: Q) -> Result<()>;
 }
@@ -25,7 +25,7 @@ impl ExampleEventHandler {
 }
 
 #[async_trait]
-impl NoriBridgeEventListener<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+impl NoriBridgeRabbitEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
     for ExampleEventHandler
 {
     async fn on_proof(&mut self, proof_data: NoriBridgeHeadProofMessage) -> Result<()> {

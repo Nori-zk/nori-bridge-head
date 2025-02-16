@@ -7,7 +7,7 @@ use crate::notice_messages::{
 };
 use crate::sp1_prover::finality_update_job;
 use crate::{
-    event_handler::NoriBridgeEventListener, proof_outputs_decoder::DecodedProofOutputs,
+    event_handler::NoriBridgeRabbitEventProducer, proof_outputs_decoder::DecodedProofOutputs,
 };
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
@@ -39,6 +39,7 @@ pub struct NoriBridgeHeadProofMessage {
     pub slot: u64,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
+    pub next_sync_committee: FixedBytes<32>
 }
 struct ProverJobOutput {
     proof: SP1ProofWithPublicValues,
@@ -78,7 +79,7 @@ pub struct BridgeHeadEventLoop {
     prover_jobs: HashMap<u64, ProverJob>,
     helios_polling_client: Inner<MainnetConsensusSpec, HttpRpc>,
     event_listener: Box<
-        dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+        dyn NoriBridgeRabbitEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
             + Send
             + Sync,
     >,
@@ -88,8 +89,8 @@ pub struct BridgeHeadEventLoop {
 impl BridgeHeadEventLoop {
     pub async fn new(
         command_receiver: mpsc::Receiver<NoriBridgeEventLoopCommand>,
-        proof_listener: Box<
-            dyn NoriBridgeEventListener<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
+        listener: Box<
+            dyn NoriBridgeRabbitEventProducer<NoriBridgeHeadProofMessage, NoriBridgeHeadNoticeMessage>
                 + Send
                 + Sync,
         >,
@@ -107,7 +108,6 @@ impl BridgeHeadEventLoop {
         let mut next_sync_committee = FixedBytes::<32>::default();
 
         // Start procedure
-        let bootstrap: bool;
         if BridgeHeadEventLoop::nb_checkpoint_exists(NB_CHECKPOINT_FILE) {
             // Warm start procedure
             info!("Loading nori slot checkpoint from file.");
@@ -115,12 +115,10 @@ impl BridgeHeadEventLoop {
                 BridgeHeadEventLoop::load_nb_checkpoint(NB_CHECKPOINT_FILE).unwrap();
             current_head = nb_checkpoint.slot_head;
             next_sync_committee = nb_checkpoint.next_sync_committee;
-            bootstrap = false;
         } else {
             // Cold start procedure
             info!("Resorting to cold start procedure.");
             current_head = BridgeHeadEventLoop::get_cold_finality_current_head().await;
-            bootstrap = true;
         }
 
         // Startup info
@@ -145,7 +143,7 @@ impl BridgeHeadEventLoop {
             last_finality_transition_instant: Instant::now(),
             next_sync_committee,
             helios_polling_client,
-            event_listener: proof_listener,
+            event_listener: listener,
             prover_jobs: HashMap::new(),
             command_receiver,
         }
@@ -384,6 +382,7 @@ impl BridgeHeadEventLoop {
                     slot,
                     proof,
                     execution_state_root: proof_outputs.execution_state_root,
+                    next_sync_committee: proof_outputs.next_sync_committee_hash
                 })
                 .await;
 
