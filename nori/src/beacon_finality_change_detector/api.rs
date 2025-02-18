@@ -1,23 +1,26 @@
-use super::event_observer::BeaconFinalityChangeEventObserver;
-use anyhow::Result;
-use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::FinalityUpdate};
+use crate::helios::{get_client, get_client_latest_finality_head, get_latest_checkpoint};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::{
     consensus::Inner,
-    rpc::{http_rpc::HttpRpc, ConsensusRpc},
+    rpc::http_rpc::HttpRpc,
 };
 use log::{error, info};
-use sp1_helios_script::{get_client, get_latest_checkpoint};
 use std::{env, time::Duration};
+use super::observer::BeaconFinalityChangeEventObserver;
 
-pub struct FinalityChangeDetectorEventLoop {
+pub struct FinalityChangeDetector {
     current_slot: u64,
     helios_polling_client: Inner<MainnetConsensusSpec, HttpRpc>,
     polling_interval_sec: f64,
     observer: Option<Box<dyn BeaconFinalityChangeEventObserver + Send + Sync>>,
 }
 
-impl FinalityChangeDetectorEventLoop {
-    pub async fn new() -> Self {
+pub struct FinalityChangeMessage {
+    pub slot: u64,
+}
+
+impl FinalityChangeDetector {
+    pub async fn new(current_slot: u64) -> Self {
         dotenv::dotenv().ok();
 
         // Define sleep interval
@@ -27,17 +30,10 @@ impl FinalityChangeDetectorEventLoop {
             .expect("Failed to parse NORI_HELIOS_POLLING_INTERVAL as f64.");
 
         // Get latest beacon checkpoint
-        let helios_checkpoint = get_latest_checkpoint().await;
+        let helios_checkpoint = get_latest_checkpoint().await.unwrap();
 
         // Get the client from the beacon checkpoint
-        let helios_polling_client = get_client(helios_checkpoint).await;
-
-        let current_slot = helios_polling_client
-            .store
-            .finalized_header
-            .clone()
-            .beacon()
-            .slot;
+        let helios_polling_client = get_client(helios_checkpoint).await.unwrap();
 
         Self {
             current_slot,
@@ -47,39 +43,20 @@ impl FinalityChangeDetectorEventLoop {
         }
     }
 
-    async fn check_finality_next_head(&self) -> Result<u64> {
-        // Get finality slot head
-        info!("Polling helios finality slot head.");
-        let finality_update: FinalityUpdate<MainnetConsensusSpec> = self
-            .helios_polling_client
-            .rpc
-            .get_finality_update()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
-
-        // Extract latest slot
-        Ok(finality_update.finalized_header.beacon().slot)
-    }
-
-    pub async fn run_loop(
+    pub async fn run(
         mut self,
         observer: Box<dyn BeaconFinalityChangeEventObserver + Send + Sync>,
     ) {
+        info!("Finality change detector is starting.");
         self.observer = Some(observer);
 
-        /* Initial observation
-        if let Some(observer) = &mut self.observer {
-            observer.as_mut().on_beacon_change(self.current_slot).await;
-        }
-        */
-
         loop {
-            match self.check_finality_next_head().await {
+            match get_client_latest_finality_head(&self.helios_polling_client).await {
                 Ok(next_head) => {
                     if next_head > self.current_slot {
                         self.current_slot = next_head;
                         if let Some(observer) = &mut self.observer {
-                            observer.as_mut().on_beacon_change(next_head).await;
+                            let _ = observer.as_mut().on_beacon_change(next_head).await;
                         }
                     }
                 }
@@ -89,5 +66,6 @@ impl FinalityChangeDetectorEventLoop {
             }
             tokio::time::sleep(Duration::from_secs_f64(self.polling_interval_sec)).await;
         }
+
     }
 }

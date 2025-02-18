@@ -1,26 +1,24 @@
-use std::sync::Arc;
 use async_trait::async_trait;
 use anyhow::{Context, Result};
 use log::info;
-use tokio::sync::Mutex;
 use crate::utils::handle_nori_proof;
-use super::{api::{BridgeHead, NoriBridgeHeadProofMessage}, event_handle::NoriBridgeHeadHandle, notice_messages::{NoriBridgeHeadMessageExtension, NoriBridgeHeadNoticeMessage}};
+use super::{api::NoriBridgeHeadProofMessage, handles::NoriBridgeHeadAdvanceHandle, notice_messages::{NoriBridgeHeadMessageExtension, NoriBridgeHeadNoticeMessage}};
 
-/// Observer trait
+// Observer trait
 #[async_trait]
 pub trait NoriBridgeHeadEventObserver: Send + Sync {
     async fn on_proof(&mut self, proof_job_data: NoriBridgeHeadProofMessage) -> Result<()>;
     async fn on_notice(&mut self, notice_data: NoriBridgeHeadNoticeMessage) -> Result<()>;
 }
 
-/// Example event observer
+// Example event observer
 
 pub struct ExampleEventObserver {
-    bridge_head: NoriBridgeHeadHandle,
+    bridge_head: NoriBridgeHeadAdvanceHandle,
 }
 
 impl ExampleEventObserver {
-    pub fn new(bridge_head: NoriBridgeHeadHandle) -> Self {
+    pub fn new(bridge_head: NoriBridgeHeadAdvanceHandle) -> Self {
         Self { bridge_head }
     }
 }

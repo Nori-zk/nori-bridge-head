@@ -1,6 +1,8 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::event_handle::{NoriBridgeEventLoopCommand, NoriBridgeHeadHandle};
-use super::event_observer::{self, NoriBridgeHeadEventObserver};
+use super::handles::{
+    NoriBridgeEventLoopCommand, NoriBridgeHeadAdvanceHandle,
+    NoriBridgeHeadBeaconFinalityChangeHandle,
+};
 use super::notice_messages::{
     get_nori_notice_message_type, NoriBridgeHeadMessageExtension,
     NoriBridgeHeadNoticeAdvanceRequested, NoriBridgeHeadNoticeBaseMessage,
@@ -8,12 +10,12 @@ use super::notice_messages::{
     NoriBridgeHeadNoticeJobCreated, NoriBridgeHeadNoticeJobFailed,
     NoriBridgeHeadNoticeJobSucceeded, NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
 };
+use super::observer::NoriBridgeHeadEventObserver;
 use crate::helios::{get_client_latest_finality_head, get_latest_finality_head};
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::finality_update_job;
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
-use async_trait::async_trait;
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::{consensus::Inner, rpc::http_rpc::HttpRpc};
@@ -72,7 +74,12 @@ pub struct BridgeHead {
 }
 
 impl BridgeHead {
-    pub async fn new() -> (NoriBridgeHeadHandle, Self) {
+    pub async fn new() -> (
+        u64,
+        NoriBridgeHeadAdvanceHandle,
+        NoriBridgeHeadBeaconFinalityChangeHandle,
+        Self,
+    ) {
         dotenv::dotenv().ok();
 
         // Define sleep interval
@@ -112,7 +119,9 @@ impl BridgeHead {
         let (command_tx, command_rx) = mpsc::channel(1);
 
         (
-            NoriBridgeHeadHandle::new(command_tx),
+            current_head,
+            NoriBridgeHeadAdvanceHandle::new(command_tx.clone()),
+            NoriBridgeHeadBeaconFinalityChangeHandle::new(command_tx),
             BridgeHead {
                 polling_interval_sec,
                 current_head,
@@ -130,6 +139,13 @@ impl BridgeHead {
                 command_rx,
             },
         )
+    }
+
+    /// Utils
+
+    // Get current head
+    pub fn current_head(self) -> u64 {
+        self.current_head
     }
 
     /// Event dispatchers
@@ -268,7 +284,7 @@ impl BridgeHead {
                     NoriBridgeHeadNoticeJobSucceeded {
                         slot,
                         job_idx,
-                        next_sync_committee: self.next_sync_committee,
+                        next_sync_committee: proof_outputs.next_sync_committee_hash,
                     },
                 ),
             )
@@ -453,6 +469,43 @@ impl BridgeHead {
             .await;
     }
 
+    async fn on_beacon_finality_change(&mut self, next_head: u64) {
+        // Have the helios finality head moved forwards
+        if next_head <= self.current_head {
+            if self.last_beacon_finality_head_checked != next_head {
+                info!(
+                    "Nori bridge head is up to date. Current head is '{}'.",
+                    self.current_head
+                );
+            }
+        } else {
+            // We have a transition!
+
+            // Notify of transition
+            let _ = self
+                .trigger_listener_with_notice(
+                    NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeFinalityTransitionDetected(
+                        NoriBridgeHeadNoticeFinalityTransitionDetected { slot: next_head },
+                    ),
+                )
+                .await;
+
+            // Update next head
+            self.next_head = next_head;
+            // Print the head change detection
+            self.last_finality_transition_instant = Instant::now();
+            info!("Helios beacon finality slot change detected. Nori bridge head is stale. Current head is: '{}' Working head is '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.working_head, self.next_head);
+            // Auto advance if nessesary
+            if self.auto_advance_index != 0 {
+                info!("Auto advance invoking job due to finality transition.");
+                // Invoke a job
+                let _ = self
+                    .create_prover_job(self.next_head, self.job_idx, self.next_sync_committee)
+                    .await;
+            }
+        }
+    }
+
     /// Event loop
 
     pub async fn run(mut self, observer: Box<dyn NoriBridgeHeadEventObserver + Send + Sync>) {
@@ -490,6 +543,10 @@ impl BridgeHead {
                         // deal with advance invocation
                         self.advance().await;
                     }
+                    NoriBridgeEventLoopCommand::BeaconFinalityChange(message) => {
+                        let next_slot = message.slot;
+                        self.on_beacon_finality_change(next_slot).await;
+                    }
                 },
                 Err(mpsc::error::TryRecvError::Empty) => {
                     // No new commands, that's fine
@@ -500,7 +557,7 @@ impl BridgeHead {
             }
 
             // Check state of the head
-            let now = Instant::now(); // Capture the current time at the start of the loop
+            /*let now = Instant::now(); // Capture the current time at the start of the loop
             if now.duration_since(last_check_time).as_secs_f64() >= self.polling_interval_sec {
                 info!("Polling helios finality slot head.");
                 match get_client_latest_finality_head(&self.helios_polling_client).await {
@@ -560,7 +617,7 @@ impl BridgeHead {
                     }
                 }
                 last_check_time = now; // Update last check time after performing the check
-            }
+            }*/
 
             // Check the status of the prover jobs
             if let Err(e) = self.check_prover_jobs().await {
