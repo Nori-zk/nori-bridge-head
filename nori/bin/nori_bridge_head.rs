@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
 
     let (current_head, bridge_head_advance_handle, bridge_head_beacon_change_handle, bridge_head) = BridgeHead::new().await;
 
-    info!("Inited bridge head observer");
+    info!("Initing bridge head observer");
 
     let bridge_head_observer = ExampleEventObserver::new(bridge_head_advance_handle);
 

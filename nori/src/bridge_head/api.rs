@@ -471,17 +471,6 @@ impl BridgeHead {
         }
 
         self.last_beacon_finality_head_checked = next_head;
-
-        /*if next_head <= self.current_head {
-            if self.last_beacon_finality_head_checked != next_head {
-                info!(
-                    "Nori bridge head is up to date. Current head is '{}'.",
-                    self.current_head
-                );
-            }
-        } else {
-
-        }*/
     }
 
     /// Event loop
