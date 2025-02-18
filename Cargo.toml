@@ -1,5 +1,5 @@
 [workspace]
-members = ["primitives", "script", "program", "nori"]
+members = ["primitives", "script", "program", "nori", "nori-bridge-head-rabbit"]
 resolver = "2"
 
 [workspace.package]
@@ -12,7 +12,7 @@ repository = "https://github.com/Nori-zk/nori-bridge-head"
 [workspace.dependencies]
 
 # nori-bridge-head
-nori-bridge-head = {path = "nori"}
+nori = {path = "nori"}
 
 # sp1-helios
 sp1-helios-script = { path = "script" }
