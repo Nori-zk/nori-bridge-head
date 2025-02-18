@@ -11,19 +11,16 @@ use super::notice_messages::{
     NoriBridgeHeadNoticeJobSucceeded, NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
 };
 use super::observer::NoriBridgeHeadEventObserver;
-use crate::helios::{get_client_latest_finality_head, get_latest_finality_head};
+use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::finality_update_job;
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
-use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use helios_ethereum::{consensus::Inner, rpc::http_rpc::HttpRpc};
 use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
-use sp1_helios_script::{get_checkpoint, get_client};
 use sp1_sdk::SP1ProofWithPublicValues;
-use std::{collections::HashMap, env};
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -472,6 +469,8 @@ impl BridgeHead {
                 .create_prover_job(self.next_head, self.job_idx, self.next_sync_committee)
                 .await;
         }
+
+        self.last_beacon_finality_head_checked = next_head;
 
         /*if next_head <= self.current_head {
             if self.last_beacon_finality_head_checked != next_head {
