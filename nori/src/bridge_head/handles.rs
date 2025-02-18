@@ -2,42 +2,42 @@ use tokio::sync::mpsc::Sender;
 use crate::beacon_finality_change_detector::api::FinalityChangeMessage;
 
 /// Event loop commands
-pub enum NoriBridgeEventLoopCommand {
+pub enum EventLoopCommand {
     Advance,
     BeaconFinalityChange(FinalityChangeMessage),
 }
 
 #[derive(Clone)]
-pub struct NoriBridgeHeadAdvanceHandle {
-    command_tx: Sender<NoriBridgeEventLoopCommand>,
+pub struct AdvanceHandle {
+    command_tx: Sender<EventLoopCommand>,
 }
 
-impl NoriBridgeHeadAdvanceHandle {
-    pub fn new(command_tx: Sender<NoriBridgeEventLoopCommand>) -> Self {
+impl AdvanceHandle {
+    pub fn new(command_tx: Sender<EventLoopCommand>) -> Self {
         Self {
             command_tx
         }
     }
 
     pub async fn advance(&self) {
-        let _ = self.command_tx.send(NoriBridgeEventLoopCommand::Advance).await;
+        let _ = self.command_tx.send(EventLoopCommand::Advance).await;
     }
 }
 
 
 #[derive(Clone)]
-pub struct NoriBridgeHeadBeaconFinalityChangeHandle {
-    command_tx: Sender<NoriBridgeEventLoopCommand>,
+pub struct BeaconFinalityChangeHandle {
+    command_tx: Sender<EventLoopCommand>,
 }
 
-impl NoriBridgeHeadBeaconFinalityChangeHandle {
-    pub fn new(command_tx: Sender<NoriBridgeEventLoopCommand>) -> Self {
+impl BeaconFinalityChangeHandle {
+    pub fn new(command_tx: Sender<EventLoopCommand>) -> Self {
         Self {
             command_tx
         }
     }
 
     pub async fn on_beacon_change(&self, slot: u64) {
-        let _ = self.command_tx.send(NoriBridgeEventLoopCommand::BeaconFinalityChange(FinalityChangeMessage { slot })).await;
+        let _ = self.command_tx.send(EventLoopCommand::BeaconFinalityChange(FinalityChangeMessage { slot })).await;
     }
 }

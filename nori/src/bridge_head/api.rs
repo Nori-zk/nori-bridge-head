@@ -1,16 +1,16 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
 use super::handles::{
-    NoriBridgeEventLoopCommand, NoriBridgeHeadAdvanceHandle,
-    NoriBridgeHeadBeaconFinalityChangeHandle,
+    EventLoopCommand, AdvanceHandle,
+    BeaconFinalityChangeHandle,
 };
 use super::notice_messages::{
-    get_nori_notice_message_type, NoriBridgeHeadMessageExtension,
-    NoriBridgeHeadNoticeAdvanceRequested, NoriBridgeHeadNoticeBaseMessage,
-    NoriBridgeHeadNoticeFinalityTransitionDetected, NoriBridgeHeadNoticeHeadAdvanced,
-    NoriBridgeHeadNoticeJobCreated, NoriBridgeHeadNoticeJobFailed,
-    NoriBridgeHeadNoticeJobSucceeded, NoriBridgeHeadNoticeMessage, NoriBridgeHeadNoticeStarted,
+    get_notice_message_type, NoticeMessageExtension,
+    NoticeAdvanceRequested, NoticeBaseMessage,
+    NoticeFinalityTransitionDetected, NoticeHeadAdvanced,
+    NoticeJobCreated, NoticeJobFailed,
+    NoticeJobSucceeded, NoticeMessage, NoticeStarted,
 };
-use super::observer::NoriBridgeHeadEventObserver;
+use super::observer::EventObserver;
 use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::finality_update_job;
@@ -28,7 +28,7 @@ const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
 
 /// Proof types
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadProofMessage {
+pub struct ProofMessage {
     pub slot: u64,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
@@ -64,15 +64,15 @@ pub struct BridgeHead {
     last_finality_transition_instant: Instant,
     next_sync_committee: FixedBytes<32>,
     prover_jobs: HashMap<u64, ProverJob>,
-    observer: Option<Box<dyn NoriBridgeHeadEventObserver + Send + Sync>>,
-    command_rx: mpsc::Receiver<NoriBridgeEventLoopCommand>,
+    observer: Option<Box<dyn EventObserver + Send + Sync>>,
+    command_rx: mpsc::Receiver<EventLoopCommand>,
 }
 
 impl BridgeHead {
     pub async fn new() -> (
         u64,
-        NoriBridgeHeadAdvanceHandle,
-        NoriBridgeHeadBeaconFinalityChangeHandle,
+        AdvanceHandle,
+        BeaconFinalityChangeHandle,
         Self,
     ) {
         // Initialise slot head / commitee vars
@@ -97,8 +97,8 @@ impl BridgeHead {
 
         (
             current_head,
-            NoriBridgeHeadAdvanceHandle::new(command_tx.clone()),
-            NoriBridgeHeadBeaconFinalityChangeHandle::new(command_tx),
+            AdvanceHandle::new(command_tx.clone()),
+            BeaconFinalityChangeHandle::new(command_tx),
             BridgeHead {
                 current_head,
                 next_head: current_head,
@@ -128,7 +128,7 @@ impl BridgeHead {
     //  Emit proofs
     async fn trigger_listener_with_proof(
         &mut self,
-        payload: NoriBridgeHeadProofMessage,
+        payload: ProofMessage,
     ) -> Result<()> {
         if let Some(event_observer) = &mut self.observer {
             let _ = event_observer.as_mut().on_proof(payload).await;
@@ -139,13 +139,13 @@ impl BridgeHead {
     // Emit notices
     async fn trigger_listener_with_notice(
         &mut self,
-        extension: NoriBridgeHeadMessageExtension,
+        extension: NoticeMessageExtension,
     ) -> Result<()> {
         if let Some(event_observer) = &mut self.observer {
             let now = Utc::now();
             let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
-            let message_type = get_nori_notice_message_type(&extension);
-            let base_message = NoriBridgeHeadNoticeBaseMessage {
+            let message_type = get_notice_message_type(&extension);
+            let base_message = NoticeBaseMessage {
                 timestamp: iso_string,
                 message_type,
                 current_head: self.current_head,
@@ -157,7 +157,7 @@ impl BridgeHead {
                     .duration_since(self.last_finality_transition_instant)
                     .as_secs_f64(),
             };
-            let full_message = NoriBridgeHeadNoticeMessage {
+            let full_message = NoticeMessage {
                 base: base_message,
                 extension,
             };
@@ -231,8 +231,8 @@ impl BridgeHead {
 
         let _ = self
             .trigger_listener_with_notice(
-                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobCreated(
-                    NoriBridgeHeadNoticeJobCreated { slot, job_idx },
+                NoticeMessageExtension::JobCreated(
+                    NoticeJobCreated { slot, job_idx },
                 ),
             )
             .await;
@@ -255,8 +255,8 @@ impl BridgeHead {
         // Notify of a succesful job
         let _ = self
             .trigger_listener_with_notice(
-                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobSucceeded(
-                    NoriBridgeHeadNoticeJobSucceeded {
+                NoticeMessageExtension::JobSucceeded(
+                    NoticeJobSucceeded {
                         slot,
                         job_idx,
                         next_sync_committee: proof_outputs.next_sync_committee_hash,
@@ -284,7 +284,7 @@ impl BridgeHead {
             info!("Triggering proof listeners");
             // Emit proof
             let _ = self
-                .trigger_listener_with_proof(NoriBridgeHeadProofMessage {
+                .trigger_listener_with_proof(ProofMessage {
                     slot,
                     proof,
                     execution_state_root: proof_outputs.execution_state_root,
@@ -295,8 +295,8 @@ impl BridgeHead {
             // Notify of head advance
             let _ = self
                 .trigger_listener_with_notice(
-                    NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeHeadAdvanced(
-                        NoriBridgeHeadNoticeHeadAdvanced {
+                    NoticeMessageExtension::HeadAdvanced(
+                        NoticeHeadAdvanced {
                             slot,
                             next_sync_committee: self.next_sync_committee,
                         },
@@ -371,8 +371,8 @@ impl BridgeHead {
             let job: &ProverJob = self.prover_jobs.get(&failed_job.0).unwrap();
             let _ = self
                 .trigger_listener_with_notice(
-                    NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobFailed(
-                        NoriBridgeHeadNoticeJobFailed {
+                    NoticeMessageExtension::JobFailed(
+                        NoticeJobFailed {
                             slot: job.slot,
                             job_idx: failed_job.0,
                             message: failed_job.1,
@@ -394,6 +394,16 @@ impl BridgeHead {
 
     // advance
     async fn advance(&mut self) {
+        let _ = self
+        .trigger_listener_with_notice(
+            NoticeMessageExtension::AdvanceRequested(
+                NoticeAdvanceRequested {},
+            ),
+        )
+        .await;
+
+        // FIXME extract most of this logic out into a 'strategy'
+
         self.job_idx += 1;
         info!("Advance called ready for job '{}'.", self.job_idx);
         if self.next_head > self.current_head {
@@ -435,13 +445,6 @@ impl BridgeHead {
             // We should wait for the next detected head update.
             self.auto_advance_index = self.job_idx;
         }
-        let _ = self
-            .trigger_listener_with_notice(
-                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeAdvanceRequested(
-                    NoriBridgeHeadNoticeAdvanceRequested {},
-                ),
-            )
-            .await;
     }
 
     async fn on_beacon_finality_change(&mut self, next_head: u64) {
@@ -450,8 +453,8 @@ impl BridgeHead {
         // Notify of transition
         let _ = self
             .trigger_listener_with_notice(
-                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeFinalityTransitionDetected(
-                    NoriBridgeHeadNoticeFinalityTransitionDetected { slot: next_head },
+                NoticeMessageExtension::FinalityTransitionDetected(
+                    NoticeFinalityTransitionDetected { slot: next_head },
                 ),
             )
             .await;
@@ -475,15 +478,15 @@ impl BridgeHead {
 
     /// Event loop
 
-    pub async fn run(mut self, observer: Box<dyn NoriBridgeHeadEventObserver + Send + Sync>) {
+    pub async fn run(mut self, observer: Box<dyn EventObserver + Send + Sync>) {
         self.observer = Some(observer);
         // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
         // that happened while this process was offline
 
         let _ = self
             .trigger_listener_with_notice(
-                NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeStarted(
-                    NoriBridgeHeadNoticeStarted {},
+                NoticeMessageExtension::Started(
+                    NoticeStarted {},
                 ),
             )
             .await;
@@ -503,11 +506,11 @@ impl BridgeHead {
             // Read the command_receiver which gets messages from the parent thread
             match self.command_rx.try_recv() {
                 Ok(cmd) => match cmd {
-                    NoriBridgeEventLoopCommand::Advance => {
+                    EventLoopCommand::Advance => {
                         // deal with advance invocation
                         self.advance().await;
                     }
-                    NoriBridgeEventLoopCommand::BeaconFinalityChange(message) => {
+                    EventLoopCommand::BeaconFinalityChange(message) => {
                         let next_slot = message.slot;
                         self.on_beacon_finality_change(next_slot).await;
                     }

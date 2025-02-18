@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Base notice message types
 #[derive(Serialize, Deserialize, Clone)]
-pub enum NoriNoticeMessageType {
+pub enum NoticeMessageType {
     Started,
     Warning,
     JobCreated,
@@ -15,9 +15,9 @@ pub enum NoriNoticeMessageType {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeBaseMessage {
+pub struct NoticeBaseMessage {
     pub timestamp: String,
-    pub message_type: NoriNoticeMessageType,
+    pub message_type: NoticeMessageType,
     pub current_head: u64,
     pub next_head: u64,
     pub working_head: u64,
@@ -26,69 +26,69 @@ pub struct NoriBridgeHeadNoticeBaseMessage {
     pub time_until_next_finality_transition_seconds: f64
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeStarted {}
+pub struct NoticeStarted {}
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeWarning {
+pub struct NoticeWarning {
     pub message: String
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct  NoriBridgeHeadNoticeJobCreated {
+pub struct  NoticeJobCreated {
     pub slot: u64,
     pub job_idx: u64
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeJobSucceeded {
+pub struct NoticeJobSucceeded {
     pub slot: u64,
     pub job_idx: u64,
     pub next_sync_committee: FixedBytes<32>
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct  NoriBridgeHeadNoticeJobFailed {
+pub struct  NoticeJobFailed {
     pub slot: u64,
     pub job_idx: u64,
     pub message: String
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeFinalityTransitionDetected {
+pub struct NoticeFinalityTransitionDetected {
     pub slot: u64
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeAdvanceRequested {
+pub struct NoticeAdvanceRequested {
 
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeHeadAdvanced {
+pub struct NoticeHeadAdvanced {
     pub slot: u64,
     pub next_sync_committee: FixedBytes<32>
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub enum NoriBridgeHeadMessageExtension {
-    NoriBridgeHeadNoticeStarted(NoriBridgeHeadNoticeStarted),
-    NoriBridgeHeadNoticeWarning(NoriBridgeHeadNoticeWarning),
-    NoriBridgeHeadNoticeJobCreated(NoriBridgeHeadNoticeJobCreated),
-    NoriBridgeHeadNoticeJobSucceeded(NoriBridgeHeadNoticeJobSucceeded),
-    NoriBridgeHeadNoticeJobFailed(NoriBridgeHeadNoticeJobFailed),
-    NoriBridgeHeadNoticeFinalityTransitionDetected(NoriBridgeHeadNoticeFinalityTransitionDetected),
-    NoriBridgeHeadNoticeAdvanceRequested(NoriBridgeHeadNoticeAdvanceRequested),
-    NoriBridgeHeadNoticeHeadAdvanced(NoriBridgeHeadNoticeHeadAdvanced)    
+pub enum NoticeMessageExtension {
+    Started(NoticeStarted),
+    Warning(NoticeWarning),
+    JobCreated(NoticeJobCreated),
+    JobSucceeded(NoticeJobSucceeded),
+    JobFailed(NoticeJobFailed),
+    FinalityTransitionDetected(NoticeFinalityTransitionDetected),
+    AdvanceRequested(NoticeAdvanceRequested),
+    HeadAdvanced(NoticeHeadAdvanced)    
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoriBridgeHeadNoticeMessage {
-    pub base: NoriBridgeHeadNoticeBaseMessage,
-    pub extension: NoriBridgeHeadMessageExtension
+pub struct NoticeMessage {
+    pub base: NoticeBaseMessage,
+    pub extension: NoticeMessageExtension
 }
 
-pub fn get_nori_notice_message_type(extension: &NoriBridgeHeadMessageExtension) -> NoriNoticeMessageType {
+pub fn get_notice_message_type(extension: &NoticeMessageExtension) -> NoticeMessageType {
     match extension {
-        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeStarted(_) => NoriNoticeMessageType::Started,
-        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeWarning(_) => NoriNoticeMessageType::Warning,
-        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobCreated(_) => NoriNoticeMessageType::JobCreated,
-        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobSucceeded(_) => NoriNoticeMessageType::JobSucceeded,
-        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobFailed(_) => NoriNoticeMessageType::JobFailed,
-        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeFinalityTransitionDetected(_) => NoriNoticeMessageType::FinalityTransitionDetected,
-        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeAdvanceRequested(_) => NoriNoticeMessageType::AdvanceRequested,
-        NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeHeadAdvanced(_) => NoriNoticeMessageType::HeadAdvanced,
+        NoticeMessageExtension::Started(_) => NoticeMessageType::Started,
+        NoticeMessageExtension::Warning(_) => NoticeMessageType::Warning,
+        NoticeMessageExtension::JobCreated(_) => NoticeMessageType::JobCreated,
+        NoticeMessageExtension::JobSucceeded(_) => NoticeMessageType::JobSucceeded,
+        NoticeMessageExtension::JobFailed(_) => NoticeMessageType::JobFailed,
+        NoticeMessageExtension::FinalityTransitionDetected(_) => NoticeMessageType::FinalityTransitionDetected,
+        NoticeMessageExtension::AdvanceRequested(_) => NoticeMessageType::AdvanceRequested,
+        NoticeMessageExtension::HeadAdvanced(_) => NoticeMessageType::HeadAdvanced,
     }
 }

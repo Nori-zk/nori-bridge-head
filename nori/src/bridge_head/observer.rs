@@ -2,32 +2,32 @@ use async_trait::async_trait;
 use anyhow::{Context, Result};
 use log::info;
 use crate::utils::handle_nori_proof;
-use super::{api::NoriBridgeHeadProofMessage, handles::NoriBridgeHeadAdvanceHandle, notice_messages::{NoriBridgeHeadMessageExtension, NoriBridgeHeadNoticeMessage}};
+use super::{api::ProofMessage, handles::AdvanceHandle, notice_messages::{NoticeMessageExtension, NoticeMessage}};
 
 // Observer trait
 #[async_trait]
-pub trait NoriBridgeHeadEventObserver: Send + Sync {
-    async fn on_proof(&mut self, proof_job_data: NoriBridgeHeadProofMessage) -> Result<()>;
-    async fn on_notice(&mut self, notice_data: NoriBridgeHeadNoticeMessage) -> Result<()>;
+pub trait EventObserver: Send + Sync {
+    async fn on_proof(&mut self, proof_job_data: ProofMessage) -> Result<()>;
+    async fn on_notice(&mut self, notice_data: NoticeMessage) -> Result<()>;
 }
 
 // Example event observer
 
 pub struct ExampleEventObserver {
-    bridge_head: NoriBridgeHeadAdvanceHandle,
+    bridge_head: AdvanceHandle,
 }
 
 impl ExampleEventObserver {
-    pub fn new(bridge_head: NoriBridgeHeadAdvanceHandle) -> Self {
+    pub fn new(bridge_head: AdvanceHandle) -> Self {
         Self { bridge_head }
     }
 }
 
 #[async_trait]
-impl NoriBridgeHeadEventObserver
+impl EventObserver
     for ExampleEventObserver
 {
-    async fn on_proof(&mut self, proof_data: NoriBridgeHeadProofMessage) -> Result<()> {
+    async fn on_proof(&mut self, proof_data: ProofMessage) -> Result<()> {
         println!("PROOF| {}", proof_data.slot);
 
         info!("Saving Nori sp1 proof");
@@ -38,31 +38,31 @@ impl NoriBridgeHeadEventObserver
         Ok(())
     }
 
-    async fn on_notice(&mut self, notice_data: NoriBridgeHeadNoticeMessage) -> Result<()> {       
+    async fn on_notice(&mut self, notice_data: NoticeMessage) -> Result<()> {       
         // Do something specific
         match notice_data.clone().extension {
-            NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeStarted(data) => {
+            NoticeMessageExtension::Started(data) => {
                 println!("NOTICE_TYPE| Started");
             }
-            NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeWarning(data) => {
+            NoticeMessageExtension::Warning(data) => {
                 println!("NOTICE_TYPE| Warning: {:?}", data.message);
             }
-            NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobCreated(data) => {
+            NoticeMessageExtension::JobCreated(data) => {
                 println!("NOTICE_TYPE| Job Created: {:?}", data.job_idx);
             }
-            NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobSucceeded(data) => {
+            NoticeMessageExtension::JobSucceeded(data) => {
                 println!("NOTICE_TYPE| Job Succeeded: {:?}", data.job_idx);
             }
-            NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeJobFailed(data) => {
+            NoticeMessageExtension::JobFailed(data) => {
                 println!("NOTICE_TYPE| Job Failed: {:?}", data.job_idx);
             }
-            NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeFinalityTransitionDetected(data) => {
+            NoticeMessageExtension::FinalityTransitionDetected(data) => {
                 println!("NOTICE_TYPE| Finality Transition Detected: {:?}", data.slot);
             }
-            NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeAdvanceRequested(data) => {
+            NoticeMessageExtension::AdvanceRequested(data) => {
                 println!("NOTICE_TYPE| Advance Requested");
             }
-            NoriBridgeHeadMessageExtension::NoriBridgeHeadNoticeHeadAdvanced(data) => {
+            NoticeMessageExtension::HeadAdvanced(data) => {
                 println!("NOTICE_TYPE| Head Advanced: {:?}", data.slot);
             }
         }
