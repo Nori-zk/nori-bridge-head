@@ -26,3 +26,6 @@ nb_checkpoint.json
 
 # Sp1 Proofs
 sp1-helios-proofs/
+
+# Ignore infra
+nori-bridge-head-rabbit/
