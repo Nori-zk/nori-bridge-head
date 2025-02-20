@@ -14,6 +14,7 @@ pub enum NoticeMessageType {
     HeadAdvanced,
 }
 
+// Base message type
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoticeBaseMessage {
     pub timestamp: String,
@@ -25,6 +26,8 @@ pub struct NoticeBaseMessage {
     pub last_job_duration_seconds: f64,
     pub time_until_next_finality_transition_seconds: f64
 }
+
+// Message extensions
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoticeStarted {}
 #[derive(Serialize, Deserialize, Clone)]

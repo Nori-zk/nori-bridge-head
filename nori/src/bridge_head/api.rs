@@ -1,14 +1,9 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::handles::{
-    EventLoopCommand, AdvanceHandle,
-    BeaconFinalityChangeHandle,
-};
+use super::handles::{AdvanceHandle, BeaconFinalityChangeHandle, EventLoopCommand};
 use super::notice_messages::{
-    get_notice_message_type, NoticeMessageExtension,
-    NoticeAdvanceRequested, NoticeBaseMessage,
-    NoticeFinalityTransitionDetected, NoticeHeadAdvanced,
-    NoticeJobCreated, NoticeJobFailed,
-    NoticeJobSucceeded, NoticeMessage, NoticeStarted,
+    get_notice_message_type, NoticeAdvanceRequested, NoticeBaseMessage,
+    NoticeFinalityTransitionDetected, NoticeHeadAdvanced, NoticeJobCreated, NoticeJobFailed,
+    NoticeJobSucceeded, NoticeMessage, NoticeMessageExtension, NoticeStarted,
 };
 use super::observer::EventObserver;
 use crate::helios::get_latest_finality_head;
@@ -69,12 +64,7 @@ pub struct BridgeHead {
 }
 
 impl BridgeHead {
-    pub async fn new() -> (
-        u64,
-        AdvanceHandle,
-        BeaconFinalityChangeHandle,
-        Self,
-    ) {
+    pub async fn new() -> (u64, AdvanceHandle, BeaconFinalityChangeHandle, Self) {
         // Initialise slot head / commitee vars
         let current_head;
         let mut next_sync_committee = FixedBytes::<32>::default();
@@ -93,7 +83,7 @@ impl BridgeHead {
         }
 
         // Create command mpsc
-        let (command_tx, command_rx) = mpsc::channel(1);
+        let (command_tx, command_rx) = mpsc::channel(2);
 
         (
             current_head,
@@ -116,20 +106,10 @@ impl BridgeHead {
         )
     }
 
-    /// Utils
-
-    // Get current head
-    pub fn current_head(self) -> u64 {
-        self.current_head
-    }
-
     /// Event dispatchers
 
     //  Emit proofs
-    async fn trigger_listener_with_proof(
-        &mut self,
-        payload: ProofMessage,
-    ) -> Result<()> {
+    async fn trigger_listener_with_proof(&mut self, payload: ProofMessage) -> Result<()> {
         if let Some(event_observer) = &mut self.observer {
             let _ = event_observer.as_mut().on_proof(payload).await;
         }
@@ -229,12 +209,10 @@ impl BridgeHead {
             self.auto_advance_index = 0;
         }
 
-        let _ = self
-            .trigger_listener_with_notice(
-                NoticeMessageExtension::JobCreated(
-                    NoticeJobCreated { slot, job_idx },
-                ),
-            )
+        let _ =
+            self.trigger_listener_with_notice(NoticeMessageExtension::JobCreated(
+                NoticeJobCreated { slot, job_idx },
+            ))
             .await;
     }
 
@@ -254,15 +232,13 @@ impl BridgeHead {
 
         // Notify of a succesful job
         let _ = self
-            .trigger_listener_with_notice(
-                NoticeMessageExtension::JobSucceeded(
-                    NoticeJobSucceeded {
-                        slot,
-                        job_idx,
-                        next_sync_committee: proof_outputs.next_sync_committee_hash,
-                    },
-                ),
-            )
+            .trigger_listener_with_notice(NoticeMessageExtension::JobSucceeded(
+                NoticeJobSucceeded {
+                    slot,
+                    job_idx,
+                    next_sync_committee: proof_outputs.next_sync_committee_hash,
+                },
+            ))
             .await;
 
         // Check if our result is still relevant after the computation, if our working_head has advanced then we are working on a more recent head in another thread.
@@ -294,14 +270,12 @@ impl BridgeHead {
 
             // Notify of head advance
             let _ = self
-                .trigger_listener_with_notice(
-                    NoticeMessageExtension::HeadAdvanced(
-                        NoticeHeadAdvanced {
-                            slot,
-                            next_sync_committee: self.next_sync_committee,
-                        },
-                    ),
-                )
+                .trigger_listener_with_notice(NoticeMessageExtension::HeadAdvanced(
+                    NoticeHeadAdvanced {
+                        slot,
+                        next_sync_committee: self.next_sync_committee,
+                    },
+                ))
                 .await;
 
             if self.next_head == self.current_head {
@@ -370,15 +344,11 @@ impl BridgeHead {
         for failed_job in failed.clone() {
             let job: &ProverJob = self.prover_jobs.get(&failed_job.0).unwrap();
             let _ = self
-                .trigger_listener_with_notice(
-                    NoticeMessageExtension::JobFailed(
-                        NoticeJobFailed {
-                            slot: job.slot,
-                            job_idx: failed_job.0,
-                            message: failed_job.1,
-                        },
-                    ),
-                )
+                .trigger_listener_with_notice(NoticeMessageExtension::JobFailed(NoticeJobFailed {
+                    slot: job.slot,
+                    job_idx: failed_job.0,
+                    message: failed_job.1,
+                }))
                 .await;
         }
 
@@ -395,12 +365,10 @@ impl BridgeHead {
     // advance
     async fn advance(&mut self) {
         let _ = self
-        .trigger_listener_with_notice(
-            NoticeMessageExtension::AdvanceRequested(
+            .trigger_listener_with_notice(NoticeMessageExtension::AdvanceRequested(
                 NoticeAdvanceRequested {},
-            ),
-        )
-        .await;
+            ))
+            .await;
 
         // FIXME extract most of this logic out into a 'strategy'
 
@@ -410,24 +378,23 @@ impl BridgeHead {
             // TODO think about the time until the next transition
             if self.last_job_duration_sec != 0.0 {
                 // If we have data on the last job time
-
-                let seconds_since_last_transition = Instant::now()
-                    .duration_since(self.last_finality_transition_instant)
-                    .as_secs_f64();
-
                 if self.last_job_duration_sec > TYPICAL_FINALITY_TRANSITION_TIME {
                     warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will definitely not be able to catch up.", self.last_job_duration_sec, TYPICAL_FINALITY_TRANSITION_TIME);
                 } else if self.last_job_duration_sec > TYPICAL_FINALITY_TRANSITION_TIME * 0.8 {
                     warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will take a while to catch up.", self.last_job_duration_sec, TYPICAL_FINALITY_TRANSITION_TIME);
                 }
 
+                let seconds_since_last_transition = Instant::now()
+                    .duration_since(self.last_finality_transition_instant)
+                    .as_secs_f64();
+
                 info!(
                     "Expected time to next finality transition is {} seconds.",
                     TYPICAL_FINALITY_TRANSITION_TIME - seconds_since_last_transition
                 );
 
-                if seconds_since_last_transition > 0.5 * TYPICAL_FINALITY_TRANSITION_TIME {
-                    warn!("We are within 50% of the typical finality transition time away from the next finality transition. Strategically waiting for the next finality transition in order to try to catch up more quickly. Note this will cause latency for current transactions in the bridge.");
+                if seconds_since_last_transition > 0.8 * TYPICAL_FINALITY_TRANSITION_TIME {
+                    warn!("We are within 80% of the typical finality transition time away from the next finality transition. Strategically waiting for the next finality transition in order to try to catch up more quickly. Note this will cause latency for current transactions in the bridge.");
                     // We should wait for the next detected head update.
                     self.auto_advance_index = self.job_idx;
                 }
@@ -452,11 +419,9 @@ impl BridgeHead {
 
         // Notify of transition
         let _ = self
-            .trigger_listener_with_notice(
-                NoticeMessageExtension::FinalityTransitionDetected(
-                    NoticeFinalityTransitionDetected { slot: next_head },
-                ),
-            )
+            .trigger_listener_with_notice(NoticeMessageExtension::FinalityTransitionDetected(
+                NoticeFinalityTransitionDetected { slot: next_head },
+            ))
             .await;
 
         // Update next head
@@ -464,6 +429,7 @@ impl BridgeHead {
         // Print the head change detection
         self.last_finality_transition_instant = Instant::now();
         info!("Helios beacon finality slot change detected. Nori bridge head is stale. Current head is: '{}' Working head is '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.working_head, self.next_head);
+        
         // Auto advance if nessesary
         if self.auto_advance_index != 0 {
             info!("Auto advance invoking job due to finality transition.");
@@ -484,11 +450,7 @@ impl BridgeHead {
         // that happened while this process was offline
 
         let _ = self
-            .trigger_listener_with_notice(
-                NoticeMessageExtension::Started(
-                    NoticeStarted {},
-                ),
-            )
+            .trigger_listener_with_notice(NoticeMessageExtension::Started(NoticeStarted {}))
             .await;
 
         // This could be useful in the future be lets be careful. If there is nothing to invoke advance the it would not auto emit

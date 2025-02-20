@@ -54,7 +54,7 @@ impl EventObserver
                 println!("NOTICE_TYPE| Job Succeeded: {:?}", data.job_idx);
             }
             NoticeMessageExtension::JobFailed(data) => {
-                println!("NOTICE_TYPE| Job Failed: {:?}", data.job_idx);
+                println!("NOTICE_TYPE| Job Failed: {:?}: {}", data.job_idx, data.message);
             }
             NoticeMessageExtension::FinalityTransitionDetected(data) => {
                 println!("NOTICE_TYPE| Finality Transition Detected: {:?}", data.slot);
