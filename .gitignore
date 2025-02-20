@@ -29,3 +29,6 @@ sp1-helios-proofs/
 
 # Ignore infra
 nori-bridge-head-rabbit/
+
+# Ignore checkpoints
+checkpoint/

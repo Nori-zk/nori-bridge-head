@@ -4,7 +4,7 @@ use anyhow::Result;
 use log::info;
 use serde::{Deserialize, Serialize};
 
-const NB_CHECKPOINT_FILE: &str = "nb_checkpoint.json";
+const NB_CHECKPOINT_FILE: &str = "./checkpoint/nb_checkpoint.json";
 
 #[derive(Serialize, Deserialize)]
 pub struct NoriBridgeCheckpoint {
@@ -36,6 +36,13 @@ pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
 }
 
 pub fn save_nb_checkpoint(slot_head: u64, next_sync_committee: FixedBytes<32>) {
+    // Create dir if nessesary 
+    let checkpoint_dir = Path::new(NB_CHECKPOINT_FILE).parent().unwrap();
+
+    // Ensure the directory exists
+    std::fs::create_dir_all(checkpoint_dir)
+        .expect("Failed to create checkpoint directory.");
+
     // Define the current checkpoint
     let checkpoint = NoriBridgeCheckpoint {
         slot_head,
