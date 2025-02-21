@@ -6,6 +6,7 @@ use super::notice_messages::{
     NoticeJobSucceeded, NoticeMessage, NoticeMessageExtension, NoticeStarted,
 };
 use super::observer::EventObserver;
+use crate::beacon_finality_change_detector::observer;
 use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::finality_update_job;
@@ -28,6 +29,7 @@ pub struct ProofMessage {
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
     pub next_sync_committee: FixedBytes<32>,
+    pub time_taken_second: f64,
 }
 struct ProverJobOutput {
     proof: SP1ProofWithPublicValues,
@@ -38,6 +40,7 @@ struct ProverJobOutputWithJob {
     proof: SP1ProofWithPublicValues,
     slot: u64,
     job_idx: u64,
+    time_taken_second: f64,
 }
 
 struct ProverJob {
@@ -222,6 +225,7 @@ impl BridgeHead {
         slot: u64,
         proof: SP1ProofWithPublicValues,
         job_idx: u64,
+        elapsed_sec: f64
     ) -> Result<()> {
         info!("Handling prover job output '{}'.", job_idx);
 
@@ -265,6 +269,7 @@ impl BridgeHead {
                     proof,
                     execution_state_root: proof_outputs.execution_state_root,
                     next_sync_committee: proof_outputs.next_sync_committee_hash,
+                    time_taken_second: elapsed_sec
                 })
                 .await;
 
@@ -310,6 +315,7 @@ impl BridgeHead {
                             job_idx,
                             proof: result_data.proof,
                             slot: result_data.slot,
+                            time_taken_second: self.last_job_duration_sec
                         });
                         completed.push(job_idx);
                     }
@@ -325,7 +331,7 @@ impl BridgeHead {
 
         // Process completed output
         for result in results.iter_mut() {
-            self.handle_prover_output(result.slot, result.proof.clone(), result.job_idx)
+            self.handle_prover_output(result.slot, result.proof.clone(), result.job_idx, result.time_taken_second)
                 .await?;
         }
 
@@ -488,6 +494,11 @@ impl BridgeHead {
             // Check the status of the prover jobs
             if let Err(e) = self.check_prover_jobs().await {
                 error!("Prover job check failed: {}", e);
+            }
+
+            // Invoke tick so the observer can do misc logic.
+            if let Some(observer) = &mut self.observer {
+                let _ = observer.as_mut().on_tick().await;
             }
 
             // Yield to other tasks instead of sleeping

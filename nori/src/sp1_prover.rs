@@ -84,9 +84,9 @@ pub async fn finality_update_job(
 
             // Generate proof.
             info!("Running sp1 proof.");
-            let proof = prover_client.prove(&pk, &stdin).plonk().run()?;
+            let proof = prover_client.prove(&pk, &stdin).plonk().run();
 
-            Ok(proof) // Explicitly return proof
+            proof // Explicitly return proof
         })
         .await??; // Await the blocking task and propagate errors properly
 

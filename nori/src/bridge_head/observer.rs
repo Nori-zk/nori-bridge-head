@@ -7,6 +7,7 @@ use super::{api::ProofMessage, handles::AdvanceHandle, notice_messages::{NoticeM
 // Observer trait
 #[async_trait]
 pub trait EventObserver: Send + Sync {
+    async fn on_tick(&mut self) -> Result<()>;
     async fn on_proof(&mut self, proof_job_data: ProofMessage) -> Result<()>;
     async fn on_notice(&mut self, notice_data: NoticeMessage) -> Result<()>;
 }
@@ -27,6 +28,9 @@ impl ExampleEventObserver {
 impl EventObserver
     for ExampleEventObserver
 {
+    async fn on_tick(&mut self) -> Result<()> {
+        Ok(())
+    }
     async fn on_proof(&mut self, proof_data: ProofMessage) -> Result<()> {
         println!("PROOF| {}", proof_data.slot);
 
