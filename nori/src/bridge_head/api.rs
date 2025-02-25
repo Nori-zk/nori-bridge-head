@@ -6,7 +6,6 @@ use super::notice_messages::{
     NoticeJobSucceeded, NoticeMessage, NoticeMessageExtension, NoticeStarted,
 };
 use super::observer::EventObserver;
-use crate::beacon_finality_change_detector::observer;
 use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::finality_update_job;
