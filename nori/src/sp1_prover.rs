@@ -9,6 +9,11 @@ use tree_hash::TreeHash;
 
 pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
 
+/// Generates a ZK proof for a finality update at the given slot
+///
+/// # Arguments
+/// * `slot` - Target slot number to prove
+/// * `last_next_sync_committee` -  The previous hash of next_sync_committee
 pub async fn finality_update_job(
     slot: u64,
     last_next_sync_committee: FixedBytes<32>,

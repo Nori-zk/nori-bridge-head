@@ -50,19 +50,36 @@ struct ProverJob {
     next_sync_committee: FixedBytes<32>,
 }
 
-/// Bridge Head
+/// Core bridge head implementation that manages proof generation and state transitions
+///
+/// Handles:
+/// - Proof generation workflow
+/// - State management
+/// - Event observation
 pub struct BridgeHead {
+    /// Current finalized slot head
     current_head: u64,
+    /// Target slot to advance to
     next_head: u64,
+    /// Slot currently being processed
     working_head: u64,
+    /// Last beacon finality update checked
     last_beacon_finality_head_checked: u64,
+    /// Job index for indicating if the job is set to auto advance
     auto_advance_index: u64,
+    /// Unique identifier for prover jobs
     job_idx: u64,
+    /// Duration of last completed job in seconds
     last_job_duration_sec: f64,
+    /// Clocktime of last finality transition
     last_finality_transition_instant: Instant,
+    /// Hash of the next sync committee
     next_sync_committee: FixedBytes<32>,
+    /// Active prover jobs mapped by job ID
     prover_jobs: HashMap<u64, ProverJob>,
+    /// Event observer for handling proof and notice events
     observer: Option<Box<dyn EventObserver + Send + Sync>>,
+    /// Channel for receiving bridge head commands
     command_rx: mpsc::Receiver<EventLoopCommand>,
 }
 
@@ -225,7 +242,7 @@ impl BridgeHead {
         slot: u64,
         proof: SP1ProofWithPublicValues,
         job_idx: u64,
-        elapsed_sec: f64
+        elapsed_sec: f64,
     ) -> Result<()> {
         info!("Handling prover job output '{}'.", job_idx);
 
@@ -269,7 +286,7 @@ impl BridgeHead {
                     proof,
                     execution_state_root: proof_outputs.execution_state_root,
                     next_sync_committee: proof_outputs.next_sync_committee_hash,
-                    time_taken_second: elapsed_sec
+                    time_taken_second: elapsed_sec,
                 })
                 .await;
 
@@ -315,7 +332,7 @@ impl BridgeHead {
                             job_idx,
                             proof: result_data.proof,
                             slot: result_data.slot,
-                            time_taken_second: self.last_job_duration_sec
+                            time_taken_second: self.last_job_duration_sec,
                         });
                         completed.push(job_idx);
                     }
@@ -331,8 +348,13 @@ impl BridgeHead {
 
         // Process completed output
         for result in results.iter_mut() {
-            self.handle_prover_output(result.slot, result.proof.clone(), result.job_idx, result.time_taken_second)
-                .await?;
+            self.handle_prover_output(
+                result.slot,
+                result.proof.clone(),
+                result.job_idx,
+                result.time_taken_second,
+            )
+            .await?;
         }
 
         // Process failed jobs
@@ -435,7 +457,7 @@ impl BridgeHead {
         // Print the head change detection
         self.last_finality_transition_instant = Instant::now();
         info!("Helios beacon finality slot change detected. Nori bridge head is stale. Current head is: '{}' Working head is '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.working_head, self.next_head);
-        
+
         // Auto advance if nessesary
         if self.auto_advance_index != 0 {
             info!("Auto advance invoking job due to finality transition.");
