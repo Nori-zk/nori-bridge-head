@@ -1,5 +1,5 @@
 [workspace]
-members = ["primitives", "script", "program", "nori", "nori-bridge-head-rabbit"]
+members = ["primitives", "script", "program", "nori"]
 resolver = "2"
 
 [workspace.package]

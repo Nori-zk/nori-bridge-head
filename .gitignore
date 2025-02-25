@@ -21,9 +21,6 @@ pgo-data.profdata
 # Generated inputs
 /script/examples/*
 
-# Checkpoint files
-nb_checkpoint.json
-
 # Sp1 Proofs
 sp1-helios-proofs/
 
