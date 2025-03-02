@@ -5,7 +5,6 @@ use super::notice_messages::{
     NoticeFinalityTransitionDetected, NoticeHeadAdvanced, NoticeJobCreated, NoticeJobFailed,
     NoticeJobSucceeded, NoticeMessage, NoticeMessageExtension, NoticeStarted,
 };
-use super::observer::EventObserver;
 use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
@@ -20,6 +19,7 @@ use std::error::Error as StdError;
 use std::fmt;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
+use tokio::sync::broadcast;
 
 const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
 
@@ -69,6 +69,13 @@ struct ProverJob {
     next_sync_committee: FixedBytes<32>,
 }
 
+// Event enum
+#[derive(Clone)]
+pub enum BridgeHeadEvent {
+    ProofMessage(ProofMessage),
+    NoticeMessage(NoticeMessage)
+}
+
 /// Core bridge head implementation that manages proof generation and state transitions
 ///
 /// Handles:
@@ -96,14 +103,14 @@ pub struct BridgeHead {
     next_sync_committee: FixedBytes<32>,
     /// Active prover jobs mapped by job ID
     prover_jobs: HashMap<u64, ProverJob>,
-    /// Event observer for handling proof and notice events
-    observer: Option<Box<dyn EventObserver + Send + Sync>>,
     /// Channel for receiving bridge head commands
     command_rx: Option<mpsc::Receiver<EventLoopCommand>>,
     /// Channel for receiving job results
     job_rx: Option<mpsc::UnboundedReceiver<Result<ProverJobOutput, ProverJobError>>>,
     /// Channel for sending job results
     job_tx: mpsc::UnboundedSender<Result<ProverJobOutput, ProverJobError>>,
+    /// Channel for emitting proof and notice events
+    event_tx: broadcast::Sender<BridgeHeadEvent>
 }
 
 impl BridgeHead {
@@ -127,7 +134,12 @@ impl BridgeHead {
 
         // Create command mpsc
         let (command_tx, command_rx) = mpsc::channel(2);
+
+        // Create job mpsc
         let (job_tx, job_rx) = mpsc::unbounded_channel();
+
+        // Create events broadcast chanel
+        let (event_tx, _) = broadcast::channel(16);
 
         (
             current_head,
@@ -143,22 +155,26 @@ impl BridgeHead {
                 last_job_duration_sec: 0.0,
                 last_finality_transition_instant: Instant::now(),
                 next_sync_committee,
-                observer: None,
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
                 job_rx: Some(job_rx),
                 job_tx,
+                event_tx,
             },
         )
     }
 
     /// Event dispatchers
+    
+    // Event receiver
+
+    pub fn event_receiver(&self) -> broadcast::Receiver<BridgeHeadEvent> {
+        self.event_tx.subscribe()
+    }
 
     //  Emit proofs
     async fn trigger_listener_with_proof(&mut self, payload: ProofMessage) -> Result<()> {
-        if let Some(event_observer) = &mut self.observer {
-            let _ = event_observer.as_mut().on_proof(payload).await;
-        }
+        let _ = self.event_tx.send(BridgeHeadEvent::ProofMessage(payload));
         Ok(())
     }
 
@@ -167,28 +183,26 @@ impl BridgeHead {
         &mut self,
         extension: NoticeMessageExtension,
     ) -> Result<()> {
-        if let Some(event_observer) = &mut self.observer {
-            let now = Utc::now();
-            let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
-            let message_type = get_notice_message_type(&extension);
-            let base_message = NoticeBaseMessage {
-                timestamp: iso_string,
-                message_type,
-                current_head: self.current_head,
-                next_head: self.next_head,
-                working_head: self.working_head,
-                last_beacon_finality_head_checked: self.last_beacon_finality_head_checked,
-                last_job_duration_seconds: self.last_job_duration_sec,
-                time_until_next_finality_transition_seconds: Instant::now()
-                    .duration_since(self.last_finality_transition_instant)
-                    .as_secs_f64(),
-            };
-            let full_message = NoticeMessage {
-                base: base_message,
-                extension,
-            };
-            let _ = event_observer.as_mut().on_notice(full_message).await;
-        }
+        let now = Utc::now();
+        let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
+        let message_type = get_notice_message_type(&extension);
+        let base_message = NoticeBaseMessage {
+            timestamp: iso_string,
+            message_type,
+            current_head: self.current_head,
+            next_head: self.next_head,
+            working_head: self.working_head,
+            last_beacon_finality_head_checked: self.last_beacon_finality_head_checked,
+            last_job_duration_seconds: self.last_job_duration_sec,
+            time_until_next_finality_transition_seconds: Instant::now()
+                .duration_since(self.last_finality_transition_instant)
+                .as_secs_f64(),
+        };
+        let full_message = NoticeMessage {
+            base: base_message,
+            extension,
+        };
+        let _ = self.event_tx.send(BridgeHeadEvent::NoticeMessage(full_message));
         Ok(())
     }
 
@@ -351,16 +365,17 @@ impl BridgeHead {
         let message = format!("Job '{}' failed with error: {}", err.job_id, err);
         error!("Job '{}' failed with error: {}", err.job_id, err);
 
+        let _ = self
+        .trigger_listener_with_notice(NoticeMessageExtension::JobFailed(NoticeJobFailed {
+            slot,
+            job_idx: err.job_id,
+            message,
+        }))
+        .await;
+
         // Now that we've released the immutable borrow, we can mutably borrow `self`.
         let _ = self
             .create_prover_job(err.job_id, slot, next_sync_committee)
-            .await;
-        let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::JobFailed(NoticeJobFailed {
-                slot,
-                job_idx: err.job_id,
-                message,
-            }))
             .await;
     }
 
@@ -527,8 +542,7 @@ impl BridgeHead {
 
     /// Event loop
 
-    pub async fn run(mut self, observer: Box<dyn EventObserver + Send + Sync>) {
-        self.observer = Some(observer);
+    pub async fn run(mut self) {
         // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
         // that happened while this process was offline
 
@@ -549,7 +563,7 @@ impl BridgeHead {
 
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
-        
+
         loop {
             tokio::select! {
                 Some(cmd) = command_rx.recv() => {

@@ -1,23 +1,56 @@
 use super::{
-    api::ProofMessage,
+    api::{BridgeHeadEvent, ProofMessage},
     handles::AdvanceHandle,
     notice_messages::{NoticeMessage, NoticeMessageExtension},
 };
 use crate::utils::handle_nori_proof;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use log::info;
+use log::{info, warn};
+
 
 /// Event observer trait for handling bridge head events
 #[async_trait]
 pub trait EventObserver: Send + Sync {
-    /// Called periodically by the event loop
-    async fn on_tick(&mut self) -> Result<()>;
     /// Called when a new proof is generated
-    async fn on_proof(&mut self, proof_job_data: ProofMessage) -> Result<()>;
+    async fn on_proof(&mut self, proof_job_data: ProofMessage) -> anyhow::Result<()>;
     /// Called when a system notice is generated
-    async fn on_notice(&mut self, notice_data: NoticeMessage) -> Result<()>;
+    async fn on_notice(&mut self, notice_data: NoticeMessage) -> anyhow::Result<()>;
+
+    /// Run method default for handling event messages
+    async fn run(&mut self, mut bridge_head_event_receiver: tokio::sync::broadcast::Receiver<BridgeHeadEvent>) {
+        loop {
+            tokio::select! {
+                result = bridge_head_event_receiver.recv() => {
+                    match result {
+                        Ok(event) => {
+                            // Process the event by matching its variant.
+                            match event {
+                                BridgeHeadEvent::ProofMessage(proof_msg) => {
+                                    // Call on_proof for a Proof event.
+                                    if let Err(e) = self.on_proof(proof_msg).await {
+                                        warn!("Error handling proof event: {}", e);
+                                    }
+                                },
+                                BridgeHeadEvent::NoticeMessage(notice_msg) => {
+                                    // Call on_notice for a Notice event.
+                                    if let Err(e) = self.on_notice(notice_msg).await {
+                                        warn!("Error handling notice event: {}", e);
+                                    }
+                                },
+                            }
+                        },
+                        Err(err) => {
+                            warn!("Error receiving event: {}", err);
+                            break;
+                        },
+                    }
+                },
+            }
+        }
+    }
 }
+
 
 /// Reference implementation of EventObserver
 pub struct ExampleEventObserver {
@@ -33,9 +66,6 @@ impl ExampleEventObserver {
 
 #[async_trait]
 impl EventObserver for ExampleEventObserver {
-    async fn on_tick(&mut self) -> Result<()> {
-        Ok(())
-    }
     async fn on_proof(&mut self, proof_data: ProofMessage) -> Result<()> {
         println!("PROOF| {}", proof_data.slot);
 
