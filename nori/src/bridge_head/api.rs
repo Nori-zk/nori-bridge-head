@@ -259,7 +259,7 @@ impl BridgeHead {
            We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
            If this task was the last auto advance task we should cancel that behaviour
         */
-        if job_idx >= self.auto_advance_index && job_idx != 0 { // if its already zero we dont need to do this FIXME
+        if job_idx >= self.auto_advance_index && self.auto_advance_index != 0 { // if its already zero we dont need to do this FIXME
             // Do we need the if... this should always be true CHECKME
             // gt to account for if a previous job spawned failed with an error and didnt cancel itself
             info!(
