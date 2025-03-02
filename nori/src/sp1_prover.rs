@@ -10,7 +10,7 @@ use tree_hash::TreeHash;
 pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
 
 pub struct ProverJobOutput {
-    job_id: u64,
+    job_idx: u64,
     slot: u64,
     proof: SP1ProofWithPublicValues,
 }
@@ -24,8 +24,8 @@ impl ProverJobOutput {
         self.proof.clone()
     }
 
-    pub fn job_id(&self) -> u64 {
-        self.job_id
+    pub fn job_idx(&self) -> u64 {
+        self.job_idx
     }
 }
 
@@ -35,7 +35,7 @@ impl ProverJobOutput {
 /// * `slot` - Target slot number to prove
 /// * `last_next_sync_committee` -  The previous hash of next_sync_committee
 pub async fn finality_update_job(
-    job_id: u64,
+    job_idx: u64,
     slot: u64,
     last_next_sync_committee: FixedBytes<32>,
 ) -> Result<ProverJobOutput> {
@@ -116,5 +116,5 @@ pub async fn finality_update_job(
         })
         .await??; // Await the blocking task and propagate errors properly
 
-    Ok(ProverJobOutput {proof, slot, job_id})
+    Ok(ProverJobOutput {proof, slot, job_idx})
 }

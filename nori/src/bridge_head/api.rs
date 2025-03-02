@@ -34,14 +34,14 @@ pub struct ProofMessage {
 }
 
 pub struct ProverJobError {
-    pub job_id: u64,
+    pub job_idx: u64,
     pub error: Error,
 }
 
 // Implement Display trait for user-friendly error messages
 impl fmt::Display for ProverJobError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Prover job {} failed: {}", self.job_id, self.error)
+        write!(f, "Prover job {} failed: {}", self.job_idx, self.error)
     }
 }
 
@@ -50,8 +50,8 @@ impl fmt::Debug for ProverJobError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ProverJobError {{ job_id: {}, source: {:?} }}",
-            self.job_id, self.error
+            "ProverJobError {{ job_idx: {}, source: {:?} }}",
+            self.job_idx, self.error
         )
     }
 }
@@ -246,7 +246,7 @@ impl BridgeHead {
                 }
                 Err(error) => {
                     let job_error = ProverJobError {
-                        job_id: job_idx,
+                        job_idx,
                         error,
                     };
                     tx.send(Err(job_error)).unwrap();
@@ -259,7 +259,7 @@ impl BridgeHead {
            We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
            If this task was the last auto advance task we should cancel that behaviour
         */
-        if job_idx >= self.auto_advance_index {
+        if job_idx >= self.auto_advance_index && job_idx != 0 { // if its already zero we dont need to do this FIXME
             // Do we need the if... this should always be true CHECKME
             // gt to account for if a previous job spawned failed with an error and didnt cancel itself
             info!(
@@ -276,8 +276,8 @@ impl BridgeHead {
             .await;
     }
 
-    // Handle prover job output
-    async fn handle_prover_output(
+    // Handle prover job success
+    async fn handle_prover_success(
         &mut self,
         slot: u64,
         proof: SP1ProofWithPublicValues,
@@ -307,7 +307,7 @@ impl BridgeHead {
 
         // Check if our result is still relevant after the computation, if our working_head has advanced then we are working on a more recent head in another thread.
         if self.working_head == slot {
-            // could move this to a job_id check vs auto_advance_index if we really wanted to skip what we've got in place with advance being called.
+            // could move this to a job_idx check vs auto_advance_index if we really wanted to skip what we've got in place with advance being called.
             // Update our state
             info!("Moving nori head forward.");
 
@@ -354,110 +354,31 @@ impl BridgeHead {
     }
 
     // Handle prover job failures
-    async fn handle_failed_job(&mut self, err: &ProverJobError) {
+    async fn handle_prover_failure(&mut self, err: &ProverJobError) {
         // Cache the fields needed from the job so we can release the immutable borrow.
         let (slot, next_sync_committee) = {
             // Immutable borrow to get the job.
-            let job = self.prover_jobs.get(&err.job_id).unwrap();
+            let job = self.prover_jobs.get(&err.job_idx).unwrap();
             (job.slot, job.next_sync_committee)
         };
 
-        let message = format!("Job '{}' failed with error: {}", err.job_id, err);
-        error!("Job '{}' failed with error: {}", err.job_id, err);
+        let message = format!("Job '{}' failed with error: {}", err.job_idx, err);
+        error!("Job '{}' failed with error: {}", err.job_idx, err);
 
         let _ = self
         .trigger_listener_with_notice(NoticeMessageExtension::JobFailed(NoticeJobFailed {
             slot,
-            job_idx: err.job_id,
+            job_idx: err.job_idx,
             message,
         }))
         .await;
 
         // Now that we've released the immutable borrow, we can mutably borrow `self`.
         let _ = self
-            .create_prover_job(err.job_id, slot, next_sync_committee)
+            .create_prover_job(err.job_idx, slot, next_sync_committee)
             .await;
     }
 
-    // Handler prover jobs
-    /*
-        async fn check_prover_jobs(&mut self) -> Result<()> {
-            let mut completed = Vec::new();
-            let mut results: Vec<ProverJobOutputWithTimeTaken> = Vec::new();
-            let mut failed: Vec<(u64, String)> = Vec::new();
-
-            // Extract jobs
-            for (&job_idx, job) in self.prover_jobs.iter_mut() {
-                if let Ok(result) = job.rx.try_recv() {
-                    match result {
-                        Ok(result_data) => {
-                            self.last_job_duration_sec = Instant::now()
-                                .duration_since(job.start_instant)
-                                .as_secs_f64();
-                            info!(
-                                "Job '{}' finished in {} seconds.",
-                                job_idx, self.last_job_duration_sec
-                            );
-                            results.push(ProverJobOutputWithTimeTaken {
-                                job_idx,
-                                proof: result_data.proof(),
-                                slot: result_data.slot(),
-                                time_taken_second: self.last_job_duration_sec,
-                            });
-                            completed.push(job_idx);
-                        }
-                        Err(err) => {
-                            // Handle the error case if the inner Result is Err
-                            let message = format!("Job '{}' failed with error: {}", job_idx, err);
-                            error!("Job '{}' failed with error: {}", job_idx, err);
-                            failed.push((job_idx, message));
-                        }
-                    }
-                }
-            }
-
-            // Process completed output
-            for result in results.iter_mut() {
-                self.handle_prover_output(
-                    result.slot,
-                    result.proof.clone(),
-                    result.job_idx,
-                    result.time_taken_second,
-                )
-                .await?;
-            }
-
-            // Process failed jobs
-            for failed_job in failed.clone() {
-                // If our current job failed restart it...
-                if self.job_idx == failed_job.0 {
-                    let job: &ProverJob = self.prover_jobs.get(&failed_job.0).unwrap();
-                    let _ = self
-                        .create_prover_job(failed_job.0, job.slot, job.next_sync_committee)
-                        .await;
-                }
-            }
-
-            // Emit job failure notices
-            for failed_job in failed.clone() {
-                let job: &ProverJob = self.prover_jobs.get(&failed_job.0).unwrap();
-                let _ = self
-                    .trigger_listener_with_notice(NoticeMessageExtension::JobFailed(NoticeJobFailed {
-                        slot: job.slot,
-                        job_idx: failed_job.0,
-                        message: failed_job.1,
-                    }))
-                    .await;
-            }
-
-            // Cleanup hash map
-            for job_idx in completed {
-                self.prover_jobs.remove(&job_idx);
-            }
-
-            Ok(())
-        }
-    */
     /// Commands
 
     // advance
@@ -566,6 +487,7 @@ impl BridgeHead {
 
         loop {
             tokio::select! {
+                // Read the command receiver for input commands
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         EventLoopCommand::Advance => {
@@ -578,66 +500,35 @@ impl BridgeHead {
                         }
                     }
                 }
+                // Read the job receiver for returned jobs
                 Some(job_result) = job_rx.recv() => {
                     match job_result {
                         Ok(result_data) => {
-                            let job: &ProverJob = self.prover_jobs.get(&result_data.job_id()).unwrap();
+                            let job: &ProverJob = self.prover_jobs.get(&result_data.job_idx()).unwrap();
                             let time_taken_second = Instant::now()
                                 .duration_since(job.start_instant)
                                 .as_secs_f64();
 
                             info!(
                                 "Job '{}' finished in {} seconds.",
-                                result_data.job_id(), time_taken_second
+                                result_data.job_idx(), time_taken_second
                             );
 
-                            let _ = self.handle_prover_output(
+                            let _ = self.handle_prover_success(
                                 result_data.slot(),
                                 result_data.proof(),
-                                result_data.job_id(),
+                                result_data.job_idx(),
                                 time_taken_second,
                             ).await;
 
                             self.last_job_duration_sec = time_taken_second;
                         }
                         Err(err) => {
-                            self.handle_failed_job(&err).await;
+                            self.handle_prover_failure(&err).await;
                         }
                     }
                 }
             }
-            // Read the command_receiver which gets messages from the parent thread
-            /*match self.command_rx.try_recv() {
-                Ok(cmd) => match cmd {
-                    EventLoopCommand::Advance => {
-                        // deal with advance invocation
-                        self.advance().await;
-                    }
-                    EventLoopCommand::BeaconFinalityChange(message) => {
-                        let next_slot = message.slot;
-                        self.on_beacon_finality_change(next_slot).await;
-                    }
-                },
-                Err(mpsc::error::TryRecvError::Empty) => {
-                    // No new commands, that's fine
-                }
-                Err(mpsc::error::TryRecvError::Disconnected) => {
-                    // Channel closed, but we'll keep running to finish existing jobs
-                }
-            }
-
-            // Check the status of the prover jobs
-            if let Err(e) = self.check_prover_jobs().await {
-                error!("Prover job check failed: {}", e);
-            }
-
-            // Invoke tick so the observer can do misc logic.
-            if let Some(observer) = &mut self.observer {
-                let _ = observer.as_mut().on_tick().await;
-            }
-
-            // Yield to other tasks instead of sleeping
-            tokio::task::yield_now().await;*/
         }
     }
 }
