@@ -9,15 +9,36 @@ use tree_hash::TreeHash;
 
 pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
 
+pub struct ProverJobOutput {
+    job_id: u64,
+    slot: u64,
+    proof: SP1ProofWithPublicValues,
+}
+
+impl ProverJobOutput {
+    pub fn slot(&self) -> u64 {
+        self.slot
+    }
+
+    pub fn proof(&self) -> SP1ProofWithPublicValues {
+        self.proof.clone()
+    }
+
+    pub fn job_id(&self) -> u64 {
+        self.job_id
+    }
+}
+
 /// Generates a ZK proof for a finality update at the given slot
 ///
 /// # Arguments
 /// * `slot` - Target slot number to prove
 /// * `last_next_sync_committee` -  The previous hash of next_sync_committee
 pub async fn finality_update_job(
+    job_id: u64,
     slot: u64,
     last_next_sync_committee: FixedBytes<32>,
-) -> Result<SP1ProofWithPublicValues> {
+) -> Result<ProverJobOutput> {
     // Get latest beacon checkpoint
     let helios_checkpoint = get_checkpoint(slot).await?;
 
@@ -95,5 +116,5 @@ pub async fn finality_update_job(
         })
         .await??; // Await the blocking task and propagate errors properly
 
-    Ok(proof)
+    Ok(ProverJobOutput {proof, slot, job_id})
 }
