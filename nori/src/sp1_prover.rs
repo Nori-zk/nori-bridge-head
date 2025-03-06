@@ -43,11 +43,11 @@ pub async fn finality_update_job(
     let helios_checkpoint = get_checkpoint(slot).await?;
 
     // Re init helios client
-    let mut heliod_update_client = get_client(helios_checkpoint).await?;
+    let mut helios_update_client = get_client(helios_checkpoint).await?;
 
     // Get finality update
     info!("Getting finality update.");
-    let finality_update = heliod_update_client
+    let finality_update = helios_update_client
         .rpc
         .get_finality_update()
         .await
@@ -55,7 +55,7 @@ pub async fn finality_update_job(
 
     // Get sync commitee updates
     info!("Getting sync commitee updates.");
-    let mut sync_committee_updates = get_finality_updates(&heliod_update_client).await?;
+    let mut sync_committee_updates = get_finality_updates(&helios_update_client).await?;
 
     // Taken from operator.rs
     // Optimization:
@@ -74,24 +74,24 @@ pub async fn finality_update_job(
             info!("Applying optimization, skipping sync committee update.");
             let temp_update = sync_committee_updates.remove(0);
 
-            heliod_update_client
+            helios_update_client
                 .verify_update(&temp_update)
                 .map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
-            heliod_update_client.apply_update(&temp_update);
+            helios_update_client.apply_update(&temp_update);
         }
     }
 
     // Create program inputs
     info!("Building sp1 proof inputs.");
 
-    let expected_current_slot = heliod_update_client.expected_current_slot();
+    let expected_current_slot = helios_update_client.expected_current_slot();
     let inputs = ProofInputs {
         sync_committee_updates,
         finality_update,
         expected_current_slot,
-        store: heliod_update_client.store.clone(),
-        genesis_root: heliod_update_client.config.chain.genesis_root,
-        forks: heliod_update_client.config.forks.clone(),
+        store: helios_update_client.store.clone(),
+        genesis_root: helios_update_client.config.chain.genesis_root,
+        forks: helios_update_client.config.forks.clone(),
     };
 
     // Encode proof inputs
