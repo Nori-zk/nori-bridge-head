@@ -1,6 +1,6 @@
 # Nori-bridge-head
 
-
+Helios light client running inside SP1 zkVM generating consensus proofs used in Nori bridge.
 
 Note the relevant workspace is within the `/nori' folder.
 
