@@ -5,6 +5,7 @@ use super::notice_messages::{
     NoticeFinalityTransitionDetected, NoticeHeadAdvanced, NoticeJobCreated, NoticeJobFailed,
     NoticeJobSucceeded, NoticeMessage, NoticeMessageExtension, NoticeStarted,
 };
+use super::validate::validate_env;
 use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
@@ -115,6 +116,11 @@ pub struct BridgeHead {
 
 impl BridgeHead {
     pub async fn new() -> (u64, AdvanceHandle, BeaconFinalityChangeHandle, Self) {
+        validate_env(&[
+            "SOURCE_CONSENSUS_RPC_URL",
+            "NORI_HELIOS_POLLING_INTERVAL",
+            "SP1_PROVER"
+        ]);
         // Initialise slot head / commitee vars
         let current_head;
         let mut next_sync_committee = FixedBytes::<32>::default();
