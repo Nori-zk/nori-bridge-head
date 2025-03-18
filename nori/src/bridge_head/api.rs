@@ -1,15 +1,15 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::handles::{AdvanceHandle, BeaconFinalityChangeHandle, EventLoopCommand};
+use super::handles::{BeaconFinalityChangeHandle, Command, CommandHandle};
 use super::notice_messages::{
-    get_notice_message_type, NoticeAdvanceRequested, NoticeBaseMessage,
-    NoticeFinalityTransitionDetected, NoticeHeadAdvanced, NoticeJobCreated, NoticeJobFailed,
-    NoticeJobSucceeded, NoticeMessage, NoticeMessageExtension, NoticeStarted,
-};
+    get_notice_message_type, NoticeBaseMessage, NoticeFinalityTransitionDetected,
+    NoticeHeadAdvanced, NoticeJobCreated, NoticeJobFailed, NoticeJobSucceeded, NoticeMessage,
+    NoticeMessageExtension, NoticeStarted,
+}; // NoticeAdvance
 use super::validate::validate_env;
 use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
-use alloy_primitives::FixedBytes;
+use alloy_primitives::{FixedBytes, B256};
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use log::{error, info, warn};
@@ -18,16 +18,17 @@ use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
+use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tokio::sync::broadcast;
 
 const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
 
 /// Proof types
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ProofMessage {
-    pub slot: u64,
+    pub input_slot: u64,
+    pub output_slot: u64,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
     pub next_sync_committee: FixedBytes<32>,
@@ -66,7 +67,8 @@ impl StdError for ProverJobError {
 
 struct ProverJob {
     start_instant: Instant,
-    slot: u64,
+    input_slot: u64,
+    expected_output_slot: u64,
     next_sync_committee: FixedBytes<32>,
 }
 
@@ -74,7 +76,7 @@ struct ProverJob {
 #[derive(Clone)]
 pub enum BridgeHeadEvent {
     ProofMessage(ProofMessage),
-    NoticeMessage(NoticeMessage)
+    NoticeMessage(NoticeMessage),
 }
 
 /// Core bridge head implementation that manages proof generation and state transitions
@@ -92,8 +94,8 @@ pub struct BridgeHead {
     working_head: u64,
     /// Last beacon finality update checked
     last_beacon_finality_head_checked: u64,
-    /// Job index for indicating if the job is set to auto advance
-    auto_advance_index: u64,
+    //// Job index for indicating if the job is set to auto advance
+    ///auto_advance_index: u64,
     /// Unique identifier for prover jobs
     job_idx: u64,
     /// Duration of last completed job in seconds
@@ -105,21 +107,21 @@ pub struct BridgeHead {
     /// Active prover jobs mapped by job ID
     prover_jobs: HashMap<u64, ProverJob>,
     /// Channel for receiving bridge head commands
-    command_rx: Option<mpsc::Receiver<EventLoopCommand>>,
+    command_rx: Option<mpsc::Receiver<Command>>,
     /// Channel for receiving job results
     job_rx: Option<mpsc::UnboundedReceiver<Result<ProverJobOutput, ProverJobError>>>,
     /// Channel for sending job results
     job_tx: mpsc::UnboundedSender<Result<ProverJobOutput, ProverJobError>>,
     /// Channel for emitting proof and notice events
-    event_tx: broadcast::Sender<BridgeHeadEvent>
+    event_tx: broadcast::Sender<BridgeHeadEvent>,
 }
 
 impl BridgeHead {
-    pub async fn new() -> (u64, AdvanceHandle, BeaconFinalityChangeHandle, Self) {
+    pub async fn new() -> (u64, CommandHandle, BeaconFinalityChangeHandle, Self) {
         validate_env(&[
             "SOURCE_CONSENSUS_RPC_URL",
             "NORI_HELIOS_POLLING_INTERVAL",
-            "SP1_PROVER"
+            "SP1_PROVER",
         ]);
         // Initialise slot head / commitee vars
         let current_head;
@@ -134,6 +136,7 @@ impl BridgeHead {
             next_sync_committee = nb_checkpoint.next_sync_committee;
         } else {
             // Cold start procedure
+            // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
             current_head = get_latest_finality_head().await.unwrap();
         }
@@ -149,14 +152,14 @@ impl BridgeHead {
 
         (
             current_head,
-            AdvanceHandle::new(command_tx.clone()),
+            CommandHandle::new(command_tx.clone()),
             BeaconFinalityChangeHandle::new(command_tx),
             BridgeHead {
                 current_head,
                 next_head: current_head,
                 working_head: current_head,
                 last_beacon_finality_head_checked: u64::default(),
-                auto_advance_index: 1,
+                //auto_advance_index: 1,
                 job_idx: 1,
                 last_job_duration_sec: 0.0,
                 last_finality_transition_instant: Instant::now(),
@@ -171,7 +174,7 @@ impl BridgeHead {
     }
 
     /// Event dispatchers
-    
+
     // Event receiver
 
     pub fn event_receiver(&self) -> broadcast::Receiver<BridgeHeadEvent> {
@@ -208,7 +211,9 @@ impl BridgeHead {
             base: base_message,
             extension,
         };
-        let _ = self.event_tx.send(BridgeHeadEvent::NoticeMessage(full_message));
+        let _ = self
+            .event_tx
+            .send(BridgeHeadEvent::NoticeMessage(full_message));
         Ok(())
     }
 
@@ -216,45 +221,44 @@ impl BridgeHead {
 
     // Create prover job
     async fn create_prover_job(
-        &mut self,
-        job_idx: u64,
-        slot: u64,
-        next_sync_committee: FixedBytes<32>,
+        &mut self
+        //expected_slot: u64,
+        //next_sync_committee: FixedBytes<32>,
     ) {
+        self.job_idx += 1;
+        let job_idx: u64 = self.job_idx;
         info!(
             "Nori head updater recieved a new job {}. Spawning a new worker.",
             job_idx
         );
 
-        self.working_head = slot; // Mark the working head as what was given by the slot
-
-        //let last_next_sync_committee = self.next_sync_committee;
-        let slot_clone = slot;
+        self.working_head = self.current_head; // Mark the working head as what was given by the slot
 
         self.prover_jobs.insert(
             job_idx,
             ProverJob {
                 start_instant: Instant::now(),
-                next_sync_committee,
-                slot,
+                next_sync_committee: self.next_sync_committee,
+                input_slot: self.current_head,
+                expected_output_slot: self.next_head,
             },
         );
 
         let tx = self.job_tx.clone();
+        let current_head_clone = self.current_head;
+        let next_sync_committee_clone = self.next_sync_committee;
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
-            let proof_result = finality_update_job(job_idx, slot_clone, next_sync_committee).await;
+            let proof_result =
+                finality_update_job(job_idx, current_head_clone, next_sync_committee_clone).await;
 
             match proof_result {
                 Ok(prover_job_output) => {
                     tx.send(Ok(prover_job_output)).unwrap();
                 }
                 Err(error) => {
-                    let job_error = ProverJobError {
-                        job_idx,
-                        error,
-                    };
+                    let job_error = ProverJobError { job_idx, error };
                     tx.send(Err(job_error)).unwrap();
                 }
             }
@@ -265,7 +269,8 @@ impl BridgeHead {
            We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
            If this task was the last auto advance task we should cancel that behaviour
         */
-        if job_idx >= self.auto_advance_index && self.auto_advance_index != 0 { // if its already zero we dont need to do this FIXME
+        /*if job_idx >= self.auto_advance_index && self.auto_advance_index != 0 {
+            // if its already zero we dont need to do this FIXME
             // Do we need the if... this should always be true CHECKME
             // gt to account for if a previous job spawned failed with an error and didnt cancel itself
             info!(
@@ -273,19 +278,21 @@ impl BridgeHead {
                 self.auto_advance_index
             );
             self.auto_advance_index = 0;
-        }
+        }*/
 
-        let _ =
-            self.trigger_listener_with_notice(NoticeMessageExtension::JobCreated(
-                NoticeJobCreated { slot, job_idx },
-            ))
+        let _ = self
+            .trigger_listener_with_notice(NoticeMessageExtension::JobCreated(NoticeJobCreated {
+                input_slot: self.current_head,
+                job_idx,
+                expected_output_slot: self.next_head,
+            }))
             .await;
     }
 
     // Handle prover job success
     async fn handle_prover_success(
         &mut self,
-        slot: u64,
+        input_head: u64,
         proof: SP1ProofWithPublicValues,
         job_idx: u64,
         elapsed_sec: f64,
@@ -300,25 +307,48 @@ impl BridgeHead {
         let public_values_bytes = public_values.as_slice(); // Raw bytes
         let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes)?;
 
+        // need to cast new head to a u64 // FIXME change the decoder later.......
+        let new_head = proof_outputs.new_head;
+        let new_head_bytes: [u8; 32] = new_head.to_be_bytes();
+        // Extract the last 8 bytes (least significant bytes in big-endian)
+        let new_head_u64_bytes: [u8; 8] = new_head_bytes[24..32]
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
+        // Convert the bytes to u64 using big-endian interpretation
+        let output_head = u64::from_be_bytes(new_head_u64_bytes);
+
         // Notify of a succesful job
         let _ = self
             .trigger_listener_with_notice(NoticeMessageExtension::JobSucceeded(
                 NoticeJobSucceeded {
-                    slot,
+                    input_slot: input_head,
+                    output_slot: output_head,
                     job_idx,
                     next_sync_committee: proof_outputs.next_sync_committee_hash,
                 },
             ))
             .await;
 
+        // Emit proof
+        let _ = self
+        .trigger_listener_with_proof(ProofMessage {
+            input_slot: input_head,
+            output_slot: output_head,
+            proof,
+            execution_state_root: proof_outputs.execution_state_root,
+            next_sync_committee: proof_outputs.next_sync_committee_hash,
+            time_taken_second: elapsed_sec,
+        })
+        .await;
+
         // Check if our result is still relevant after the computation, if our working_head has advanced then we are working on a more recent head in another thread.
-        if self.working_head == slot {
+        /*if self.working_head == input_head {
             // could move this to a job_idx check vs auto_advance_index if we really wanted to skip what we've got in place with advance being called.
             // Update our state
             info!("Moving nori head forward.");
 
             // Update head and next_sync_committee based on the proof outputs
-            self.current_head = slot;
+            self.current_head = output_head;
             if proof_outputs.next_sync_committee_hash != FixedBytes::<32>::default() {
                 self.next_sync_committee = proof_outputs.next_sync_committee_hash;
                 // But wait! We need to check the logic in SP1Helios.sol as this can be Zeros
@@ -331,7 +361,8 @@ impl BridgeHead {
             // Emit proof
             let _ = self
                 .trigger_listener_with_proof(ProofMessage {
-                    slot,
+                    input_slot: input_head,
+                    output_slot: output_head,
                     proof,
                     execution_state_root: proof_outputs.execution_state_root,
                     next_sync_committee: proof_outputs.next_sync_committee_hash,
@@ -343,7 +374,7 @@ impl BridgeHead {
             let _ = self
                 .trigger_listener_with_notice(NoticeMessageExtension::HeadAdvanced(
                     NoticeHeadAdvanced {
-                        slot,
+                        head: input_head,
                         next_sync_committee: self.next_sync_committee,
                     },
                 ))
@@ -355,49 +386,65 @@ impl BridgeHead {
                     self.current_head
                 );
             }
-        }
+        }*/
+
         Ok(())
     }
 
     // Handle prover job failures
     async fn handle_prover_failure(&mut self, err: &ProverJobError) {
         // Cache the fields needed from the job so we can release the immutable borrow.
-        let (slot, next_sync_committee) = {
+        let (input_slot, next_sync_committee) = {
             // Immutable borrow to get the job.
             let job = self.prover_jobs.get(&err.job_idx).unwrap();
-            (job.slot, job.next_sync_committee)
+            (job.input_slot, job.next_sync_committee)
         };
 
         let message = format!("Job '{}' failed with error: {}", err.job_idx, err);
         error!("Job '{}' failed with error: {}", err.job_idx, err);
 
         let _ = self
-        .trigger_listener_with_notice(NoticeMessageExtension::JobFailed(NoticeJobFailed {
-            slot,
-            job_idx: err.job_idx,
-            message,
-        }))
-        .await;
+            .trigger_listener_with_notice(NoticeMessageExtension::JobFailed(NoticeJobFailed {
+                input_slot,
+                expected_output_slot: self.next_head,
+                job_idx: err.job_idx,
+                message,
+            }))
+            .await;
 
         // Now that we've released the immutable borrow, we can mutably borrow `self`.
+        // only redo this job if there is nothing else in the queue.. because otherwise it may be pointless FIXME...
         let _ = self
-            .create_prover_job(err.job_idx, slot, next_sync_committee)
+            .create_prover_job() // err.job_idx next_sync_committee
             .await;
     }
 
     /// Commands
 
     // advance
-    async fn advance(&mut self) {
+    async fn advance(&mut self, head: u64, next_sync_committee: FixedBytes<32>) {
+        self.current_head = head;
+        if next_sync_committee != B256::ZERO {
+            // ONLY IF NON ZEROS
+            self.next_sync_committee = next_sync_committee;
+        }
+
+        // Save the checkpoint
+        info!("Saving checkpoint.");
+        save_nb_checkpoint(self.current_head, self.next_sync_committee);
+
         let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::AdvanceRequested(
-                NoticeAdvanceRequested {},
+            .trigger_listener_with_notice(NoticeMessageExtension::HeadAdvanced(
+                NoticeHeadAdvanced {
+                    head,
+                    next_sync_committee,
+                },
             ))
             .await;
 
         // FIXME extract most of this logic out into a 'strategy'
 
-        self.job_idx += 1;
+        /*self.job_idx += 1;
         info!("Advance called ready for job '{}'.", self.job_idx);
         if self.next_head > self.current_head {
             // TODO think about the time until the next transition
@@ -429,14 +476,21 @@ impl BridgeHead {
             if self.auto_advance_index != self.job_idx {
                 info!("Immediately trying to advance.");
                 let _ = self
-                    .create_prover_job(self.job_idx, self.next_head, self.next_sync_committee)
+                    .create_prover_job(self.job_idx) // self.next_sync_committee
                     .await;
             }
         } else {
             info!("Setting flag to attempt auto advance head on next finality update, as nori bridge is currently up to date.");
             // We should wait for the next detected head update.
             self.auto_advance_index = self.job_idx;
-        }
+        }*/
+    }
+
+    // prepare_transition_proof
+    async fn prepare_transition_proof(&mut self) {
+        let _ = self
+            .create_prover_job() // self.job_idx self.next_sync_committee
+            .await;
     }
 
     async fn on_beacon_finality_change(&mut self, next_head: u64) {
@@ -456,13 +510,13 @@ impl BridgeHead {
         info!("Helios beacon finality slot change detected. Nori bridge head is stale. Current head is: '{}' Working head is '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.working_head, self.next_head);
 
         // Auto advance if nessesary
-        if self.auto_advance_index != 0 {
+        /*if self.auto_advance_index != 0 {
             info!("Auto advance invoking job due to finality transition.");
             // Invoke a job
             let _ = self
-                .create_prover_job(self.job_idx, self.next_head, self.next_sync_committee)
+                .create_prover_job(self.job_idx) // self.next_sync_committee
                 .await;
-        }
+        }*/
 
         self.last_beacon_finality_head_checked = next_head;
     }
@@ -483,10 +537,11 @@ impl BridgeHead {
             // Immediately spawn a sp1-prover job to update the bridge based on the checkpoint head value
             self.create_prover_job(self.next_head, self.job_idx);
         }*/
-        info!("Event loop started. Launching a proof job defensively.");
-        let _ = self
-            .create_prover_job(self.job_idx, self.next_head, self.next_sync_committee)
-            .await;
+        info!("Event loop started.");
+        
+        /*let _ = self
+            .create_prover_job() // self.job_idx self.next_sync_committee
+            .await;*/
 
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
@@ -496,13 +551,16 @@ impl BridgeHead {
                 // Read the command receiver for input commands
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
-                        EventLoopCommand::Advance => {
-                            // deal with advance invocation
-                            self.advance().await;
+                        Command::PrepareTransitionProof => {
+                            let _ = self.prepare_transition_proof().await;
                         }
-                        EventLoopCommand::BeaconFinalityChange(message) => {
+                        Command::Advance(message) => {
+                            // deal with advance invocation
+                            let _ = self.advance(message.head, message.next_sync_committee).await;
+                        }
+                        Command::BeaconFinalityChange(message) => {
                             let next_slot = message.slot;
-                            self.on_beacon_finality_change(next_slot).await;
+                            let _ = self.on_beacon_finality_change(next_slot).await;
                         }
                     }
                 }
@@ -521,7 +579,7 @@ impl BridgeHead {
                             );
 
                             let _ = self.handle_prover_success(
-                                result_data.slot(),
+                                result_data.input_head(),
                                 result_data.proof(),
                                 result_data.job_idx(),
                                 time_taken_second,
@@ -530,7 +588,7 @@ impl BridgeHead {
                             self.last_job_duration_sec = time_taken_second;
                         }
                         Err(err) => {
-                            self.handle_prover_failure(&err).await;
+                            let _ = self.handle_prover_failure(&err).await;
                         }
                     }
                 }

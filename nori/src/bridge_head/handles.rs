@@ -1,43 +1,55 @@
-use tokio::sync::mpsc::Sender;
 use crate::beacon_finality_change_detector::api::FinalityChangeMessage;
+use alloy_primitives::FixedBytes;
+use tokio::sync::mpsc::Sender;
 
 /// Event loop commands
-pub enum EventLoopCommand {
-    Advance,
+
+pub struct AdvanceMessage {
+    pub head: u64,
+    pub next_sync_committee: FixedBytes<32>,
+}
+
+pub enum Command {
+    PrepareTransitionProof,
+    Advance(AdvanceMessage),
     BeaconFinalityChange(FinalityChangeMessage),
 }
 
 #[derive(Clone)]
-pub struct AdvanceHandle {
-    command_tx: Sender<EventLoopCommand>,
+pub struct CommandHandle {
+    command_tx: Sender<Command>,
 }
 
-impl AdvanceHandle {
-    pub fn new(command_tx: Sender<EventLoopCommand>) -> Self {
-        Self {
-            command_tx
-        }
+impl CommandHandle {
+    pub fn new(command_tx: Sender<Command>) -> Self {
+        Self { command_tx }
     }
 
-    pub async fn advance(&self) {
-        let _ = self.command_tx.send(EventLoopCommand::Advance).await;
+    pub async fn prepare_transition_proof(&self) {
+        let _ = self.command_tx.send(Command::PrepareTransitionProof).await;
+    }
+
+    pub async fn advance(&self, head: u64, next_sync_committee: FixedBytes<32>) {
+        let _ = self.command_tx.send(Command::Advance(AdvanceMessage {head, next_sync_committee})).await;
     }
 }
-
 
 #[derive(Clone)]
 pub struct BeaconFinalityChangeHandle {
-    command_tx: Sender<EventLoopCommand>,
+    command_tx: Sender<Command>,
 }
 
 impl BeaconFinalityChangeHandle {
-    pub fn new(command_tx: Sender<EventLoopCommand>) -> Self {
-        Self {
-            command_tx
-        }
+    pub fn new(command_tx: Sender<Command>) -> Self {
+        Self { command_tx }
     }
 
     pub async fn on_beacon_change(&self, slot: u64) {
-        let _ = self.command_tx.send(EventLoopCommand::BeaconFinalityChange(FinalityChangeMessage { slot })).await;
+        let _ = self
+            .command_tx
+            .send(Command::BeaconFinalityChange(FinalityChangeMessage {
+                slot,
+            }))
+            .await;
     }
 }

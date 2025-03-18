@@ -1,6 +1,6 @@
 use super::{
     api::{BridgeHeadEvent, ProofMessage},
-    handles::AdvanceHandle,
+    handles::CommandHandle,
     notice_messages::{NoticeMessage, NoticeMessageExtension},
 };
 use crate::utils::handle_nori_proof;
@@ -55,11 +55,11 @@ pub trait EventObserver: Send + Sync {
 /// Reference implementation of EventObserver
 pub struct ExampleEventObserver {
     /// Handle to trigger bridge head advancement
-    bridge_head: AdvanceHandle,
+    bridge_head: CommandHandle,
 }
 
 impl ExampleEventObserver {
-    pub fn new(bridge_head: AdvanceHandle) -> Self {
+    pub fn new(bridge_head: CommandHandle) -> Self {
         Self { bridge_head }
     }
 }
@@ -67,12 +67,15 @@ impl ExampleEventObserver {
 #[async_trait]
 impl EventObserver for ExampleEventObserver {
     async fn on_proof(&mut self, proof_data: ProofMessage) -> Result<()> {
-        println!("PROOF| {}", proof_data.slot);
+        println!("PROOF| {}", proof_data.input_slot);
 
         info!("Saving Nori sp1 proof");
-        handle_nori_proof(&proof_data.proof, proof_data.slot).await?;
+        handle_nori_proof(&proof_data.proof, proof_data.input_slot).await?;
 
-        self.bridge_head.advance().await;
+        // Advance nori head
+        self.bridge_head.advance(proof_data.output_slot, proof_data.next_sync_committee).await;
+        // Prepare the next proof
+        self.bridge_head.prepare_transition_proof().await; 
 
         Ok(())
     }
@@ -82,6 +85,7 @@ impl EventObserver for ExampleEventObserver {
         match notice_data.clone().extension {
             NoticeMessageExtension::Started(data) => {
                 println!("NOTICE_TYPE| Started");
+                self.bridge_head.prepare_transition_proof().await; // Start the initial job
             }
             NoticeMessageExtension::Warning(data) => {
                 println!("NOTICE_TYPE| Warning: {:?}", data.message);
@@ -101,11 +105,11 @@ impl EventObserver for ExampleEventObserver {
             NoticeMessageExtension::FinalityTransitionDetected(data) => {
                 println!("NOTICE_TYPE| Finality Transition Detected: {:?}", data.slot);
             }
-            NoticeMessageExtension::AdvanceRequested(data) => {
+            /*NoticeMessageExtension::Advance(data) => {
                 println!("NOTICE_TYPE| Advance Requested");
-            }
+            }*/
             NoticeMessageExtension::HeadAdvanced(data) => {
-                println!("NOTICE_TYPE| Head Advanced: {:?}", data.slot);
+                println!("NOTICE_TYPE| Head Advanced: {:?}", data.head);
             }
         }
 

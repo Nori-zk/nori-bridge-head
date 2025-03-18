@@ -11,13 +11,13 @@ pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
 
 pub struct ProverJobOutput {
     job_idx: u64,
-    slot: u64,
+    input_head: u64,
     proof: SP1ProofWithPublicValues,
 }
 
 impl ProverJobOutput {
-    pub fn slot(&self) -> u64 {
-        self.slot
+    pub fn input_head(&self) -> u64 {
+        self.input_head
     }
 
     pub fn proof(&self) -> SP1ProofWithPublicValues {
@@ -36,11 +36,11 @@ impl ProverJobOutput {
 /// * `last_next_sync_committee` -  The previous hash of next_sync_committee
 pub async fn finality_update_job(
     job_idx: u64,
-    slot: u64,
+    input_head: u64,
     last_next_sync_committee: FixedBytes<32>,
 ) -> Result<ProverJobOutput> {
     // Get latest beacon checkpoint
-    let helios_checkpoint = get_checkpoint(slot).await?;
+    let helios_checkpoint = get_checkpoint(input_head).await?;
 
     // Re init helios client
     let mut helios_update_client = get_client(helios_checkpoint).await?;
@@ -116,5 +116,5 @@ pub async fn finality_update_job(
         })
         .await??; // Await the blocking task and propagate errors properly
 
-    Ok(ProverJobOutput {proof, slot, job_idx})
+    Ok(ProverJobOutput {proof, input_head, job_idx})
 }

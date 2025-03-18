@@ -36,18 +36,21 @@ pub struct NoticeWarning {
 }
 #[derive(Serialize, Deserialize, Clone)]
 pub struct  NoticeJobCreated {
-    pub slot: u64,
+    pub input_slot: u64,
+    pub expected_output_slot: u64,
     pub job_idx: u64
 }
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoticeJobSucceeded {
-    pub slot: u64,
+    pub input_slot: u64,
+    pub output_slot: u64,
     pub job_idx: u64,
     pub next_sync_committee: FixedBytes<32>
 }
 #[derive(Serialize, Deserialize, Clone)]
 pub struct  NoticeJobFailed {
-    pub slot: u64,
+    pub input_slot: u64,
+    pub expected_output_slot: u64,
     pub job_idx: u64,
     pub message: String
 }
@@ -55,13 +58,14 @@ pub struct  NoticeJobFailed {
 pub struct NoticeFinalityTransitionDetected {
     pub slot: u64
 }
-#[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeAdvanceRequested {
-
-}
+/*#[derive(Serialize, Deserialize, Clone)]
+pub struct NoticeAdvance {
+    pub head: u64,
+    pub next_sync_committee: FixedBytes<32>,
+}*/
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoticeHeadAdvanced {
-    pub slot: u64,
+    pub head: u64,
     pub next_sync_committee: FixedBytes<32>
 }
 
@@ -73,7 +77,7 @@ pub enum NoticeMessageExtension {
     JobSucceeded(NoticeJobSucceeded),
     JobFailed(NoticeJobFailed),
     FinalityTransitionDetected(NoticeFinalityTransitionDetected),
-    AdvanceRequested(NoticeAdvanceRequested),
+    //Advance(NoticeAdvance),
     HeadAdvanced(NoticeHeadAdvanced)    
 }
 
@@ -91,7 +95,7 @@ pub fn get_notice_message_type(extension: &NoticeMessageExtension) -> NoticeMess
         NoticeMessageExtension::JobSucceeded(_) => NoticeMessageType::JobSucceeded,
         NoticeMessageExtension::JobFailed(_) => NoticeMessageType::JobFailed,
         NoticeMessageExtension::FinalityTransitionDetected(_) => NoticeMessageType::FinalityTransitionDetected,
-        NoticeMessageExtension::AdvanceRequested(_) => NoticeMessageType::AdvanceRequested,
+        //NoticeMessageExtension::Advance(_) => NoticeMessageType::AdvanceRequested,
         NoticeMessageExtension::HeadAdvanced(_) => NoticeMessageType::HeadAdvanced,
     }
 }
