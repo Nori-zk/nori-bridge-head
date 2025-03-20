@@ -1,7 +1,7 @@
 use super::{
     api::{BridgeHeadEvent, ProofMessage},
     handles::CommandHandle,
-    notice_messages::{NoticeMessage, BridgeHeadNoticeMessageExtension},
+    notice_messages::BridgeHeadNoticeMessage,
 };
 use crate::utils::handle_nori_proof;
 use anyhow::{Context, Result};
@@ -15,7 +15,7 @@ pub trait EventObserver: Send + Sync {
     /// Called when a new proof is generated
     async fn on_proof(&mut self, proof_job_data: ProofMessage) -> anyhow::Result<()>;
     /// Called when a system notice is generated
-    async fn on_notice(&mut self, notice_data: NoticeMessage) -> anyhow::Result<()>;
+    async fn on_notice(&mut self, notice_data: BridgeHeadNoticeMessage) -> anyhow::Result<()>;
 
     /// Run method default for handling event messages
     async fn run(&mut self, mut bridge_head_event_receiver: tokio::sync::broadcast::Receiver<BridgeHeadEvent>) {
@@ -80,40 +80,40 @@ impl EventObserver for ExampleEventObserver {
         Ok(())
     }
 
-    async fn on_notice(&mut self, notice_data: NoticeMessage) -> Result<()> {
+    async fn on_notice(&mut self, notice_data: BridgeHeadNoticeMessage) -> Result<()> {
         // Do something specific
-        match notice_data.clone().extension {
-            BridgeHeadNoticeMessageExtension::Started(data) => {
+        match &notice_data {
+            BridgeHeadNoticeMessage::Started(data) => {                
                 println!("NOTICE_TYPE| Started");
                 let _ = self.bridge_head.prepare_transition_proof().await; // Start the initial job
             }
-            BridgeHeadNoticeMessageExtension::Warning(data) => {
-                println!("NOTICE_TYPE| Warning: {:?}", data.message);
+            BridgeHeadNoticeMessage::Warning(data) => {
+                println!("NOTICE_TYPE| Warning: {:?}", data.extension.message);
             }
-            BridgeHeadNoticeMessageExtension::JobCreated(data) => {
-                println!("NOTICE_TYPE| Job Created: {:?}", data.job_idx);
+            BridgeHeadNoticeMessage::JobCreated(data) => {
+                println!("NOTICE_TYPE| Job Created: {:?}", data.extension.job_idx);
             }
-            BridgeHeadNoticeMessageExtension::JobSucceeded(data) => {
-                println!("NOTICE_TYPE| Job Succeeded: {:?}", data.job_idx);
+            BridgeHeadNoticeMessage::JobSucceeded(data) => {
+                println!("NOTICE_TYPE| Job Succeeded: {:?}", data.extension.job_idx);
             }
-            BridgeHeadNoticeMessageExtension::JobFailed(data) => {
+            BridgeHeadNoticeMessage::JobFailed(data) => {
                 println!(
                     "NOTICE_TYPE| Job Failed: {:?}: {}",
-                    data.job_idx, data.message
+                    data.extension.job_idx, data.extension.message
                 );
                 // If there are no other jobs in the queue retry the failure
-                if data.n_job_in_buffer == 0 { 
+                if data.extension.n_job_in_buffer == 0 { 
                     let _ = self.bridge_head.prepare_transition_proof().await;
                 }
             }
-            BridgeHeadNoticeMessageExtension::FinalityTransitionDetected(data) => {
-                println!("NOTICE_TYPE| Finality Transition Detected: {:?}", data.slot);
+            BridgeHeadNoticeMessage::FinalityTransitionDetected(data) => {
+                println!("NOTICE_TYPE| Finality Transition Detected: {:?}", data.extension.slot);
             }
             /*NoticeMessageExtension::Advance(data) => {
                 println!("NOTICE_TYPE| Advance Requested");
             }*/
-            BridgeHeadNoticeMessageExtension::HeadAdvanced(data) => {
-                println!("NOTICE_TYPE| Head Advanced: {:?}", data.head);
+            BridgeHeadNoticeMessage::HeadAdvanced(data) => {
+                println!("NOTICE_TYPE| Head Advanced: {:?}", data.extension.head);
             }
         }
 

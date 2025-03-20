@@ -1,9 +1,10 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
 use super::handles::{BeaconFinalityChangeHandle, Command, CommandHandle};
 use super::notice_messages::{
-    get_notice_message_type, NoticeExtensionBridgeHeadFinalityTransitionDetected,
-    NoticeExtensionBridgeHeadAdvanced, NoticeExtensionBridgeHeadJobCreated, NoticeExtensionBridgeHeadJobFailed, NoticeExtensionBridgeHeadJobSucceeded, NoticeMessage,
-    BridgeHeadNoticeMessageExtension, NoticeExtensionBridgeHeadStarted,
+    BridgeHeadNoticeMessage, BridgeHeadNoticeMessageExtension,
+    NoticeExtensionBridgeHeadAdvanced, NoticeExtensionBridgeHeadFinalityTransitionDetected,
+    NoticeExtensionBridgeHeadJobCreated, NoticeExtensionBridgeHeadJobFailed,
+    NoticeExtensionBridgeHeadJobSucceeded, NoticeExtensionBridgeHeadStarted,
 }; // NoticeAdvance
 use super::validate::validate_env;
 use crate::helios::get_latest_finality_head;
@@ -76,7 +77,7 @@ struct ProverJob {
 #[derive(Clone)]
 pub enum BridgeHeadEvent {
     ProofMessage(ProofMessage),
-    NoticeMessage(NoticeMessage),
+    NoticeMessage(BridgeHeadNoticeMessage),
 }
 
 /// Core bridge head implementation that manages proof generation and state transitions
@@ -156,7 +157,7 @@ impl BridgeHead {
                 //working_head: current_head,
                 //last_beacon_finality_head_checked: u64::default(),
                 //auto_advance_index: 1,
-                job_idx: 1,
+                job_idx: 0,
                 //last_job_duration_sec: 0.0,
                 last_finality_transition_instant: Instant::now(),
                 next_sync_committee,
@@ -190,27 +191,10 @@ impl BridgeHead {
     ) -> Result<()> {
         let now = Utc::now();
         let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
-        let message_type = get_notice_message_type(&extension);
-        /*let base_message = NoticeBaseMessage {
-            timestamp: iso_string,
-            //current_head: self.current_head,
-            //next_slot: self.next_slot,
-            //working_head: self.working_head,
-            //last_beacon_finality_head_checked: self.last_beacon_finality_head_checked,
-            //last_job_duration_seconds: self.last_job_duration_sec,
-            /*time_until_next_finality_transition_seconds: Instant::now()
-            .duration_since(self.last_finality_transition_instant)
-            .as_secs_f64(),*/
-        };*/
-        let full_message = NoticeMessage {
-            //base: base_message,
-            datetime_iso: iso_string,
-            message_type,
-            extension,
-        };
+        let notice_message = extension.into_message(iso_string);
         let _ = self
             .event_tx
-            .send(BridgeHeadEvent::NoticeMessage(full_message));
+            .send(BridgeHeadEvent::NoticeMessage(notice_message));
         Ok(())
     }
 
@@ -344,14 +328,16 @@ impl BridgeHead {
         error!("Job '{}' failed with error: {}", err.job_idx, err);
 
         let _ = self
-            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobFailed(NoticeExtensionBridgeHeadJobFailed {
-                input_slot,
-                expected_output_slot,
-                job_idx: err.job_idx,
-                message,
-                elapsed_sec,
-                n_job_in_buffer: n_jobs as u64,
-            }))
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobFailed(
+                NoticeExtensionBridgeHeadJobFailed {
+                    input_slot,
+                    expected_output_slot,
+                    job_idx: err.job_idx,
+                    message,
+                    elapsed_sec,
+                    n_job_in_buffer: n_jobs as u64,
+                },
+            ))
             .await;
 
         // Now that we've released the immutable borrow, we can mutably borrow `self`.
@@ -426,11 +412,13 @@ impl BridgeHead {
         }*/
 
         let _ = self
-            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobCreated(NoticeExtensionBridgeHeadJobCreated {
-                input_slot: self.current_head,
-                job_idx,
-                expected_output_slot: self.next_slot,
-            }))
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobCreated(
+                NoticeExtensionBridgeHeadJobCreated {
+                    input_slot: self.current_head,
+                    job_idx,
+                    expected_output_slot: self.next_slot,
+                },
+            ))
             .await;
     }
 
@@ -511,9 +499,11 @@ impl BridgeHead {
 
         // Notify of transition
         let _ = self
-            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::FinalityTransitionDetected(
-                NoticeExtensionBridgeHeadFinalityTransitionDetected { slot },
-            ))
+            .trigger_listener_with_notice(
+                BridgeHeadNoticeMessageExtension::FinalityTransitionDetected(
+                    NoticeExtensionBridgeHeadFinalityTransitionDetected { slot },
+                ),
+            )
             .await;
 
         // Update next head
@@ -541,7 +531,9 @@ impl BridgeHead {
         // that happened while this process was offline
 
         let _ = self
-            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::Started(NoticeExtensionBridgeHeadStarted {}))
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::Started(
+                NoticeExtensionBridgeHeadStarted {},
+            ))
             .await;
 
         // This could be useful in the future be lets be careful. If there is nothing to invoke advance the it would not auto emit

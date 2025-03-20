@@ -1,8 +1,11 @@
 use alloy_primitives::FixedBytes;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::{Map, Value};
+use serde::de::Error; 
 
-/// Base notice message types
-#[derive(Serialize, Deserialize, Clone)]
+// ================  BASE TYPES ================ //
+/// Base message types (enum)
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum NoticeMessageType {
     BridgeHeadStarted,
     BridgeHeadWarning,
@@ -10,32 +13,54 @@ pub enum NoticeMessageType {
     BridgeHeadJobSucceeded,
     BridgeHeadJobFailed,
     BridgeHeadFinalityTransitionDetected,
-    BridgeHeadAdvanceRequested,
     BridgeHeadAdvanced,
 }
 
-// Message extensions
-#[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeExtensionBridgeHeadStarted {}
-#[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeExtensionBridgeHeadWarning {
-    pub message: String
+// ================ MACRO FOR MESSAGE TYPES ================ //
+macro_rules! define_message {
+    ($msg_type:ident, $ext_type:ty) => {
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        pub struct $msg_type {
+            pub datetime_iso: String,
+            pub extension: $ext_type,
+            pub message_type: NoticeMessageType,
+        }
+
+        impl $msg_type {
+            pub fn new(datetime_iso: String, extension: $ext_type) -> Self {
+                Self {
+                    datetime_iso,
+                    extension,
+                    message_type: NoticeMessageType::$msg_type,
+                }
+            }
+        }
+    };
 }
-#[derive(Serialize, Deserialize, Clone)]
-pub struct  NoticeExtensionBridgeHeadJobCreated {
+
+// ================ EXTENSION STRUCTS ================ //
+// Message extensions
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NoticeExtensionBridgeHeadStarted {}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NoticeExtensionBridgeHeadWarning {
+    pub message: String,
+}
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NoticeExtensionBridgeHeadJobCreated {
     pub input_slot: u64,
     pub expected_output_slot: u64,
-    pub job_idx: u64
+    pub job_idx: u64,
 }
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobSucceeded {
     pub input_slot: u64,
     pub output_slot: u64,
     pub job_idx: u64,
     pub next_sync_committee: FixedBytes<32>,
-    pub elapsed_sec: f64
+    pub elapsed_sec: f64,
 }
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobFailed {
     pub input_slot: u64,
     pub expected_output_slot: u64,
@@ -44,16 +69,118 @@ pub struct NoticeExtensionBridgeHeadJobFailed {
     pub elapsed_sec: f64,
     pub n_job_in_buffer: u64,
 }
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadFinalityTransitionDetected {
-    pub slot: u64
+    pub slot: u64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadAdvanced {
     pub head: u64,
-    pub next_sync_committee: FixedBytes<32>
+    pub next_sync_committee: FixedBytes<32>,
 }
+
+// ================ GENERATE MESSAGES VIA MACRO ================ //
+define_message!(BridgeHeadStarted, NoticeExtensionBridgeHeadStarted);
+define_message!(BridgeHeadWarning, NoticeExtensionBridgeHeadWarning);
+define_message!(BridgeHeadJobCreated, NoticeExtensionBridgeHeadJobCreated);
+define_message!(
+    BridgeHeadJobSucceeded,
+    NoticeExtensionBridgeHeadJobSucceeded
+);
+define_message!(BridgeHeadJobFailed, NoticeExtensionBridgeHeadJobFailed);
+define_message!(
+    BridgeHeadFinalityTransitionDetected,
+    NoticeExtensionBridgeHeadFinalityTransitionDetected
+);
+define_message!(BridgeHeadAdvanced, NoticeExtensionBridgeHeadAdvanced);
+
+
+
+#[derive(Clone)]
+pub enum BridgeHeadNoticeMessage {
+    Started(BridgeHeadStarted),
+    Warning(BridgeHeadWarning),
+    JobCreated(BridgeHeadJobCreated),
+    JobSucceeded(BridgeHeadJobSucceeded),
+    JobFailed(BridgeHeadJobFailed),
+    FinalityTransitionDetected(BridgeHeadFinalityTransitionDetected),
+    HeadAdvanced(BridgeHeadAdvanced)
+}
+
+impl Serialize for BridgeHeadNoticeMessage {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            BridgeHeadNoticeMessage::Started(msg) => msg.serialize(serializer),
+            BridgeHeadNoticeMessage::Warning(msg) => msg.serialize(serializer),
+            BridgeHeadNoticeMessage::JobCreated(msg) => msg.serialize(serializer),
+            BridgeHeadNoticeMessage::JobSucceeded(msg) => msg.serialize(serializer),
+            BridgeHeadNoticeMessage::JobFailed(msg) => msg.serialize(serializer),
+            BridgeHeadNoticeMessage::FinalityTransitionDetected(msg) => msg.serialize(serializer),
+            BridgeHeadNoticeMessage::HeadAdvanced(msg) => msg.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BridgeHeadNoticeMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Helper struct to extract message_type
+        #[derive(Deserialize)]
+        struct Helper {
+            message_type: NoticeMessageType,
+            #[serde(flatten)]
+            other: Map<String, Value>,
+        }
+
+        let helper = Helper::deserialize(deserializer)?;
+        let json_value = Value::Object(helper.other);
+        
+        match helper.message_type {
+            NoticeMessageType::BridgeHeadStarted => {
+                let msg = BridgeHeadStarted::deserialize(json_value)
+                    .map_err(D::Error::custom)?;
+                Ok(BridgeHeadNoticeMessage::Started(msg))
+            },
+            NoticeMessageType::BridgeHeadWarning => {
+                let msg = BridgeHeadWarning::deserialize(json_value)
+                    .map_err(D::Error::custom)?;
+                Ok(BridgeHeadNoticeMessage::Warning(msg))
+            },
+            NoticeMessageType::BridgeHeadJobCreated => {
+                let msg = BridgeHeadJobCreated::deserialize(json_value)
+                    .map_err(D::Error::custom)?;
+                Ok(BridgeHeadNoticeMessage::JobCreated(msg))
+            },
+            NoticeMessageType::BridgeHeadJobSucceeded => {
+                let msg = BridgeHeadJobSucceeded::deserialize(json_value)
+                    .map_err(D::Error::custom)?;
+                Ok(BridgeHeadNoticeMessage::JobSucceeded(msg))
+            },
+            NoticeMessageType::BridgeHeadJobFailed => {
+                let msg = BridgeHeadJobFailed::deserialize(json_value)
+                    .map_err(D::Error::custom)?;
+                Ok(BridgeHeadNoticeMessage::JobFailed(msg))
+            },
+            NoticeMessageType::BridgeHeadFinalityTransitionDetected => {
+                let msg = BridgeHeadFinalityTransitionDetected::deserialize(json_value)
+                    .map_err(D::Error::custom)?;
+                Ok(BridgeHeadNoticeMessage::FinalityTransitionDetected(msg))
+            },
+            NoticeMessageType::BridgeHeadAdvanced => {
+                let msg = BridgeHeadAdvanced::deserialize(json_value)
+                    .map_err(D::Error::custom)?;
+                Ok(BridgeHeadNoticeMessage::HeadAdvanced(msg))
+            },
+        }
+    }
+}
+
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum BridgeHeadNoticeMessageExtension {
@@ -63,24 +190,27 @@ pub enum BridgeHeadNoticeMessageExtension {
     JobSucceeded(NoticeExtensionBridgeHeadJobSucceeded),
     JobFailed(NoticeExtensionBridgeHeadJobFailed),
     FinalityTransitionDetected(NoticeExtensionBridgeHeadFinalityTransitionDetected),
-    HeadAdvanced(NoticeExtensionBridgeHeadAdvanced)    
+    HeadAdvanced(NoticeExtensionBridgeHeadAdvanced)
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeMessage {
-    pub datetime_iso: String,
-    pub message_type: NoticeMessageType,
-    pub extension: BridgeHeadNoticeMessageExtension
-}
 
-pub fn get_notice_message_type(extension: &BridgeHeadNoticeMessageExtension) -> NoticeMessageType {
-    match extension {
-        BridgeHeadNoticeMessageExtension::Started(_) => NoticeMessageType::BridgeHeadStarted,
-        BridgeHeadNoticeMessageExtension::Warning(_) => NoticeMessageType::BridgeHeadWarning,
-        BridgeHeadNoticeMessageExtension::JobCreated(_) => NoticeMessageType::BridgeHeadJobCreated,
-        BridgeHeadNoticeMessageExtension::JobSucceeded(_) => NoticeMessageType::BridgeHeadJobSucceeded,
-        BridgeHeadNoticeMessageExtension::JobFailed(_) => NoticeMessageType::BridgeHeadJobFailed,
-        BridgeHeadNoticeMessageExtension::FinalityTransitionDetected(_) => NoticeMessageType::BridgeHeadFinalityTransitionDetected,
-        BridgeHeadNoticeMessageExtension::HeadAdvanced(_) => NoticeMessageType::BridgeHeadAdvanced,
+impl BridgeHeadNoticeMessageExtension {
+    pub fn into_message(self, datetime_iso: String) -> BridgeHeadNoticeMessage {
+        match self {
+            Self::Started(ext) => 
+                BridgeHeadNoticeMessage::Started(BridgeHeadStarted::new(datetime_iso, ext)),
+            Self::Warning(ext) => 
+                BridgeHeadNoticeMessage::Warning(BridgeHeadWarning::new( datetime_iso, ext )),
+            Self::JobCreated(ext) => 
+                BridgeHeadNoticeMessage::JobCreated(BridgeHeadJobCreated::new(datetime_iso,  ext )),
+            Self::JobSucceeded(ext) => 
+                BridgeHeadNoticeMessage::JobSucceeded(BridgeHeadJobSucceeded::new(datetime_iso,  ext )),
+            Self::JobFailed(ext) => 
+                BridgeHeadNoticeMessage::JobFailed(BridgeHeadJobFailed::new(datetime_iso,  ext )),
+            Self::FinalityTransitionDetected(ext) => 
+                BridgeHeadNoticeMessage::FinalityTransitionDetected(BridgeHeadFinalityTransitionDetected::new(datetime_iso, ext )),
+            Self::HeadAdvanced(ext) => 
+                BridgeHeadNoticeMessage::HeadAdvanced(BridgeHeadAdvanced::new(  datetime_iso,  ext )),
+        }
     }
 }
