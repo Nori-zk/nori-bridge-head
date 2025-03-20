@@ -99,7 +99,7 @@ pub struct BridgeHead {
     /// Unique identifier for prover jobs
     job_idx: u64,
     /// Duration of last completed job in seconds
-    last_job_duration_sec: f64,
+    //last_job_duration_sec: f64,
     /// Clocktime of last finality transition
     last_finality_transition_instant: Instant,
     /// Hash of the next sync committee
@@ -118,10 +118,7 @@ pub struct BridgeHead {
 
 impl BridgeHead {
     pub async fn new() -> (u64, CommandHandle, BeaconFinalityChangeHandle, Self) {
-        validate_env(&[
-            "SOURCE_CONSENSUS_RPC_URL",
-            "SP1_PROVER",
-        ]);
+        validate_env(&["SOURCE_CONSENSUS_RPC_URL", "SP1_PROVER"]);
         // Initialise slot head / commitee vars
         let current_head;
         let mut next_sync_committee = FixedBytes::<32>::default();
@@ -160,7 +157,7 @@ impl BridgeHead {
                 //last_beacon_finality_head_checked: u64::default(),
                 //auto_advance_index: 1,
                 job_idx: 1,
-                last_job_duration_sec: 0.0,
+                //last_job_duration_sec: 0.0,
                 last_finality_transition_instant: Instant::now(),
                 next_sync_committee,
                 prover_jobs: HashMap::new(),
@@ -196,14 +193,14 @@ impl BridgeHead {
         let message_type = get_notice_message_type(&extension);
         let base_message = NoticeBaseMessage {
             timestamp: iso_string,
-            current_head: self.current_head,
-            next_slot: self.next_slot,
+            //current_head: self.current_head,
+            //next_slot: self.next_slot,
             //working_head: self.working_head,
             //last_beacon_finality_head_checked: self.last_beacon_finality_head_checked,
             //last_job_duration_seconds: self.last_job_duration_sec,
-            time_until_next_finality_transition_seconds: Instant::now()
-                .duration_since(self.last_finality_transition_instant)
-                .as_secs_f64(),
+            /*time_until_next_finality_transition_seconds: Instant::now()
+            .duration_since(self.last_finality_transition_instant)
+            .as_secs_f64(),*/
         };
         let full_message = NoticeMessage {
             base: base_message,
@@ -216,76 +213,7 @@ impl BridgeHead {
         Ok(())
     }
 
-    /// Jobs
-
-    // Create prover job
-    async fn create_prover_job(
-        &mut self, //expected_slot: u64,
-                   //next_sync_committee: FixedBytes<32>,
-    ) {
-        self.job_idx += 1;
-        let job_idx: u64 = self.job_idx;
-        info!(
-            "Nori head updater recieved a new job {}. Spawning a new worker.",
-            job_idx
-        );
-
-        //self.working_head = self.current_head; // Mark the working head as what was given by the slot
-
-        self.prover_jobs.insert(
-            job_idx,
-            ProverJob {
-                start_instant: Instant::now(),
-                next_sync_committee: self.next_sync_committee,
-                input_slot: self.current_head,
-                expected_output_slot: self.next_slot,
-            },
-        );
-
-        let tx = self.job_tx.clone();
-        let current_head_clone = self.current_head;
-        let next_sync_committee_clone = self.next_sync_committee;
-
-        // Spawn proof job in worker thread (check for blocking)
-        tokio::spawn(async move {
-            let proof_result =
-                finality_update_job(job_idx, current_head_clone, next_sync_committee_clone).await;
-
-            match proof_result {
-                Ok(prover_job_output) => {
-                    tx.send(Ok(prover_job_output)).unwrap();
-                }
-                Err(error) => {
-                    let job_error = ProverJobError { job_idx, error };
-                    tx.send(Err(job_error)).unwrap();
-                }
-            }
-        });
-
-        /*
-           Need to carefully deactivate auto_advance, but lets think about this....
-           We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
-           If this task was the last auto advance task we should cancel that behaviour
-        */
-        /*if job_idx >= self.auto_advance_index && self.auto_advance_index != 0 {
-            // if its already zero we dont need to do this FIXME
-            // Do we need the if... this should always be true CHECKME
-            // gt to account for if a previous job spawned failed with an error and didnt cancel itself
-            info!(
-                "Cancelling auto advance for job '{}'.",
-                self.auto_advance_index
-            );
-            self.auto_advance_index = 0;
-        }*/
-
-        let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::JobCreated(NoticeJobCreated {
-                input_slot: self.current_head,
-                job_idx,
-                expected_output_slot: self.next_slot,
-            }))
-            .await;
-    }
+    /// Jobs Handlers
 
     // Handle prover job success
     async fn handle_prover_success(
@@ -407,7 +335,7 @@ impl BridgeHead {
                 job.input_slot,
                 job.expected_output_slot,
                 self.prover_jobs.len(),
-                elapsed_sec
+                elapsed_sec,
             )
         };
 
@@ -421,20 +349,89 @@ impl BridgeHead {
                 job_idx: err.job_idx,
                 message,
                 elapsed_sec,
-                n_job_in_buffer: n_jobs as u64
+                n_job_in_buffer: n_jobs as u64,
             }))
             .await;
 
         // Now that we've released the immutable borrow, we can mutably borrow `self`.
         // only redo this job if there is nothing else in the queue.. because otherwise it may be pointless FIXME...
-        if n_jobs == 0 {
+        /*if n_jobs == 0 {
             let _ = self
                 .create_prover_job() // err.job_idx next_sync_committee
                 .await;
-        }
+        }*/
     }
 
     /// Commands
+
+    // Create prover job
+    async fn prepare_transition_proof(
+        &mut self, //expected_slot: u64,
+                   //next_sync_committee: FixedBytes<32>,
+    ) {
+        self.job_idx += 1;
+        let job_idx: u64 = self.job_idx;
+        info!(
+            "Nori head updater recieved a new job {}. Spawning a new worker.",
+            job_idx
+        );
+
+        //self.working_head = self.current_head; // Mark the working head as what was given by the slot
+
+        self.prover_jobs.insert(
+            job_idx,
+            ProverJob {
+                start_instant: Instant::now(),
+                next_sync_committee: self.next_sync_committee,
+                input_slot: self.current_head,
+                expected_output_slot: self.next_slot,
+            },
+        );
+
+        let tx = self.job_tx.clone();
+        let current_head_clone = self.current_head;
+        let next_sync_committee_clone = self.next_sync_committee;
+
+        // Spawn proof job in worker thread (check for blocking)
+        tokio::spawn(async move {
+            let proof_result =
+                finality_update_job(job_idx, current_head_clone, next_sync_committee_clone).await;
+
+            match proof_result {
+                Ok(prover_job_output) => {
+                    tx.send(Ok(prover_job_output)).unwrap();
+                }
+                Err(error) => {
+                    let job_error = ProverJobError { job_idx, error };
+                    tx.send(Err(job_error)).unwrap();
+                }
+            }
+        });
+
+        /*
+           Need to carefully deactivate auto_advance, but lets think about this....
+           We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
+           If this task was the last auto advance task we should cancel that behaviour
+        */
+        /*if job_idx >= self.auto_advance_index && self.auto_advance_index != 0 {
+            // if its already zero we dont need to do this FIXME
+            // Do we need the if... this should always be true CHECKME
+            // gt to account for if a previous job spawned failed with an error and didnt cancel itself
+            info!(
+                "Cancelling auto advance for job '{}'.",
+                self.auto_advance_index
+            );
+            self.auto_advance_index = 0;
+        }*/
+
+        let _ = self
+            .trigger_listener_with_notice(NoticeMessageExtension::JobCreated(NoticeJobCreated {
+                input_slot: self.current_head,
+                job_idx,
+                expected_output_slot: self.next_slot,
+            }))
+            .await;
+    }
 
     // advance
     async fn advance(&mut self, head: u64, next_sync_committee: FixedBytes<32>) {
@@ -502,11 +499,11 @@ impl BridgeHead {
     }
 
     // prepare_transition_proof
-    async fn prepare_transition_proof(&mut self) {
+    /*async fn prepare_transition_proof(&mut self) {
         let _ = self
-            .create_prover_job() // self.job_idx self.next_sync_committee
+            .prepare_transition_proof() // self.job_idx self.next_sync_committee
             .await;
-    }
+    }*/
 
     async fn on_beacon_finality_change(&mut self, slot: u64) {
         // We have a transition!
@@ -600,7 +597,7 @@ impl BridgeHead {
                                 time_taken_second,
                             ).await;
 
-                            self.last_job_duration_sec = time_taken_second;
+                            //self.last_job_duration_sec = time_taken_second;
                         }
                         Err(err) => {
                             let _ = self.handle_prover_failure(&err).await;

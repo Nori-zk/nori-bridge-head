@@ -18,9 +18,9 @@ pub enum NoticeMessageType {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoticeBaseMessage {
     pub timestamp: String,
-    pub current_head: u64,
-    pub next_slot: u64,
-    pub time_until_next_finality_transition_seconds: f64
+    //pub current_head: u64,
+    //pub next_slot: u64,
+    //pub time_until_next_finality_transition_seconds: f64
 }
 
 // Message extensions
@@ -72,7 +72,6 @@ pub enum NoticeMessageExtension {
     JobSucceeded(NoticeJobSucceeded),
     JobFailed(NoticeJobFailed),
     FinalityTransitionDetected(NoticeFinalityTransitionDetected),
-    //Advance(NoticeAdvance),
     HeadAdvanced(NoticeHeadAdvanced)    
 }
 
@@ -91,7 +90,6 @@ pub fn get_notice_message_type(extension: &NoticeMessageExtension) -> NoticeMess
         NoticeMessageExtension::JobSucceeded(_) => NoticeMessageType::JobSucceeded,
         NoticeMessageExtension::JobFailed(_) => NoticeMessageType::JobFailed,
         NoticeMessageExtension::FinalityTransitionDetected(_) => NoticeMessageType::FinalityTransitionDetected,
-        //NoticeMessageExtension::Advance(_) => NoticeMessageType::AdvanceRequested,
         NoticeMessageExtension::HeadAdvanced(_) => NoticeMessageType::HeadAdvanced,
     }
 }
