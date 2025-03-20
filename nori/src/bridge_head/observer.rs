@@ -73,9 +73,9 @@ impl EventObserver for ExampleEventObserver {
         handle_nori_proof(&proof_data.proof, proof_data.input_slot).await?;
 
         // Advance nori head
-        self.bridge_head.advance(proof_data.output_slot, proof_data.next_sync_committee).await;
+        let _ = self.bridge_head.advance(proof_data.output_slot, proof_data.next_sync_committee).await;
         // Prepare the next proof
-        self.bridge_head.prepare_transition_proof().await; 
+        let _ = self.bridge_head.prepare_transition_proof().await; 
 
         Ok(())
     }
@@ -85,7 +85,7 @@ impl EventObserver for ExampleEventObserver {
         match notice_data.clone().extension {
             NoticeMessageExtension::Started(data) => {
                 println!("NOTICE_TYPE| Started");
-                self.bridge_head.prepare_transition_proof().await; // Start the initial job
+                let _ = self.bridge_head.prepare_transition_proof().await; // Start the initial job
             }
             NoticeMessageExtension::Warning(data) => {
                 println!("NOTICE_TYPE| Warning: {:?}", data.message);
@@ -101,6 +101,10 @@ impl EventObserver for ExampleEventObserver {
                     "NOTICE_TYPE| Job Failed: {:?}: {}",
                     data.job_idx, data.message
                 );
+                // If there are no other jobs in the queue retry the failure
+                if data.n_job_in_buffer == 0 { 
+                    let _ = self.bridge_head.prepare_transition_proof().await;
+                }
             }
             NoticeMessageExtension::FinalityTransitionDetected(data) => {
                 println!("NOTICE_TYPE| Finality Transition Detected: {:?}", data.slot);
