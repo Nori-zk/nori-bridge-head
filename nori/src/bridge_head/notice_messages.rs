@@ -16,19 +16,19 @@ pub enum NoticeMessageType {
 
 // Message extensions
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BridgeHeadNoticeStarted {}
+pub struct NoticeExtensionBridgeHeadStarted {}
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BridgeHeadNoticeWarning {
+pub struct NoticeExtensionBridgeHeadWarning {
     pub message: String
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct  BridgeHeadNoticeJobCreated {
+pub struct  NoticeExtensionBridgeHeadJobCreated {
     pub input_slot: u64,
     pub expected_output_slot: u64,
     pub job_idx: u64
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BridgeHeadNoticeJobSucceeded {
+pub struct NoticeExtensionBridgeHeadJobSucceeded {
     pub input_slot: u64,
     pub output_slot: u64,
     pub job_idx: u64,
@@ -36,7 +36,7 @@ pub struct BridgeHeadNoticeJobSucceeded {
     pub elapsed_sec: f64
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BridgeHeadNoticeJobFailed {
+pub struct NoticeExtensionBridgeHeadJobFailed {
     pub input_slot: u64,
     pub expected_output_slot: u64,
     pub job_idx: u64,
@@ -45,25 +45,25 @@ pub struct BridgeHeadNoticeJobFailed {
     pub n_job_in_buffer: u64,
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BridgeHeadNoticeFinalityTransitionDetected {
+pub struct NoticeExtensionBridgeHeadFinalityTransitionDetected {
     pub slot: u64
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct BridgeHeadNoticeHeadAdvanced {
+pub struct NoticeExtensionBridgeHeadAdvanced {
     pub head: u64,
     pub next_sync_committee: FixedBytes<32>
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub enum BridgeHeadNoticeMessageExtension {
-    Started(BridgeHeadNoticeStarted),
-    Warning(BridgeHeadNoticeWarning),
-    JobCreated(BridgeHeadNoticeJobCreated),
-    JobSucceeded(BridgeHeadNoticeJobSucceeded),
-    JobFailed(BridgeHeadNoticeJobFailed),
-    FinalityTransitionDetected(BridgeHeadNoticeFinalityTransitionDetected),
-    HeadAdvanced(BridgeHeadNoticeHeadAdvanced)    
+    Started(NoticeExtensionBridgeHeadStarted),
+    Warning(NoticeExtensionBridgeHeadWarning),
+    JobCreated(NoticeExtensionBridgeHeadJobCreated),
+    JobSucceeded(NoticeExtensionBridgeHeadJobSucceeded),
+    JobFailed(NoticeExtensionBridgeHeadJobFailed),
+    FinalityTransitionDetected(NoticeExtensionBridgeHeadFinalityTransitionDetected),
+    HeadAdvanced(NoticeExtensionBridgeHeadAdvanced)    
 }
 
 #[derive(Serialize, Deserialize, Clone)]
