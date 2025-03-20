@@ -4,40 +4,31 @@ use serde::{Deserialize, Serialize};
 /// Base notice message types
 #[derive(Serialize, Deserialize, Clone)]
 pub enum NoticeMessageType {
-    Started,
-    Warning,
-    JobCreated,
-    JobSucceeded,
-    JobFailed,
-    FinalityTransitionDetected,
-    AdvanceRequested,
-    HeadAdvanced,
-}
-
-// Base message type
-#[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeBaseMessage {
-    pub timestamp: String,
-    //pub current_head: u64,
-    //pub next_slot: u64,
-    //pub time_until_next_finality_transition_seconds: f64
+    BridgeHeadStarted,
+    BridgeHeadWarning,
+    BridgeHeadJobCreated,
+    BridgeHeadJobSucceeded,
+    BridgeHeadJobFailed,
+    BridgeHeadFinalityTransitionDetected,
+    BridgeHeadAdvanceRequested,
+    BridgeHeadAdvanced,
 }
 
 // Message extensions
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeStarted {}
+pub struct BridgeHeadNoticeStarted {}
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeWarning {
+pub struct BridgeHeadNoticeWarning {
     pub message: String
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct  NoticeJobCreated {
+pub struct  BridgeHeadNoticeJobCreated {
     pub input_slot: u64,
     pub expected_output_slot: u64,
     pub job_idx: u64
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeJobSucceeded {
+pub struct BridgeHeadNoticeJobSucceeded {
     pub input_slot: u64,
     pub output_slot: u64,
     pub job_idx: u64,
@@ -45,7 +36,7 @@ pub struct NoticeJobSucceeded {
     pub elapsed_sec: f64
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeJobFailed {
+pub struct BridgeHeadNoticeJobFailed {
     pub input_slot: u64,
     pub expected_output_slot: u64,
     pub job_idx: u64,
@@ -54,42 +45,42 @@ pub struct NoticeJobFailed {
     pub n_job_in_buffer: u64,
 }
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeFinalityTransitionDetected {
+pub struct BridgeHeadNoticeFinalityTransitionDetected {
     pub slot: u64
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub struct NoticeHeadAdvanced {
+pub struct BridgeHeadNoticeHeadAdvanced {
     pub head: u64,
     pub next_sync_committee: FixedBytes<32>
 }
 
 #[derive(Serialize, Deserialize, Clone)]
-pub enum NoticeMessageExtension {
-    Started(NoticeStarted),
-    Warning(NoticeWarning),
-    JobCreated(NoticeJobCreated),
-    JobSucceeded(NoticeJobSucceeded),
-    JobFailed(NoticeJobFailed),
-    FinalityTransitionDetected(NoticeFinalityTransitionDetected),
-    HeadAdvanced(NoticeHeadAdvanced)    
+pub enum BridgeHeadNoticeMessageExtension {
+    Started(BridgeHeadNoticeStarted),
+    Warning(BridgeHeadNoticeWarning),
+    JobCreated(BridgeHeadNoticeJobCreated),
+    JobSucceeded(BridgeHeadNoticeJobSucceeded),
+    JobFailed(BridgeHeadNoticeJobFailed),
+    FinalityTransitionDetected(BridgeHeadNoticeFinalityTransitionDetected),
+    HeadAdvanced(BridgeHeadNoticeHeadAdvanced)    
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct NoticeMessage {
-    pub base: NoticeBaseMessage,
+    pub datetime_iso: String,
     pub message_type: NoticeMessageType,
-    pub extension: NoticeMessageExtension
+    pub extension: BridgeHeadNoticeMessageExtension
 }
 
-pub fn get_notice_message_type(extension: &NoticeMessageExtension) -> NoticeMessageType {
+pub fn get_notice_message_type(extension: &BridgeHeadNoticeMessageExtension) -> NoticeMessageType {
     match extension {
-        NoticeMessageExtension::Started(_) => NoticeMessageType::Started,
-        NoticeMessageExtension::Warning(_) => NoticeMessageType::Warning,
-        NoticeMessageExtension::JobCreated(_) => NoticeMessageType::JobCreated,
-        NoticeMessageExtension::JobSucceeded(_) => NoticeMessageType::JobSucceeded,
-        NoticeMessageExtension::JobFailed(_) => NoticeMessageType::JobFailed,
-        NoticeMessageExtension::FinalityTransitionDetected(_) => NoticeMessageType::FinalityTransitionDetected,
-        NoticeMessageExtension::HeadAdvanced(_) => NoticeMessageType::HeadAdvanced,
+        BridgeHeadNoticeMessageExtension::Started(_) => NoticeMessageType::BridgeHeadStarted,
+        BridgeHeadNoticeMessageExtension::Warning(_) => NoticeMessageType::BridgeHeadWarning,
+        BridgeHeadNoticeMessageExtension::JobCreated(_) => NoticeMessageType::BridgeHeadJobCreated,
+        BridgeHeadNoticeMessageExtension::JobSucceeded(_) => NoticeMessageType::BridgeHeadJobSucceeded,
+        BridgeHeadNoticeMessageExtension::JobFailed(_) => NoticeMessageType::BridgeHeadJobFailed,
+        BridgeHeadNoticeMessageExtension::FinalityTransitionDetected(_) => NoticeMessageType::BridgeHeadFinalityTransitionDetected,
+        BridgeHeadNoticeMessageExtension::HeadAdvanced(_) => NoticeMessageType::BridgeHeadAdvanced,
     }
 }

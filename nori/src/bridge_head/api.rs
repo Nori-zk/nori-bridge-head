@@ -1,9 +1,9 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
 use super::handles::{BeaconFinalityChangeHandle, Command, CommandHandle};
 use super::notice_messages::{
-    get_notice_message_type, NoticeBaseMessage, NoticeFinalityTransitionDetected,
-    NoticeHeadAdvanced, NoticeJobCreated, NoticeJobFailed, NoticeJobSucceeded, NoticeMessage,
-    NoticeMessageExtension, NoticeStarted,
+    get_notice_message_type, BridgeHeadNoticeFinalityTransitionDetected,
+    BridgeHeadNoticeHeadAdvanced, BridgeHeadNoticeJobCreated, BridgeHeadNoticeJobFailed, BridgeHeadNoticeJobSucceeded, NoticeMessage,
+    BridgeHeadNoticeMessageExtension, BridgeHeadNoticeStarted,
 }; // NoticeAdvance
 use super::validate::validate_env;
 use crate::helios::get_latest_finality_head;
@@ -186,12 +186,12 @@ impl BridgeHead {
     // Emit notices
     async fn trigger_listener_with_notice(
         &mut self,
-        extension: NoticeMessageExtension,
+        extension: BridgeHeadNoticeMessageExtension,
     ) -> Result<()> {
         let now = Utc::now();
         let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
         let message_type = get_notice_message_type(&extension);
-        let base_message = NoticeBaseMessage {
+        /*let base_message = NoticeBaseMessage {
             timestamp: iso_string,
             //current_head: self.current_head,
             //next_slot: self.next_slot,
@@ -201,9 +201,10 @@ impl BridgeHead {
             /*time_until_next_finality_transition_seconds: Instant::now()
             .duration_since(self.last_finality_transition_instant)
             .as_secs_f64(),*/
-        };
+        };*/
         let full_message = NoticeMessage {
-            base: base_message,
+            //base: base_message,
+            datetime_iso: iso_string,
             message_type,
             extension,
         };
@@ -245,8 +246,8 @@ impl BridgeHead {
 
         // Notify of a succesful job
         let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::JobSucceeded(
-                NoticeJobSucceeded {
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobSucceeded(
+                BridgeHeadNoticeJobSucceeded {
                     input_slot: input_head,
                     output_slot: output_head,
                     job_idx,
@@ -343,7 +344,7 @@ impl BridgeHead {
         error!("Job '{}' failed with error: {}", err.job_idx, err);
 
         let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::JobFailed(NoticeJobFailed {
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobFailed(BridgeHeadNoticeJobFailed {
                 input_slot,
                 expected_output_slot,
                 job_idx: err.job_idx,
@@ -425,7 +426,7 @@ impl BridgeHead {
         }*/
 
         let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::JobCreated(NoticeJobCreated {
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobCreated(BridgeHeadNoticeJobCreated {
                 input_slot: self.current_head,
                 job_idx,
                 expected_output_slot: self.next_slot,
@@ -446,8 +447,8 @@ impl BridgeHead {
         save_nb_checkpoint(self.current_head, self.next_sync_committee);
 
         let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::HeadAdvanced(
-                NoticeHeadAdvanced {
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::HeadAdvanced(
+                BridgeHeadNoticeHeadAdvanced {
                     head,
                     next_sync_committee,
                 },
@@ -510,8 +511,8 @@ impl BridgeHead {
 
         // Notify of transition
         let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::FinalityTransitionDetected(
-                NoticeFinalityTransitionDetected { slot },
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::FinalityTransitionDetected(
+                BridgeHeadNoticeFinalityTransitionDetected { slot },
             ))
             .await;
 
@@ -540,7 +541,7 @@ impl BridgeHead {
         // that happened while this process was offline
 
         let _ = self
-            .trigger_listener_with_notice(NoticeMessageExtension::Started(NoticeStarted {}))
+            .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::Started(BridgeHeadNoticeStarted {}))
             .await;
 
         // This could be useful in the future be lets be careful. If there is nothing to invoke advance the it would not auto emit
