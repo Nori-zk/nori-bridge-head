@@ -17,6 +17,7 @@ pub enum NoticeMessageType {
 }
 
 // ================ MACRO FOR MESSAGE TYPES ================ //
+#[macro_export]
 macro_rules! define_message {
     ($msg_type:ident, $ext_type:ty) => {
         #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,7 +193,6 @@ pub enum BridgeHeadNoticeMessageExtension {
     FinalityTransitionDetected(NoticeExtensionBridgeHeadFinalityTransitionDetected),
     HeadAdvanced(NoticeExtensionBridgeHeadAdvanced)
 }
-
 
 impl BridgeHeadNoticeMessageExtension {
     pub fn into_message(self, datetime_iso: String) -> BridgeHeadNoticeMessage {

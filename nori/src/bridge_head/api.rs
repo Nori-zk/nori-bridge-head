@@ -1,10 +1,10 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
 use super::handles::{BeaconFinalityChangeHandle, Command, CommandHandle};
 use super::notice_messages::{
-    BridgeHeadNoticeMessage, BridgeHeadNoticeMessageExtension,
-    NoticeExtensionBridgeHeadAdvanced, NoticeExtensionBridgeHeadFinalityTransitionDetected,
-    NoticeExtensionBridgeHeadJobCreated, NoticeExtensionBridgeHeadJobFailed,
-    NoticeExtensionBridgeHeadJobSucceeded, NoticeExtensionBridgeHeadStarted,
+    BridgeHeadNoticeMessage, BridgeHeadNoticeMessageExtension, NoticeExtensionBridgeHeadAdvanced,
+    NoticeExtensionBridgeHeadFinalityTransitionDetected, NoticeExtensionBridgeHeadJobCreated,
+    NoticeExtensionBridgeHeadJobFailed, NoticeExtensionBridgeHeadJobSucceeded,
+    NoticeExtensionBridgeHeadStarted,
 }; // NoticeAdvance
 use super::validate::validate_env;
 use crate::helios::get_latest_finality_head;
@@ -22,8 +22,6 @@ use std::fmt;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-
-const TYPICAL_FINALITY_TRANSITION_TIME: f64 = 384.0;
 
 /// Proof types
 #[derive(Serialize, Deserialize, Clone)]
@@ -91,18 +89,8 @@ pub struct BridgeHead {
     current_head: u64,
     /// Target slot to advance to
     next_slot: u64,
-    //// Slot currently being processed
-    //working_head: u64,
-    /// Last beacon finality update checked
-    ///last_beacon_finality_head_checked: u64,
-    //// Job index for indicating if the job is set to auto advance
-    ///auto_advance_index: u64,
     /// Unique identifier for prover jobs
     job_idx: u64,
-    /// Duration of last completed job in seconds
-    //last_job_duration_sec: f64,
-    /// Clocktime of last finality transition
-    last_finality_transition_instant: Instant,
     /// Hash of the next sync committee
     next_sync_committee: FixedBytes<32>,
     /// Active prover jobs mapped by job ID
@@ -154,12 +142,7 @@ impl BridgeHead {
             BridgeHead {
                 current_head,
                 next_slot: current_head,
-                //working_head: current_head,
-                //last_beacon_finality_head_checked: u64::default(),
-                //auto_advance_index: 1,
                 job_idx: 0,
-                //last_job_duration_sec: 0.0,
-                last_finality_transition_instant: Instant::now(),
                 next_sync_committee,
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
@@ -253,53 +236,6 @@ impl BridgeHead {
             })
             .await;
 
-        // Check if our result is still relevant after the computation, if our working_head has advanced then we are working on a more recent head in another thread.
-        /*if self.working_head == input_head {
-            // could move this to a job_idx check vs auto_advance_index if we really wanted to skip what we've got in place with advance being called.
-            // Update our state
-            info!("Moving nori head forward.");
-
-            // Update head and next_sync_committee based on the proof outputs
-            self.current_head = output_head;
-            if proof_outputs.next_sync_committee_hash != FixedBytes::<32>::default() {
-                self.next_sync_committee = proof_outputs.next_sync_committee_hash;
-                // But wait! We need to check the logic in SP1Helios.sol as this can be Zeros
-            }
-            // Save the checkpoint
-            info!("Saving checkpoint.");
-            save_nb_checkpoint(self.current_head, self.next_sync_committee);
-
-            info!("Triggering proof listeners");
-            // Emit proof
-            let _ = self
-                .trigger_listener_with_proof(ProofMessage {
-                    input_slot: input_head,
-                    output_slot: output_head,
-                    proof,
-                    execution_state_root: proof_outputs.execution_state_root,
-                    next_sync_committee: proof_outputs.next_sync_committee_hash,
-                    time_taken_second: elapsed_sec,
-                })
-                .await;
-
-            // Notify of head advance
-            let _ = self
-                .trigger_listener_with_notice(NoticeMessageExtension::HeadAdvanced(
-                    NoticeHeadAdvanced {
-                        head: input_head,
-                        next_sync_committee: self.next_sync_committee,
-                    },
-                ))
-                .await;
-
-            if self.next_head == self.current_head {
-                info!(
-                    "Nori bridge head is up to date. Current head is '{}'.",
-                    self.current_head
-                );
-            }
-        }*/
-
         Ok(())
     }
 
@@ -309,16 +245,19 @@ impl BridgeHead {
         let (input_slot, expected_output_slot, n_jobs, elapsed_sec) = {
             // Immutable borrow to get the job.
             let job = self.prover_jobs.get(&err.job_idx).unwrap();
+            let input_slot = job.input_slot;
+            let expected_output_slot = job.expected_output_slot;
 
             // Elapsed
-            //elapsed_sec
             let elapsed_sec = Instant::now()
                 .duration_since(job.start_instant)
                 .as_secs_f64();
 
+            self.prover_jobs.remove(&err.job_idx);
+
             (
-                job.input_slot,
-                job.expected_output_slot,
+                input_slot,
+                expected_output_slot,
                 self.prover_jobs.len(),
                 elapsed_sec,
             )
@@ -339,31 +278,18 @@ impl BridgeHead {
                 },
             ))
             .await;
-
-        // Now that we've released the immutable borrow, we can mutably borrow `self`.
-        // only redo this job if there is nothing else in the queue.. because otherwise it may be pointless FIXME...
-        /*if n_jobs == 0 {
-            let _ = self
-                .create_prover_job() // err.job_idx next_sync_committee
-                .await;
-        }*/
     }
 
     /// Commands
 
     // Create prover job
-    async fn prepare_transition_proof(
-        &mut self, //expected_slot: u64,
-                   //next_sync_committee: FixedBytes<32>,
-    ) {
+    async fn prepare_transition_proof(&mut self) {
         self.job_idx += 1;
         let job_idx: u64 = self.job_idx;
         info!(
             "Nori head updater recieved a new job {}. Spawning a new worker.",
             job_idx
         );
-
-        //self.working_head = self.current_head; // Mark the working head as what was given by the slot
 
         self.prover_jobs.insert(
             job_idx,
@@ -394,22 +320,6 @@ impl BridgeHead {
                 }
             }
         });
-
-        /*
-           Need to carefully deactivate auto_advance, but lets think about this....
-           We might have had advance called multiple times we need some concept of the job number to know if we should prevent auto advancement.
-           If this task was the last auto advance task we should cancel that behaviour
-        */
-        /*if job_idx >= self.auto_advance_index && self.auto_advance_index != 0 {
-            // if its already zero we dont need to do this FIXME
-            // Do we need the if... this should always be true CHECKME
-            // gt to account for if a previous job spawned failed with an error and didnt cancel itself
-            info!(
-                "Cancelling auto advance for job '{}'.",
-                self.auto_advance_index
-            );
-            self.auto_advance_index = 0;
-        }*/
 
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobCreated(
@@ -442,57 +352,7 @@ impl BridgeHead {
                 },
             ))
             .await;
-
-        // FIXME extract most of this logic out into a 'strategy'
-
-        /*self.job_idx += 1;
-        info!("Advance called ready for job '{}'.", self.job_idx);
-        if self.next_head > self.current_head {
-            // TODO think about the time until the next transition
-            if self.last_job_duration_sec != 0.0 {
-                // If we have data on the last job time
-                if self.last_job_duration_sec > TYPICAL_FINALITY_TRANSITION_TIME {
-                    warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will definitely not be able to catch up.", self.last_job_duration_sec, TYPICAL_FINALITY_TRANSITION_TIME);
-                } else if self.last_job_duration_sec > TYPICAL_FINALITY_TRANSITION_TIME * 0.8 {
-                    warn!("Long last job duration '{}' seconds, compared to the typical finality transition time '{}'. If this continues nori bridge will take a while to catch up.", self.last_job_duration_sec, TYPICAL_FINALITY_TRANSITION_TIME);
-                }
-
-                let seconds_since_last_transition = Instant::now()
-                    .duration_since(self.last_finality_transition_instant)
-                    .as_secs_f64();
-
-                info!(
-                    "Expected time to next finality transition is {} seconds.",
-                    TYPICAL_FINALITY_TRANSITION_TIME - seconds_since_last_transition
-                );
-
-                if seconds_since_last_transition > 0.8 * TYPICAL_FINALITY_TRANSITION_TIME {
-                    warn!("We are within 80% of the typical finality transition time away from the next finality transition. Strategically waiting for the next finality transition in order to try to catch up more quickly. Note this will cause latency for current transactions in the bridge.");
-                    // We should wait for the next detected head update.
-                    self.auto_advance_index = self.job_idx;
-                }
-            }
-
-            // We should immediately try to create a new proof
-            if self.auto_advance_index != self.job_idx {
-                info!("Immediately trying to advance.");
-                let _ = self
-                    .create_prover_job(self.job_idx) // self.next_sync_committee
-                    .await;
-            }
-        } else {
-            info!("Setting flag to attempt auto advance head on next finality update, as nori bridge is currently up to date.");
-            // We should wait for the next detected head update.
-            self.auto_advance_index = self.job_idx;
-        }*/
     }
-
-    // prepare_transition_proof
-    /*async fn prepare_transition_proof(&mut self) {
-        let _ = self
-            .prepare_transition_proof() // self.job_idx self.next_sync_committee
-            .await;
-    }*/
 
     async fn on_beacon_finality_change(&mut self, slot: u64) {
         // We have a transition!
@@ -508,45 +368,21 @@ impl BridgeHead {
 
         // Update next head
         self.next_slot = slot;
+
         // Print the head change detection
-        self.last_finality_transition_instant = Instant::now();
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.next_slot);
-
-        // Auto advance if nessesary
-        /*if self.auto_advance_index != 0 {
-            info!("Auto advance invoking job due to finality transition.");
-            // Invoke a job
-            let _ = self
-                .create_prover_job(self.job_idx) // self.next_sync_committee
-                .await;
-        }*/
-
-        //self.last_beacon_finality_head_checked = slot;
     }
 
     /// Event loop
 
     pub async fn run(mut self) {
-        // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
-        // that happened while this process was offline
-
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::Started(
                 NoticeExtensionBridgeHeadStarted {},
             ))
             .await;
 
-        // This could be useful in the future be lets be careful. If there is nothing to invoke advance the it would not auto emit
-        /*let offline_finality_update_next_head = self.check_finality_next_head().await.unwrap(); // Panic if the rpc is down.
-        if self.current_head < offline_finality_update_next_head || self.bootstrap {
-            // Immediately spawn a sp1-prover job to update the bridge based on the checkpoint head value
-            self.create_prover_job(self.next_head, self.job_idx);
-        }*/
         info!("Event loop started.");
-
-        /*let _ = self
-        .create_prover_job() // self.job_idx self.next_sync_committee
-        .await;*/
 
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
@@ -589,8 +425,6 @@ impl BridgeHead {
                                 result_data.job_idx(),
                                 time_taken_second,
                             ).await;
-
-                            //self.last_job_duration_sec = time_taken_second;
                         }
                         Err(err) => {
                             let _ = self.handle_prover_failure(&err).await;

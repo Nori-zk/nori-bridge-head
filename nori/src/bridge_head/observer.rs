@@ -8,7 +8,6 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use log::{info, warn};
 
-
 /// Event observer trait for handling bridge head events
 #[async_trait]
 pub trait EventObserver: Send + Sync {
@@ -18,7 +17,10 @@ pub trait EventObserver: Send + Sync {
     async fn on_notice(&mut self, notice_data: BridgeHeadNoticeMessage) -> anyhow::Result<()>;
 
     /// Run method default for handling event messages
-    async fn run(&mut self, mut bridge_head_event_receiver: tokio::sync::broadcast::Receiver<BridgeHeadEvent>) {
+    async fn run(
+        &mut self,
+        mut bridge_head_event_receiver: tokio::sync::broadcast::Receiver<BridgeHeadEvent>,
+    ) {
         loop {
             tokio::select! {
                 result = bridge_head_event_receiver.recv() => {
@@ -51,7 +53,6 @@ pub trait EventObserver: Send + Sync {
     }
 }
 
-
 /// Reference implementation of EventObserver
 pub struct ExampleEventObserver {
     /// Handle to trigger bridge head advancement
@@ -73,9 +74,12 @@ impl EventObserver for ExampleEventObserver {
         handle_nori_proof(&proof_data.proof, proof_data.input_slot).await?;
 
         // Advance nori head
-        let _ = self.bridge_head.advance(proof_data.output_slot, proof_data.next_sync_committee).await;
+        let _ = self
+            .bridge_head
+            .advance(proof_data.output_slot, proof_data.next_sync_committee)
+            .await;
         // Prepare the next proof
-        let _ = self.bridge_head.prepare_transition_proof().await; 
+        let _ = self.bridge_head.prepare_transition_proof().await;
 
         Ok(())
     }
@@ -83,8 +87,10 @@ impl EventObserver for ExampleEventObserver {
     async fn on_notice(&mut self, notice_data: BridgeHeadNoticeMessage) -> Result<()> {
         // Do something specific
         match &notice_data {
-            BridgeHeadNoticeMessage::Started(data) => {                
+            BridgeHeadNoticeMessage::Started(data) => {
                 println!("NOTICE_TYPE| Started");
+                // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
+                // that happened while this process was offline
                 let _ = self.bridge_head.prepare_transition_proof().await; // Start the initial job
             }
             BridgeHeadNoticeMessage::Warning(data) => {
@@ -102,12 +108,15 @@ impl EventObserver for ExampleEventObserver {
                     data.extension.job_idx, data.extension.message
                 );
                 // If there are no other jobs in the queue retry the failure
-                if data.extension.n_job_in_buffer == 0 { 
+                if data.extension.n_job_in_buffer == 0 {
                     let _ = self.bridge_head.prepare_transition_proof().await;
                 }
             }
             BridgeHeadNoticeMessage::FinalityTransitionDetected(data) => {
-                println!("NOTICE_TYPE| Finality Transition Detected: {:?}", data.extension.slot);
+                println!(
+                    "NOTICE_TYPE| Finality Transition Detected: {:?}",
+                    data.extension.slot
+                );
             }
             /*NoticeMessageExtension::Advance(data) => {
                 println!("NOTICE_TYPE| Advance Requested");
