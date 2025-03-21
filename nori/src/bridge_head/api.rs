@@ -220,6 +220,7 @@ impl BridgeHead {
                     job_idx,
                     next_sync_committee: proof_outputs.next_sync_committee_hash,
                     elapsed_sec,
+                    execution_state_root: proof_outputs.execution_state_root
                 },
             ))
             .await;

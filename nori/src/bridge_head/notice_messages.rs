@@ -59,6 +59,7 @@ pub struct NoticeExtensionBridgeHeadJobSucceeded {
     pub output_slot: u64,
     pub job_idx: u64,
     pub next_sync_committee: FixedBytes<32>,
+    pub execution_state_root: FixedBytes<32>,
     pub elapsed_sec: f64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
