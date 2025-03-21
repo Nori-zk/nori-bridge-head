@@ -118,9 +118,6 @@ impl EventObserver for ExampleEventObserver {
                     data.extension.slot
                 );
             }
-            /*NoticeMessageExtension::Advance(data) => {
-                println!("NOTICE_TYPE| Advance Requested");
-            }*/
             BridgeHeadNoticeMessage::HeadAdvanced(data) => {
                 println!("NOTICE_TYPE| Head Advanced: {:?}", data.extension.head);
             }
