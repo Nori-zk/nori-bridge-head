@@ -31,7 +31,7 @@ pub struct ProofMessage {
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
     pub next_sync_committee: FixedBytes<32>,
-    pub time_taken_second: f64,
+    pub time_taken_seconds: f64,
 }
 
 pub struct ProverJobError {
@@ -233,7 +233,7 @@ impl BridgeHead {
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
                 next_sync_committee: proof_outputs.next_sync_committee_hash,
-                time_taken_second: elapsed_sec,
+                time_taken_seconds: elapsed_sec,
             })
             .await;
 
@@ -411,20 +411,20 @@ impl BridgeHead {
                     match job_result {
                         Ok(result_data) => {
                             let job: &ProverJob = self.prover_jobs.get(&result_data.job_idx()).unwrap();
-                            let time_taken_second = Instant::now()
+                            let time_taken_seconds = Instant::now()
                                 .duration_since(job.start_instant)
                                 .as_secs_f64();
 
                             info!(
                                 "Job '{}' finished in {} seconds.",
-                                result_data.job_idx(), time_taken_second
+                                result_data.job_idx(), time_taken_seconds
                             );
 
                             let _ = self.handle_prover_success(
                                 result_data.input_head(),
                                 result_data.proof(),
                                 result_data.job_idx(),
-                                time_taken_second,
+                                time_taken_seconds,
                             ).await;
                         }
                         Err(err) => {
