@@ -17,12 +17,12 @@ async fn main() -> Result<()> {
 
     info!("Inited bridge head");
 
-    let (current_head, bridge_head_advance_handle, bridge_head_beacon_change_handle, bridge_head) = BridgeHead::new().await;
+    let (current_head, bridge_head_cmd_handle, bridge_head_beacon_change_handle, bridge_head) = BridgeHead::new().await;
 
     info!("Starting nori event observer.");
     let bridge_head_event_receiver = bridge_head.event_receiver();
     tokio::spawn(async move {
-        let mut bridge_head_observer = ExampleEventObserver::new(bridge_head_advance_handle);
+        let mut bridge_head_observer = ExampleEventObserver::new(bridge_head_cmd_handle);
         bridge_head_observer.run(bridge_head_event_receiver).await;
     });    
     info!("Started nori event observer.");
