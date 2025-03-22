@@ -24,7 +24,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 
 /// Proof types
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProofMessage {
     pub input_slot: u64,
     pub output_slot: u64,
