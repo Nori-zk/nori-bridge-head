@@ -153,6 +153,10 @@ impl BridgeHead {
         )
     }
 
+    pub fn get_current_head(&self) -> u64 {
+        self.current_head
+    }
+
     /// Event dispatchers
 
     // Event receiver
