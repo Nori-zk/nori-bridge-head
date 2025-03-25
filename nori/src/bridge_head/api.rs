@@ -153,16 +153,6 @@ impl BridgeHead {
         )
     }
 
-    /// Getters
-
-    pub fn get_current_head(&self) -> u64 {
-        self.current_head
-    }
-
-    pub fn get_next_slot(&self) -> u64 {
-        self.next_slot
-    }
-
     /// Event dispatchers
 
     // Event receiver
