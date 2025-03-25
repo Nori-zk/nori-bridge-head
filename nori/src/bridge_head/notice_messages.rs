@@ -140,7 +140,9 @@ impl<'de> Deserialize<'de> for BridgeHeadNoticeMessage {
             other: Map<String, Value>,
         }
 
-        let helper = Helper::deserialize(deserializer)?;
+        let mut helper = Helper::deserialize(deserializer)?;
+        // Add message_type back into our Map collection.
+        helper.other.insert("message_type".to_string(), serde_json::to_value(&helper.message_type).map_err(D::Error::custom)?);
         let json_value = Value::Object(helper.other);
         
         match helper.message_type {

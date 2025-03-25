@@ -5,7 +5,7 @@ use super::notice_messages::{
     NoticeExtensionBridgeHeadFinalityTransitionDetected, NoticeExtensionBridgeHeadJobCreated,
     NoticeExtensionBridgeHeadJobFailed, NoticeExtensionBridgeHeadJobSucceeded,
     NoticeExtensionBridgeHeadStarted,
-}; // NoticeAdvance
+};
 use super::validate::validate_env;
 use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
