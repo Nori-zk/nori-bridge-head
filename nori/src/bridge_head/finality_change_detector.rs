@@ -12,6 +12,8 @@ pub struct FinalityChangeMessage {
 pub async fn start_helios_finality_change_detector(
     current_head: u64,
 ) -> (u64, tokio::sync::mpsc::Receiver<FinalityChangeMessage>) {
+    dotenv::dotenv().ok();
+
     // Define helios polling sleep interval
     let polling_interval_sec: f64 = env::var("NORI_HELIOS_POLLING_INTERVAL")
         .unwrap_or_else(|_| "1.0".to_string()) // Default to 1.0 if not set

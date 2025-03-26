@@ -115,7 +115,6 @@ pub struct BridgeHead {
 
 impl BridgeHead {
     pub async fn new() -> (CommandHandle, Self) {
-        dotenv::dotenv().ok();
         validate_env(&["SOURCE_CONSENSUS_RPC_URL", "SP1_PROVER"]);
 
         // Initialise slot head / commitee vars
