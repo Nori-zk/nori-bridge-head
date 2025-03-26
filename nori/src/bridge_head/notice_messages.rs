@@ -42,7 +42,10 @@ macro_rules! define_message {
 // ================ EXTENSION STRUCTS ================ //
 // Message extensions
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct NoticeExtensionBridgeHeadStarted {}
+pub struct NoticeExtensionBridgeHeadStarted {
+    pub latest_beacon_slot: u64,
+    pub current_head: u64
+}
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadWarning {
     pub message: String,

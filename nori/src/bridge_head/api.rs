@@ -7,7 +7,10 @@ use super::notice_messages::{
     NoticeExtensionBridgeHeadStarted,
 };
 use super::validate::validate_env;
-use crate::helios::get_latest_finality_head;
+use crate::beacon_finality_change_detector::api::FinalityChangeMessage;
+use crate::helios::{
+    get_client, get_client_latest_finality_head, get_latest_checkpoint, get_latest_finality_head,
+};
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::{FixedBytes, B256};
@@ -18,7 +21,8 @@ use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-use std::fmt;
+use std::time::Duration;
+use std::{env, fmt};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -87,6 +91,8 @@ pub enum BridgeHeadEvent {
 pub struct BridgeHead {
     /// Current finalized slot head
     current_head: u64,
+    /// Latest beacon slot when bridge head inited
+    init_latest_beacon_slot: u64,
     /// Target slot to advance to
     next_slot: u64,
     /// Unique identifier for prover jobs
@@ -106,8 +112,11 @@ pub struct BridgeHead {
 }
 
 impl BridgeHead {
-    pub async fn new() -> (u64, CommandHandle, BeaconFinalityChangeHandle, Self) {
+    pub async fn new() -> (CommandHandle, Self) {
+        // u64,
+        dotenv::dotenv().ok();
         validate_env(&["SOURCE_CONSENSUS_RPC_URL", "SP1_PROVER"]);
+
         // Initialise slot head / commitee vars
         let current_head;
         let mut next_sync_committee = FixedBytes::<32>::default();
@@ -126,21 +135,71 @@ impl BridgeHead {
             current_head = get_latest_finality_head().await.unwrap();
         }
 
-        // Create command mpsc
+        // Setup command mpsc
         let (command_tx, command_rx) = mpsc::channel(2);
+
+        // Create command handle
+        let input_command_handle = CommandHandle::new(command_tx.clone());
+
+        // Setup polling client for finality change detection
+        info!("Starting helios polling client.");
+
+        // Define sleep interval
+        let polling_interval_sec: f64 = env::var("NORI_HELIOS_POLLING_INTERVAL")
+            .unwrap_or_else(|_| "1.0".to_string()) // Default to 1.0 if not set
+            .parse()
+            .expect("Failed to parse NORI_HELIOS_POLLING_INTERVAL as f64.");
+
+        info!("Fetching helios latest checkpoint.");
+
+        // Get latest beacon checkpoint
+        let helios_checkpoint = get_latest_checkpoint().await.unwrap();
+
+        // Get the client from the beacon checkpoint
+        let helios_polling_client = get_client(helios_checkpoint).await.unwrap();
+
+        info!("Fetching helios latest finality head.");
+
+        // Get latest slot
+        let init_latest_beacon_slot = get_client_latest_finality_head(&helios_polling_client)
+            .await
+            .unwrap();
+
+        // Create finality change detector
+        let beacon_change_command_handle_tx = command_tx.clone();
+        tokio::spawn(async move {
+            info!("Finality change detector is starting.");
+            let mut current_slot = current_head;
+            loop {
+                match get_client_latest_finality_head(&helios_polling_client).await {
+                    Ok(next_head) => {
+                        if next_head > current_slot {
+                            current_slot = next_head;
+                            let _ = beacon_change_command_handle_tx
+                                .send(Command::BeaconFinalityChange(FinalityChangeMessage {
+                                    slot: next_head,
+                                }))
+                                .await;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error checking finality slot head: {}", e);
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs_f64(polling_interval_sec)).await;
+            }
+        });
 
         // Create job mpsc
         let (job_tx, job_rx) = mpsc::unbounded_channel();
 
         // Create events broadcast chanel
         let (event_tx, _) = broadcast::channel(16);
-
         (
-            current_head,
-            CommandHandle::new(command_tx.clone()),
-            BeaconFinalityChangeHandle::new(command_tx),
+            input_command_handle,
             BridgeHead {
                 current_head,
+                init_latest_beacon_slot,
                 next_slot: current_head,
                 job_idx: 0,
                 next_sync_committee,
@@ -220,7 +279,7 @@ impl BridgeHead {
                     job_idx,
                     next_sync_committee: proof_outputs.next_sync_committee_hash,
                     elapsed_sec,
-                    execution_state_root: proof_outputs.execution_state_root
+                    execution_state_root: proof_outputs.execution_state_root,
                 },
             ))
             .await;
@@ -288,7 +347,7 @@ impl BridgeHead {
         self.job_idx += 1;
         let job_idx: u64 = self.job_idx;
         info!(
-            "Nori head updater recieved a new job {}. Spawning a new worker.",
+            "Nori head updater received a new job {}. Spawning a new worker.",
             job_idx
         );
 
@@ -379,7 +438,10 @@ impl BridgeHead {
     pub async fn run(mut self) {
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::Started(
-                NoticeExtensionBridgeHeadStarted {},
+                NoticeExtensionBridgeHeadStarted {
+                    latest_beacon_slot: self.init_latest_beacon_slot,
+                    current_head: self.current_head,
+                },
             ))
             .await;
 
