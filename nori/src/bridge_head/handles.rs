@@ -1,4 +1,4 @@
-use crate::beacon_finality_change_detector::api::FinalityChangeMessage;
+use super::api::FinalityChangeMessage;
 use alloy_primitives::FixedBytes;
 use tokio::sync::mpsc::Sender;
 
@@ -10,7 +10,7 @@ pub struct AdvanceMessage {
 }
 
 pub enum Command {
-    PrepareTransitionProof,
+    StageTransitionProof,
     Advance(AdvanceMessage),
     BeaconFinalityChange(FinalityChangeMessage),
 }
@@ -25,8 +25,8 @@ impl CommandHandle {
         Self { command_tx }
     }
 
-    pub async fn prepare_transition_proof(&self) {
-        let _ = self.command_tx.send(Command::PrepareTransitionProof).await;
+    pub async fn stage_transition_proof(&self) {
+        let _ = self.command_tx.send(Command::StageTransitionProof).await;
     }
 
     pub async fn advance(&self, head: u64, next_sync_committee: FixedBytes<32>) {
@@ -34,6 +34,7 @@ impl CommandHandle {
     }
 }
 
+/*/
 #[derive(Clone)]
 pub struct BeaconFinalityChangeHandle {
     command_tx: Sender<Command>,
@@ -52,4 +53,4 @@ impl BeaconFinalityChangeHandle {
             }))
             .await;
     }
-}
+}*/

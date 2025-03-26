@@ -58,36 +58,17 @@ pub trait EventObserver: Send + Sync {
 pub struct ExampleEventObserver {
     /// Handle to trigger bridge head advancement
     bridge_head_handle: CommandHandle,
-    /// Boolean to represent if we should wait until the next finality transition before triggering a transition proof
-    stage_transition_proof: bool,
-    /// Latest beacon slot from helios
-    latest_beacon_slot: u64,
-    /// Current nori head
-    current_head: u64,
 }
 
 impl ExampleEventObserver {
     pub fn new(bridge_head_handle: CommandHandle) -> Self {
         Self {
-            bridge_head_handle,
-            stage_transition_proof: false,
-            latest_beacon_slot: 0,
-            current_head: 0,
+            bridge_head_handle
         }
     }
-    async fn stage_transition_proof(&mut self) {
-        if self.latest_beacon_slot > self.current_head {
-            // Immediately do the transition proof job.
-            let _ = self.bridge_head_handle.prepare_transition_proof().await;
-            self.stage_transition_proof = false;
-        } else {
-            // Wait for finality transition before doing the transition proof job.
-            self.stage_transition_proof = true;
-        }
-    }
+
     // Advance nori head
     async fn advance(&mut self, slot: u64, next_sync_commitee: FixedBytes<32>) {
-        self.current_head = slot;
         let _ = self
             .bridge_head_handle
             .advance(slot, next_sync_commitee)
@@ -107,7 +88,7 @@ impl EventObserver for ExampleEventObserver {
         let _ = self.advance(proof_data.output_slot, proof_data.next_sync_committee).await;
 
         // Stage the next proof
-        let _ = self.stage_transition_proof().await;
+        let _ = self.bridge_head_handle.stage_transition_proof().await;
 
         Ok(())
     }
@@ -117,11 +98,9 @@ impl EventObserver for ExampleEventObserver {
         match &notice_data {
             BridgeHeadNoticeMessage::Started(data) => {
                 println!("NOTICE_TYPE| Started");
-                self.latest_beacon_slot = data.extension.latest_beacon_slot;
-                self.current_head = data.extension.current_head;
                 // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
                 // that happened while this process was offline
-                let _ = self.stage_transition_proof().await;
+                let _ = self.bridge_head_handle.stage_transition_proof().await;
             }
             BridgeHeadNoticeMessage::Warning(data) => {
                 println!("NOTICE_TYPE| Warning: {:?}", data.extension.message);
@@ -139,7 +118,7 @@ impl EventObserver for ExampleEventObserver {
                 );
                 // If there are no other jobs in the queue retry the failure
                 if data.extension.n_job_in_buffer == 0 {
-                    let _ = self.bridge_head_handle.prepare_transition_proof().await;
+                    let _ = self.bridge_head_handle.stage_transition_proof().await;
                 }
             }
             BridgeHeadNoticeMessage::FinalityTransitionDetected(data) => {
@@ -147,10 +126,6 @@ impl EventObserver for ExampleEventObserver {
                     "NOTICE_TYPE| Finality Transition Detected: {:?}",
                     data.extension.slot
                 );
-                self.latest_beacon_slot = data.extension.slot;
-                if self.stage_transition_proof {
-                    let _ = self.stage_transition_proof().await;
-                }
             }
             BridgeHeadNoticeMessage::HeadAdvanced(data) => {
                 println!("NOTICE_TYPE| Head Advanced: {:?}", data.extension.head);

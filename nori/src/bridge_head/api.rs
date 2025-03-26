@@ -1,5 +1,5 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::handles::{BeaconFinalityChangeHandle, Command, CommandHandle};
+use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     BridgeHeadNoticeMessage, BridgeHeadNoticeMessageExtension, NoticeExtensionBridgeHeadAdvanced,
     NoticeExtensionBridgeHeadFinalityTransitionDetected, NoticeExtensionBridgeHeadJobCreated,
@@ -7,7 +7,6 @@ use super::notice_messages::{
     NoticeExtensionBridgeHeadStarted,
 };
 use super::validate::validate_env;
-use crate::beacon_finality_change_detector::api::FinalityChangeMessage;
 use crate::helios::{
     get_client, get_client_latest_finality_head, get_latest_checkpoint, get_latest_finality_head,
 };
@@ -26,6 +25,11 @@ use std::{env, fmt};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
+
+// Finality change message
+pub struct FinalityChangeMessage {
+    pub slot: u64,
+}
 
 /// Proof types
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -109,6 +113,8 @@ pub struct BridgeHead {
     job_tx: mpsc::UnboundedSender<Result<ProverJobOutput, ProverJobError>>,
     /// Channel for emitting proof and notice events
     event_tx: broadcast::Sender<BridgeHeadEvent>,
+    /// Boolean for indicating a job should be issued on the next beacon slot change event
+    stage_transition_proof: bool,
 }
 
 impl BridgeHead {
@@ -161,15 +167,20 @@ impl BridgeHead {
         info!("Fetching helios latest finality head.");
 
         // Get latest slot
-        let init_latest_beacon_slot = get_client_latest_finality_head(&helios_polling_client)
+        let mut init_latest_beacon_slot = get_client_latest_finality_head(&helios_polling_client)
             .await
             .unwrap();
+
+        // If we get an erronous slot from get_client_latest_finality_head then override it with the current_head
+        if current_head > init_latest_beacon_slot {
+            init_latest_beacon_slot = current_head;
+        }
 
         // Create finality change detector
         let beacon_change_command_handle_tx = command_tx.clone();
         tokio::spawn(async move {
             info!("Finality change detector is starting.");
-            let mut current_slot = current_head;
+            let mut current_slot = init_latest_beacon_slot;
             loop {
                 match get_client_latest_finality_head(&helios_polling_client).await {
                     Ok(next_head) => {
@@ -200,7 +211,7 @@ impl BridgeHead {
             BridgeHead {
                 current_head,
                 init_latest_beacon_slot,
-                next_slot: current_head,
+                next_slot: init_latest_beacon_slot,
                 job_idx: 0,
                 next_sync_committee,
                 prover_jobs: HashMap::new(),
@@ -208,6 +219,7 @@ impl BridgeHead {
                 job_rx: Some(job_rx),
                 job_tx,
                 event_tx,
+                stage_transition_proof: false,
             },
         )
     }
@@ -340,8 +352,6 @@ impl BridgeHead {
             .await;
     }
 
-    /// Commands
-
     // Create prover job
     async fn prepare_transition_proof(&mut self) {
         self.job_idx += 1;
@@ -392,9 +402,26 @@ impl BridgeHead {
             .await;
     }
 
-    // advance
+    /// Commands
+
+    // Stage transition proof generation
+    async fn stage_transition_proof(&mut self) {
+        if self.next_slot > self.current_head {
+            // Immediately do the transition proof job.
+            let _ = self.prepare_transition_proof().await;
+            self.stage_transition_proof = false;
+        } else {
+            // Wait for finality transition before doing the transition proof job.
+            self.stage_transition_proof = true;
+        }
+    }
+
+    // Advance the bridge head
     async fn advance(&mut self, head: u64, next_sync_committee: FixedBytes<32>) {
+        // Update current head
         self.current_head = head;
+
+        // If sync committee is valid then update it
         if next_sync_committee != B256::ZERO {
             // ONLY IF NON ZEROS
             self.next_sync_committee = next_sync_committee;
@@ -404,6 +431,7 @@ impl BridgeHead {
         info!("Saving checkpoint.");
         save_nb_checkpoint(self.current_head, self.next_sync_committee);
 
+        // Notify
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::HeadAdvanced(
                 NoticeExtensionBridgeHeadAdvanced {
@@ -414,8 +442,15 @@ impl BridgeHead {
             .await;
     }
 
+    // Update next slot logic
     async fn on_beacon_finality_change(&mut self, slot: u64) {
-        // We have a transition!
+        // Update next head
+        self.next_slot = slot;
+
+        // If we have a staged transition proof then attempt to run that job
+        if self.stage_transition_proof {
+            let _ = self.stage_transition_proof().await;
+        }
 
         // Notify of transition
         let _ = self
@@ -425,9 +460,6 @@ impl BridgeHead {
                 ),
             )
             .await;
-
-        // Update next head
-        self.next_slot = slot;
 
         // Print the head change detection
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.next_slot);
@@ -455,7 +487,7 @@ impl BridgeHead {
                 // Read the command receiver for input commands
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
-                        Command::PrepareTransitionProof => {
+                        Command::StageTransitionProof => {
                             let _ = self.prepare_transition_proof().await;
                         }
                         Command::Advance(message) => {
