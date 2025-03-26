@@ -1,4 +1,5 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
+use super::finality_change_detector::{start_helios_finality_change_detector, FinalityChangeMessage};
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     BridgeHeadNoticeMessage, BridgeHeadNoticeMessageExtension, NoticeExtensionBridgeHeadAdvanced,
@@ -7,31 +8,24 @@ use super::notice_messages::{
     NoticeExtensionBridgeHeadStarted,
 };
 use super::validate::validate_env;
-use crate::helios::{
-    get_client, get_client_latest_finality_head, get_latest_checkpoint, get_latest_finality_head,
-};
+use crate::helios::get_latest_finality_head;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
-use log::{error, info, warn};
+use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-use std::time::Duration;
-use std::{env, fmt};
+use std::fmt;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-// Finality change message
-pub struct FinalityChangeMessage {
-    pub slot: u64,
-}
-
 /// Proof types
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProofMessage {
     pub input_slot: u64,
@@ -40,6 +34,13 @@ pub struct ProofMessage {
     pub execution_state_root: FixedBytes<32>,
     pub next_sync_committee: FixedBytes<32>,
     pub time_taken_seconds: f64,
+}
+
+struct ProverJob {
+    start_instant: Instant,
+    input_slot: u64,
+    expected_output_slot: u64,
+    next_sync_committee: FixedBytes<32>,
 }
 
 pub struct ProverJobError {
@@ -72,13 +73,6 @@ impl StdError for ProverJobError {
     }
 }
 
-struct ProverJob {
-    start_instant: Instant,
-    input_slot: u64,
-    expected_output_slot: u64,
-    next_sync_committee: FixedBytes<32>,
-}
-
 // Event enum
 #[derive(Clone)]
 pub enum BridgeHeadEvent {
@@ -107,6 +101,8 @@ pub struct BridgeHead {
     prover_jobs: HashMap<u64, ProverJob>,
     /// Channel for receiving bridge head commands
     command_rx: Option<mpsc::Receiver<Command>>,
+    /// Chanel for receiving helios finality transition events
+    finality_rx: Option<mpsc::Receiver<FinalityChangeMessage>>,
     /// Channel for receiving job results
     job_rx: Option<mpsc::UnboundedReceiver<Result<ProverJobOutput, ProverJobError>>>,
     /// Channel for sending job results
@@ -119,7 +115,6 @@ pub struct BridgeHead {
 
 impl BridgeHead {
     pub async fn new() -> (CommandHandle, Self) {
-        // u64,
         dotenv::dotenv().ok();
         validate_env(&["SOURCE_CONSENSUS_RPC_URL", "SP1_PROVER"]);
 
@@ -142,70 +137,22 @@ impl BridgeHead {
         }
 
         // Setup command mpsc
-        let (command_tx, command_rx) = mpsc::channel(2);
+        let (command_tx, command_rx) = mpsc::channel(2); // FIXME this isnt the best choice of buffer size. It makes assumptions that the sender knows what they are doing.
 
         // Create command handle
-        let input_command_handle = CommandHandle::new(command_tx.clone());
-
-        // Setup polling client for finality change detection
-        info!("Starting helios polling client.");
-
-        // Define sleep interval
-        let polling_interval_sec: f64 = env::var("NORI_HELIOS_POLLING_INTERVAL")
-            .unwrap_or_else(|_| "1.0".to_string()) // Default to 1.0 if not set
-            .parse()
-            .expect("Failed to parse NORI_HELIOS_POLLING_INTERVAL as f64.");
-
-        info!("Fetching helios latest checkpoint.");
-
-        // Get latest beacon checkpoint
-        let helios_checkpoint = get_latest_checkpoint().await.unwrap();
-
-        // Get the client from the beacon checkpoint
-        let helios_polling_client = get_client(helios_checkpoint).await.unwrap();
-
-        info!("Fetching helios latest finality head.");
-
-        // Get latest slot
-        let mut init_latest_beacon_slot = get_client_latest_finality_head(&helios_polling_client)
-            .await
-            .unwrap();
-
-        // If we get an erronous slot from get_client_latest_finality_head then override it with the current_head
-        if current_head > init_latest_beacon_slot {
-            init_latest_beacon_slot = current_head;
-        }
-
-        // Create finality change detector
-        let beacon_change_command_handle_tx = command_tx.clone();
-        tokio::spawn(async move {
-            info!("Finality change detector is starting.");
-            let mut current_slot = init_latest_beacon_slot;
-            loop {
-                match get_client_latest_finality_head(&helios_polling_client).await {
-                    Ok(next_head) => {
-                        if next_head > current_slot {
-                            current_slot = next_head;
-                            let _ = beacon_change_command_handle_tx
-                                .send(Command::BeaconFinalityChange(FinalityChangeMessage {
-                                    slot: next_head,
-                                }))
-                                .await;
-                        }
-                    }
-                    Err(e) => {
-                        error!("Error checking finality slot head: {}", e);
-                    }
-                }
-                tokio::time::sleep(Duration::from_secs_f64(polling_interval_sec)).await;
-            }
-        });
+        let input_command_handle = CommandHandle::new(command_tx);
 
         // Create job mpsc
         let (job_tx, job_rx) = mpsc::unbounded_channel();
 
         // Create events broadcast chanel
         let (event_tx, _) = broadcast::channel(16);
+
+        // Setup polling client for finality change detection
+        info!("Starting helios polling client.");
+        let (init_latest_beacon_slot, finality_rx) =
+            start_helios_finality_change_detector(current_head).await;
+
         (
             input_command_handle,
             BridgeHead {
@@ -216,11 +163,12 @@ impl BridgeHead {
                 next_sync_committee,
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
+                finality_rx: Some(finality_rx),
                 job_rx: Some(job_rx),
                 job_tx,
                 event_tx,
                 stage_transition_proof: false,
-            },
+            }
         )
     }
 
@@ -444,14 +392,6 @@ impl BridgeHead {
 
     // Update next slot logic
     async fn on_beacon_finality_change(&mut self, slot: u64) {
-        // Update next head
-        self.next_slot = slot;
-
-        // If we have a staged transition proof then attempt to run that job
-        if self.stage_transition_proof {
-            let _ = self.stage_transition_proof().await;
-        }
-
         // Notify of transition
         let _ = self
             .trigger_listener_with_notice(
@@ -461,8 +401,16 @@ impl BridgeHead {
             )
             .await;
 
+        // Update next head
+        self.next_slot = slot;
+
         // Print the head change detection
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.next_slot);
+
+        // If we have a staged transition proof then attempt to run that job
+        if self.stage_transition_proof {
+            let _ = self.stage_transition_proof().await;
+        }
     }
 
     /// Event loop
@@ -479,24 +427,25 @@ impl BridgeHead {
 
         info!("Event loop started.");
 
+        let mut finality_rx = self.finality_rx.take().unwrap();
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
 
         loop {
             tokio::select! {
+                // Read the finality reciever for finality change events
+                Some(event) = finality_rx.recv() => {
+                    let _ = self.on_beacon_finality_change(event.slot).await;
+                }
                 // Read the command receiver for input commands
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         Command::StageTransitionProof => {
-                            let _ = self.prepare_transition_proof().await;
+                            let _ = self.stage_transition_proof().await;
                         }
                         Command::Advance(message) => {
                             // deal with advance invocation
                             let _ = self.advance(message.head, message.next_sync_committee).await;
-                        }
-                        Command::BeaconFinalityChange(message) => {
-                            let next_slot = message.slot;
-                            let _ = self.on_beacon_finality_change(next_slot).await;
                         }
                     }
                 }

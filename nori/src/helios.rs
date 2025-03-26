@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc::channel, watch};
 use tree_hash::TreeHash;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
-use anyhow::{Result, Error};
+use anyhow::{Error, Result};
 
 pub async fn get_latest_finality_head() -> Result<u64> {
     // Get latest beacon checkpoint
@@ -27,7 +27,9 @@ pub async fn get_latest_finality_head() -> Result<u64> {
     Ok(helios_client.store.finalized_header.clone().beacon().slot)
 }
 
-pub async fn get_client_latest_finality_head(client: &Inner<MainnetConsensusSpec, HttpRpc>) -> Result<u64> {
+pub async fn get_client_latest_finality_head(
+    client: &Inner<MainnetConsensusSpec, HttpRpc>,
+) -> Result<u64> {
     // Get finality slot head
     let finality_update: FinalityUpdate<MainnetConsensusSpec> = client
         .rpc
@@ -42,7 +44,8 @@ pub async fn get_client_latest_finality_head(client: &Inner<MainnetConsensusSpec
 pub async fn get_finality_updates(
     client: &Inner<MainnetConsensusSpec, HttpRpc>,
 ) -> Result<Vec<Update<MainnetConsensusSpec>>> {
-    let period = calc_sync_period::<MainnetConsensusSpec>(client.store.finalized_header.beacon().slot);
+    let period =
+        calc_sync_period::<MainnetConsensusSpec>(client.store.finalized_header.beacon().slot);
 
     // Handling the result and converting errors to anyhow::Error
     let updates_result = client
@@ -83,30 +86,47 @@ pub async fn get_latest_checkpoint() -> Result<B256> {
         .await
         .map_err(|e| Error::msg(format!("Failed to build checkpoint fallback: {}", e)))?;
 
-    let chain_id = std::env::var("SOURCE_CHAIN_ID")
-        .map_err(|e| Error::msg(format!("SOURCE_CHAIN_ID environment variable not set: {}", e)))?;
-    
-    let network = Network::from_chain_id(chain_id.parse().map_err(|e| Error::msg(format!("Invalid chain ID format: {}", e)))?)
-        .map_err(|e| Error::msg(format!("Failed to convert chain ID to network: {}", e)))?;
+    let chain_id = std::env::var("SOURCE_CHAIN_ID").map_err(|e| {
+        Error::msg(format!(
+            "SOURCE_CHAIN_ID environment variable not set: {}",
+            e
+        ))
+    })?;
+
+    let network = Network::from_chain_id(
+        chain_id
+            .parse()
+            .map_err(|e| Error::msg(format!("Invalid chain ID format: {}", e)))?,
+    )
+    .map_err(|e| Error::msg(format!("Failed to convert chain ID to network: {}", e)))?;
 
     cf.fetch_latest_checkpoint(&network)
         .await
-        .map_err(|e| Error::msg(format!("Failed to fetch latest checkpoint: {}", e))) // Convert error with context
+        .map_err(|e| Error::msg(format!("Failed to fetch latest checkpoint: {}", e)))
+    // Convert error with context
 }
 
 /// Fetch checkpoint from a slot number.
 pub async fn get_checkpoint(slot: u64) -> Result<B256> {
     // Fetching environment variables
-    let consensus_rpc = std::env::var("SOURCE_CONSENSUS_RPC_URL")
-        .map_err(|e| Error::msg(format!("SOURCE_CONSENSUS_RPC_URL not set or invalid: {}", e)))?;
-    
+    let consensus_rpc = std::env::var("SOURCE_CONSENSUS_RPC_URL").map_err(|e| {
+        Error::msg(format!(
+            "SOURCE_CONSENSUS_RPC_URL not set or invalid: {}",
+            e
+        ))
+    })?;
+
     let chain_id = std::env::var("SOURCE_CHAIN_ID")
         .map_err(|e| Error::msg(format!("SOURCE_CHAIN_ID not set or invalid: {}", e)))?;
-    
+
     // Parsing chain ID and creating network
-    let network = Network::from_chain_id(chain_id.parse().map_err(|e| Error::msg(format!("Invalid chain ID format: {}", e)))?)
-        .map_err(|e| Error::msg(format!("Failed to convert chain ID to network: {}", e)))?;
-    
+    let network = Network::from_chain_id(
+        chain_id
+            .parse()
+            .map_err(|e| Error::msg(format!("Invalid chain ID format: {}", e)))?,
+    )
+    .map_err(|e| Error::msg(format!("Failed to convert chain ID to network: {}", e)))?;
+
     let base_config = network.to_base_config();
 
     // Configuring client
@@ -132,7 +152,9 @@ pub async fn get_checkpoint(slot: u64) -> Result<B256> {
     );
 
     // Fetching the block
-    let block: BeaconBlock<MainnetConsensusSpec> = client.rpc.get_block(slot)
+    let block: BeaconBlock<MainnetConsensusSpec> = client
+        .rpc
+        .get_block(slot)
         .await
         .map_err(|e| Error::msg(format!("Failed to fetch block for slot {}: {}", slot, e)))?;
 
@@ -143,16 +165,24 @@ pub async fn get_checkpoint(slot: u64) -> Result<B256> {
 /// Setup a client from a checkpoint.
 pub async fn get_client(checkpoint: B256) -> Result<Inner<MainnetConsensusSpec, HttpRpc>> {
     // Fetching environment variables
-    let consensus_rpc = std::env::var("SOURCE_CONSENSUS_RPC_URL")
-        .map_err(|e| Error::msg(format!("SOURCE_CONSENSUS_RPC_URL not set or invalid: {}", e)))?;
-    
+    let consensus_rpc = std::env::var("SOURCE_CONSENSUS_RPC_URL").map_err(|e| {
+        Error::msg(format!(
+            "SOURCE_CONSENSUS_RPC_URL not set or invalid: {}",
+            e
+        ))
+    })?;
+
     let chain_id = std::env::var("SOURCE_CHAIN_ID")
         .map_err(|e| Error::msg(format!("SOURCE_CHAIN_ID not set or invalid: {}", e)))?;
-    
+
     // Parsing chain ID and creating network
-    let network = Network::from_chain_id(chain_id.parse().map_err(|e| Error::msg(format!("Invalid chain ID format: {}", e)))?)
-        .map_err(|e| Error::msg(format!("Failed to convert chain ID to network: {}", e)))?;
-    
+    let network = Network::from_chain_id(
+        chain_id
+            .parse()
+            .map_err(|e| Error::msg(format!("Invalid chain ID format: {}", e)))?,
+    )
+    .map_err(|e| Error::msg(format!("Failed to convert chain ID to network: {}", e)))?;
+
     let base_config = network.to_base_config();
 
     // Configuring client
@@ -178,7 +208,8 @@ pub async fn get_client(checkpoint: B256) -> Result<Inner<MainnetConsensusSpec, 
     );
 
     // Bootstrap the client with the checkpoint
-    client.bootstrap(checkpoint)
+    client
+        .bootstrap(checkpoint)
         .await
         .map_err(|e| Error::msg(format!("Failed to bootstrap client with checkpoint: {}", e)))?;
 

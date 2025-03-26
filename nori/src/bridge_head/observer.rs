@@ -62,9 +62,7 @@ pub struct ExampleEventObserver {
 
 impl ExampleEventObserver {
     pub fn new(bridge_head_handle: CommandHandle) -> Self {
-        Self {
-            bridge_head_handle
-        }
+        Self { bridge_head_handle }
     }
 
     // Advance nori head
@@ -85,7 +83,9 @@ impl EventObserver for ExampleEventObserver {
         let _ = handle_nori_proof(&proof_data.proof, proof_data.input_slot).await;
 
         // Advance the head
-        let _ = self.advance(proof_data.output_slot, proof_data.next_sync_committee).await;
+        let _ = self
+            .advance(proof_data.output_slot, proof_data.next_sync_committee)
+            .await;
 
         // Stage the next proof
         let _ = self.bridge_head_handle.stage_transition_proof().await;
@@ -97,7 +97,10 @@ impl EventObserver for ExampleEventObserver {
         // Do something specific
         match &notice_data {
             BridgeHeadNoticeMessage::Started(data) => {
-                println!("NOTICE_TYPE| Started");
+                println!(
+                    "NOTICE_TYPE| Started. Current head: {:?} Finality slot: {:?}",
+                    data.extension.current_head, data.extension.latest_beacon_slot
+                );
                 // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
                 // that happened while this process was offline
                 let _ = self.bridge_head_handle.stage_transition_proof().await;

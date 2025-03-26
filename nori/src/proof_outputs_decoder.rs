@@ -1,6 +1,6 @@
 use alloy_primitives::{B256, U256};
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecodedProofOutputs {
@@ -11,7 +11,7 @@ pub struct DecodedProofOutputs {
     pub prev_header: B256,
     pub prev_head: U256,
     pub sync_committee_hash: B256,
-    pub start_sync_committee_hash: B256
+    pub start_sync_committee_hash: B256,
 }
 
 impl DecodedProofOutputs {
@@ -51,7 +51,7 @@ impl DecodedProofOutputs {
             prev_header,
             prev_head,
             sync_committee_hash,
-            start_sync_committee_hash
+            start_sync_committee_hash,
         })
     }
 }

@@ -1,6 +1,6 @@
 use crate::helios::{get_checkpoint, get_client, get_finality_updates};
 use alloy_primitives::{FixedBytes, B256};
-use anyhow::{bail, Error, Result};
+use anyhow::{Error, Result};
 use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use sp1_helios_primitives::types::ProofInputs;
@@ -116,5 +116,9 @@ pub async fn finality_update_job(
         })
         .await??; // Await the blocking task and propagate errors properly
 
-    Ok(ProverJobOutput {proof, input_head, job_idx})
+    Ok(ProverJobOutput {
+        proof,
+        input_head,
+        job_idx,
+    })
 }

@@ -1,8 +1,8 @@
-use std::{fs::File, io::Read, path::Path};
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
 use log::info;
 use serde::{Deserialize, Serialize};
+use std::{fs::File, io::Read, path::Path};
 
 const NB_CHECKPOINT_FILE: &str = "./checkpoint/nb_checkpoint.json";
 
@@ -20,8 +20,7 @@ pub fn nb_checkpoint_exists() -> bool {
 // Static method to load the checkpoint from file
 pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
     // Open the checkpoint file
-    let mut file =
-        File::open(NB_CHECKPOINT_FILE).expect("Failed to open nori checkpoint file.");
+    let mut file = File::open(NB_CHECKPOINT_FILE).expect("Failed to open nori checkpoint file.");
 
     // Read the contents into a Vec<u8>
     let mut serialized_checkpoint = Vec::new();
@@ -36,12 +35,11 @@ pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
 }
 
 pub fn save_nb_checkpoint(slot_head: u64, next_sync_committee: FixedBytes<32>) {
-    // Create dir if nessesary 
+    // Create dir if nessesary
     let checkpoint_dir = Path::new(NB_CHECKPOINT_FILE).parent().unwrap();
 
     // Ensure the directory exists
-    std::fs::create_dir_all(checkpoint_dir)
-        .expect("Failed to create checkpoint directory.");
+    std::fs::create_dir_all(checkpoint_dir).expect("Failed to create checkpoint directory.");
 
     // Define the current checkpoint
     let checkpoint = NoriBridgeCheckpoint {
