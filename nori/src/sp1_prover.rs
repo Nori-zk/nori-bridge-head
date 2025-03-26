@@ -1,14 +1,28 @@
+use std::sync::OnceLock;
 use crate::helios::{get_checkpoint, get_client, get_finality_updates};
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{Error, Result};
 use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use sp1_helios_primitives::types::ProofInputs;
-use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1Stdin};
+use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
 use tree_hash::TreeHash;
 
 pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
 
+// Cache the proving key globally (initialized once)
+static PROVING_KEY: OnceLock<SP1ProvingKey> = OnceLock::new();
+
+async fn initialize_proving_key() -> &'static SP1ProvingKey {
+    PROVING_KEY.get_or_init(|| {
+        // Initialize fresh client just for setup
+        let client = ProverClient::from_env();
+        let (pk, _) = client.setup(ELF);
+        pk
+    })
+}
+
+// Struct for ProverJobOutput
 pub struct ProverJobOutput {
     job_idx: u64,
     input_head: u64,
@@ -99,6 +113,9 @@ pub async fn finality_update_job(
     info!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
 
+    // Get proving key
+    let pk = initialize_proving_key().await;
+
     let proof: SP1ProofWithPublicValues =
         tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
             // Setup prover client
@@ -106,11 +123,10 @@ pub async fn finality_update_job(
             let mut stdin = SP1Stdin::new();
             stdin.write_slice(&encoded_proof_inputs);
             let prover_client = ProverClient::from_env();
-            let (pk, _) = prover_client.setup(ELF); // FIXME this is expensive! What about a persistant thread pool.
 
             // Generate proof.
             info!("Running sp1 proof.");
-            let proof = prover_client.prove(&pk, &stdin).plonk().run();
+            let proof = prover_client.prove(pk, &stdin).plonk().run();
 
             proof // Explicitly return proof
         })
