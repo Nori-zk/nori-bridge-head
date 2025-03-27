@@ -55,12 +55,12 @@ pub trait EventObserver: Send + Sync {
 }
 
 /// Reference implementation of EventObserver
-pub struct ExampleEventObserver {
+pub struct ExampleBridgeHeadEventObserver {
     /// Handle to trigger bridge head advancement
     bridge_head_handle: CommandHandle,
 }
 
-impl ExampleEventObserver {
+impl ExampleBridgeHeadEventObserver {
     pub fn new(bridge_head_handle: CommandHandle) -> Self {
         Self { bridge_head_handle }
     }
@@ -75,7 +75,7 @@ impl ExampleEventObserver {
 }
 
 #[async_trait]
-impl EventObserver for ExampleEventObserver {
+impl EventObserver for ExampleBridgeHeadEventObserver {
     async fn on_proof(&mut self, proof_data: ProofMessage) -> Result<()> {
         println!("PROOF| {}", proof_data.input_slot);
 

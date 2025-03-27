@@ -3,7 +3,7 @@ use log::info;
 use nori::{
     bridge_head::{
         api::BridgeHead,
-        observer::{EventObserver, ExampleEventObserver},
+        observer::{EventObserver, ExampleBridgeHeadEventObserver},
     },
     utils::enable_logging_from_cargo_run,
 };
@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     // Start the bridge head receiver
     info!("Starting nori event observer.");
     tokio::spawn(async move {
-        let mut bridge_head_observer = ExampleEventObserver::new(bridge_head_cmd_handle);
+        let mut bridge_head_observer = ExampleBridgeHeadEventObserver::new(bridge_head_cmd_handle);
         bridge_head_observer.run(bridge_head_event_receiver).await;
     });
     info!("Started nori event observer.");
