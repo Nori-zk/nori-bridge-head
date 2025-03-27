@@ -14,6 +14,9 @@ repository = "https://github.com/Nori-zk/nori-bridge-head"
 # nori-bridge-head
 nori = {path = "nori"}
 
+# o1-js
+kimchi = { git = "https://github.com/o1-labs/proof-systems", branch = "master" }
+
 # sp1-helios
 sp1-helios-script = { path = "script" }
 sp1-helios-program = { path = "program" }
@@ -31,7 +34,7 @@ sp1-sdk = "4.0.0"
 sp1-build = "4.0.0"
 tokio = "1.38.0"
 tracing = "0.1.37"
-serde = "1.0.203"
+serde = "1.0.219"
 thiserror = "1.0.61"
 zduny-wasm-timer = "0.2.8"
 serde_cbor = "0.11.2"
