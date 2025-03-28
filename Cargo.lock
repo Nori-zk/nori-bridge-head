@@ -4614,6 +4614,7 @@ dependencies = [
  "log",
  "rand 0.9.0",
  "reqwest",
+ "rmp-serde",
  "serde",
  "serde_cbor",
  "serde_json",

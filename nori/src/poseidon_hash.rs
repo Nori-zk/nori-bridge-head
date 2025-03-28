@@ -1,72 +1,121 @@
+use alloy_primitives::ruint::algorithms::div;
 use anyhow::Result;
 use helios_consensus_core::{
     consensus_spec::MainnetConsensusSpec,
     types::{LightClientHeader, LightClientStore},
 };
-/*use kimchi::{
+use kimchi::{
     mina_curves::pasta::Fp,
     mina_poseidon::{
         constants::PlonkSpongeConstantsKimchi,
         pasta::fp_kimchi,
         poseidon::{ArithmeticSponge as Poseidon, Sponge as _},
     },
-};*/
-use serde::Serialize;
+    o1_utils::FieldHelpers,
+};
 
-/*fn poseidon_hash(input: &[Fp]) -> Fp {
+fn poseidon_hash(input: &[Fp]) -> Fp {
     let mut hash = Poseidon::<Fp, PlonkSpongeConstantsKimchi>::new(fp_kimchi::static_params());
     hash.absorb(input);
     hash.squeeze()
-}*/
+}
 
-/*fn bytes_to_hex(bytes: &[u8]) -> String {
-    const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
-    let mut hex_string = String::with_capacity(bytes.len() * 2);
+// https://github.com/djkoloski/rust_serialization_benchmark
+// bitcode is the winner but not serde compatiable seems like only rmp_serde is the only compatible fastest
+// Simple strategy
 
-    for &byte in bytes {
-        hex_string.push(HEX_CHARS[(byte >> 4) as usize] as char);
-        hex_string.push(HEX_CHARS[(byte & 0x0F) as usize] as char);
+fn serialize_to_cbor(helios_store: &LightClientStore<MainnetConsensusSpec>) -> Result<Vec<u8>> {
+    // We need to go to bytes somehow?
+
+    let mut result = Vec::new();
+
+    // Required fields
+    result.extend(rmp_serde::to_vec(&helios_store.finalized_header)?);
+    result.extend(rmp_serde::to_vec(&helios_store.current_sync_committee)?);
+    result.extend(rmp_serde::to_vec(&helios_store.optimistic_header)?);
+    result.extend(rmp_serde::to_vec(
+        &helios_store.previous_max_active_participants,
+    )?);
+    result.extend(rmp_serde::to_vec(
+        &helios_store.current_max_active_participants,
+    )?);
+
+    // Optional fields
+    if let Some(next) = &helios_store.next_sync_committee {
+        result.extend(rmp_serde::to_vec(next)?);
+    }
+    if let Some(best) = &helios_store.best_valid_update {
+        result.extend(rmp_serde::to_vec(best)?);
     }
 
-    hex_string
-}*/
+    Ok(result)
+}
 
-/*fn serialize_to_hex(helios_store: &LightClientStore<MainnetConsensusSpec>) -> Result<String> {
-    let mut serializer = Vec::new();
-    helios_store.finalized_header.serialize(&mut serializer)?; // Not going to work as we cannot go to vec8 directly perhaps use bincode which has typescript support
-    // https://github.com/4t145/bincode-ts
-    let hex_string = bytes_to_hex(&serializer);
-    Ok(hex_string)
-}*/
 
-// we need to go to bytes somehow?
+/*
+pub fn poseidon_hash_helios_store(
+    helios_store: LightClientStore<MainnetConsensusSpec>,
+) -> Result<Fp> {
+    let encoded_store = serialize_to_cbor(&helios_store)?;
 
-pub fn poseidon_hash_helios_store(helios_store: LightClientStore<MainnetConsensusSpec>) {
-    
+    //  Fp<P, N> requires exactly N * 8 bytes.
+    // pub type Fp832<P> = Fp<P, 13>; this is the largest type 1->13
+    // We need to derive optimal packing with the least number of FP's returned.
 
-    // let finalized_header = helios_store.finalized_header.serialize(serializer);
-    //let _ = helios_store.finalized_header.beacon().slot;
+    // Strategy find the largest modulo for which the encoded data is divisable and reduce this out.
+    // Then if there is a remainer then we find out how many bytes we are short and apply this logic again using a smaller field.
 
-    // helios_store.finalized_header.beacon().slot;
+    let mut remaining_bytes = encoded_store.len();
+    let mut divisor = 13;
+    let mut fps: Vec<Fp> = Vec::new();
+    let mut start = 0;
 
-    // Fp::from(value)
+    while remaining_bytes != 0 {
+        // Find the smallest divisor that fits the remaining bytes
+        while divisor > 0 && (divisor * 8) > remaining_bytes {
+            divisor -= 1;
+        }
 
-    /*
+        // Handle final partial chunk with proper 8-byte array
+        if divisor == 0 {
+            let mut padded = [0u8; 8];
+            let bytes_to_copy = remaining_bytes.min(8);
+            padded[..bytes_to_copy].copy_from_slice(&encoded_store[start..start + bytes_to_copy]);
+            fps.push(Fp::from_bytes(&padded)?);
+            break;
+        }
 
-        pub finalized_header: LightClientHeader,
-    pub current_sync_committee: SyncCommittee<S>,
-    pub next_sync_committee: Option<SyncCommittee<S>>,
-    pub optimistic_header: LightClientHeader,
-    pub previous_max_active_participants: u64,
-    pub current_max_active_participants: u64,
-    pub best_valid_update: Option<GenericUpdate<S>>,
+        let divisions = remaining_bytes / (divisor * 8);
 
-     */
+        // Process all full chunks for this divisor
+        for _ in 0..divisions {
+            let end = start + (divisor * 8); // Fixed off-by-one
+            let slice = &encoded_store[start..end];
+            fps.push(Fp::from_bytes(slice)?);
+            start = end;
+        }
 
-     // member1 leaf1 concat leaf2 concact
-    // 
+        remaining_bytes = encoded_store.len() - start;
+    }
 
-    // Unpack values and cast to fields
+    Ok(poseidon_hash(&fps))
+} NOT GOING TO WORK CANNOT MIX FP types*/
+
+pub fn poseidon_hash_helios_store(
+    helios_store: &LightClientStore<MainnetConsensusSpec>,
+) -> Result<Fp> { // Fp = Fp256<...>
+    let encoded_store = serialize_to_cbor(helios_store)?;
+    let mut fps = Vec::new();
+
+    // Split into 32-byte chunks (Fp256 requires exactly 32 bytes)
+    for chunk in encoded_store.chunks(32) {
+        let mut bytes = [0u8; 32];
+        let bytes_to_copy = chunk.len().min(32);
+        bytes[..bytes_to_copy].copy_from_slice(&chunk[..bytes_to_copy]);
+        fps.push(Fp::from_bytes(&bytes)?); 
+    }
+
+    Ok(poseidon_hash(&fps))
 }
 
 // SP1 LOGIC -------------------------------------------------------------------
@@ -139,7 +188,6 @@ return next_hash + other public outputs
 
         return new_hash
 */
-
 
 /*
 

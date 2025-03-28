@@ -30,6 +30,7 @@ cargo_metadata = { workspace = true }
 reqwest = { workspace = true }
 tree_hash = { workspace = true }
 serde_json = { workspace = true }
+rmp-serde = { workspace = true }
 async-trait = "0.1.86"
 futures = "0.3.31"
 rand = "0.9.0"
