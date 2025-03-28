@@ -20,13 +20,12 @@ fn poseidon_hash(input: &[Fp]) -> Fp {
     hash.squeeze()
 }
 
+// We need to go to bytes somehow
 // https://github.com/djkoloski/rust_serialization_benchmark
 // bitcode is the winner but not serde compatiable seems like only rmp_serde is the only compatible fastest
 // Simple strategy
 
 fn serialize_to_cbor(helios_store: &LightClientStore<MainnetConsensusSpec>) -> Result<Vec<u8>> {
-    // We need to go to bytes somehow?
-
     let mut result = Vec::new();
 
     // Required fields
@@ -50,56 +49,6 @@ fn serialize_to_cbor(helios_store: &LightClientStore<MainnetConsensusSpec>) -> R
 
     Ok(result)
 }
-
-
-/*
-pub fn poseidon_hash_helios_store(
-    helios_store: LightClientStore<MainnetConsensusSpec>,
-) -> Result<Fp> {
-    let encoded_store = serialize_to_cbor(&helios_store)?;
-
-    //  Fp<P, N> requires exactly N * 8 bytes.
-    // pub type Fp832<P> = Fp<P, 13>; this is the largest type 1->13
-    // We need to derive optimal packing with the least number of FP's returned.
-
-    // Strategy find the largest modulo for which the encoded data is divisable and reduce this out.
-    // Then if there is a remainer then we find out how many bytes we are short and apply this logic again using a smaller field.
-
-    let mut remaining_bytes = encoded_store.len();
-    let mut divisor = 13;
-    let mut fps: Vec<Fp> = Vec::new();
-    let mut start = 0;
-
-    while remaining_bytes != 0 {
-        // Find the smallest divisor that fits the remaining bytes
-        while divisor > 0 && (divisor * 8) > remaining_bytes {
-            divisor -= 1;
-        }
-
-        // Handle final partial chunk with proper 8-byte array
-        if divisor == 0 {
-            let mut padded = [0u8; 8];
-            let bytes_to_copy = remaining_bytes.min(8);
-            padded[..bytes_to_copy].copy_from_slice(&encoded_store[start..start + bytes_to_copy]);
-            fps.push(Fp::from_bytes(&padded)?);
-            break;
-        }
-
-        let divisions = remaining_bytes / (divisor * 8);
-
-        // Process all full chunks for this divisor
-        for _ in 0..divisions {
-            let end = start + (divisor * 8); // Fixed off-by-one
-            let slice = &encoded_store[start..end];
-            fps.push(Fp::from_bytes(slice)?);
-            start = end;
-        }
-
-        remaining_bytes = encoded_store.len() - start;
-    }
-
-    Ok(poseidon_hash(&fps))
-} NOT GOING TO WORK CANNOT MIX FP types*/
 
 pub fn poseidon_hash_helios_store(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
@@ -194,7 +143,9 @@ return next_hash + other public outputs
 1.
 
 return type for proof outputs SP1
-prevHead: U256::from(prev_head), // Matthew is this nessesary prev_head is u64 and perhaps isnt provable??
+prevHead: U256::from(prev_head), // Matthew is this nessesary prev_head is u64 and perhaps isnt provable?? I think this 
+is an artifact of the solidity stuff and perhaps not relevant. Todo as well move away from the solidity encoding as we dont
+care about it.
 
 2.
 
