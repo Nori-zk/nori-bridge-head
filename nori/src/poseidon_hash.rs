@@ -1,9 +1,5 @@
-use alloy_primitives::ruint::algorithms::div;
 use anyhow::Result;
-use helios_consensus_core::{
-    consensus_spec::MainnetConsensusSpec,
-    types::{LightClientHeader, LightClientStore},
-};
+use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
 use kimchi::{
     mina_curves::pasta::Fp,
     mina_poseidon::{
@@ -14,6 +10,8 @@ use kimchi::{
     o1_utils::FieldHelpers,
 };
 
+// Kimchi poseidon hash
+
 fn poseidon_hash(input: &[Fp]) -> Fp {
     let mut hash = Poseidon::<Fp, PlonkSpongeConstantsKimchi>::new(fp_kimchi::static_params());
     hash.absorb(input);
@@ -23,9 +21,9 @@ fn poseidon_hash(input: &[Fp]) -> Fp {
 // We need to go to bytes somehow
 // https://github.com/djkoloski/rust_serialization_benchmark
 // bitcode is the winner but not serde compatiable seems like only rmp_serde is the only compatible fastest
-// Simple strategy
+// Simple strategy first....
 
-fn serialize_to_cbor(helios_store: &LightClientStore<MainnetConsensusSpec>) -> Result<Vec<u8>> {
+fn serialize_helios_store(helios_store: &LightClientStore<MainnetConsensusSpec>) -> Result<Vec<u8>> {
     let mut result = Vec::new();
 
     // Required fields
@@ -50,10 +48,13 @@ fn serialize_to_cbor(helios_store: &LightClientStore<MainnetConsensusSpec>) -> R
     Ok(result)
 }
 
+// Poesidon hash serialized helios store.
+
 pub fn poseidon_hash_helios_store(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
-) -> Result<Fp> { // Fp = Fp256<...>
-    let encoded_store = serialize_to_cbor(helios_store)?;
+) -> Result<Fp> {
+    // Fp = Fp256<...>
+    let encoded_store = serialize_helios_store(helios_store)?;
     let mut fps = Vec::new();
 
     // Split into 32-byte chunks (Fp256 requires exactly 32 bytes)
@@ -61,7 +62,7 @@ pub fn poseidon_hash_helios_store(
         let mut bytes = [0u8; 32];
         let bytes_to_copy = chunk.len().min(32);
         bytes[..bytes_to_copy].copy_from_slice(&chunk[..bytes_to_copy]);
-        fps.push(Fp::from_bytes(&bytes)?); 
+        fps.push(Fp::from_bytes(&bytes)?);
     }
 
     Ok(poseidon_hash(&fps))
@@ -143,7 +144,7 @@ return next_hash + other public outputs
 1.
 
 return type for proof outputs SP1
-prevHead: U256::from(prev_head), // Matthew is this nessesary prev_head is u64 and perhaps isnt provable?? I think this 
+prevHead: U256::from(prev_head), // Matthew is this nessesary prev_head is u64 and perhaps isnt provable?? I think this
 is an artifact of the solidity stuff and perhaps not relevant. Todo as well move away from the solidity encoding as we dont
 care about it.
 
