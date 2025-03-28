@@ -23,7 +23,9 @@ fn poseidon_hash(input: &[Fp]) -> Fp {
 // bitcode is the winner but not serde compatiable seems like only rmp_serde is the only compatible fastest
 // Simple strategy first....
 
-fn serialize_helios_store(helios_store: &LightClientStore<MainnetConsensusSpec>) -> Result<Vec<u8>> {
+fn serialize_helios_store(
+    helios_store: &LightClientStore<MainnetConsensusSpec>,
+) -> Result<Vec<u8>> {
     let mut result = Vec::new();
 
     // Required fields
@@ -57,11 +59,9 @@ pub fn poseidon_hash_helios_store(
     let encoded_store = serialize_helios_store(helios_store)?;
     let mut fps = Vec::new();
 
-    // Split into 32-byte chunks (Fp256 requires exactly 32 bytes)
     for chunk in encoded_store.chunks(32) {
         let mut bytes = [0u8; 32];
-        let bytes_to_copy = chunk.len().min(32);
-        bytes[..bytes_to_copy].copy_from_slice(&chunk[..bytes_to_copy]);
+        bytes[..chunk.len()].copy_from_slice(chunk);
         fps.push(Fp::from_bytes(&bytes)?);
     }
 
