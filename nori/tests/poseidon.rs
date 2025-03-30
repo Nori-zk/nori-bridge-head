@@ -65,4 +65,6 @@ async fn serialize_helios_store_test() {
     let hex = bytes_to_hex(&hash);
     
     println!("hex {} calculate in {} seconds", hex, elapsed);
+
+    assert!(hex == "a63ffae75aba725f2b7ddf91006c3266da81d46d61ecb9ee15ff52bebe56bc1b")
 }
