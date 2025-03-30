@@ -33,3 +33,7 @@ NORI_HELIOS_POLLING_INTERVAL=1.0
 ## Execution
 
 `cargo run --bin nbhead`
+
+## Tests
+
+`cargo test -- --nocapture`

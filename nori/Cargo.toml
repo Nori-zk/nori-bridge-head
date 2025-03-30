@@ -9,6 +9,10 @@ authors.workspace = true
 name = "nbhead"
 path = "./bin/nori_bridge_head.rs"
 
+[lib]
+path = "src/lib.rs"
+name = "nori"
+
 [dependencies]
 dotenv = { workspace = true }
 sp1-sdk = { workspace = true }

@@ -10,6 +10,7 @@ use kimchi::{
     o1_utils::FieldHelpers,
 };
 use tree_hash::TreeHash;
+//use kimchi::ark_ff::{PrimeField, MontFp, Field};
 
 // Kimchi poseidon hash
 
@@ -217,18 +218,24 @@ fn serialize_helios_store(
 
 pub fn poseidon_hash_helios_store(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
-) -> Result<Fp> {
+) -> Result<Vec<u8>> {
     // Fp = Fp256<...>
+    println!("getting encoded store");
+
     let encoded_store = serialize_helios_store(helios_store)?;
+    println!("got encoded store");
     let mut fps = Vec::new();
 
-    for chunk in encoded_store.chunks(32) {
+    for chunk in encoded_store.chunks(31) {
         let mut bytes = [0u8; 32];
         bytes[..chunk.len()].copy_from_slice(chunk);
+        println!("le chunk {:?}", bytes);
         fps.push(Fp::from_bytes(&bytes)?);
     }
 
-    Ok(poseidon_hash(&fps))
+    println!("got chunks");
+
+    Ok(poseidon_hash(&fps).to_bytes())
 }
 
 // SP1 LOGIC -------------------------------------------------------------------
