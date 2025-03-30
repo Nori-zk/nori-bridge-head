@@ -220,20 +220,15 @@ pub fn poseidon_hash_helios_store(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
 ) -> Result<Vec<u8>> {
     // Fp = Fp256<...>
-    println!("getting encoded store");
 
     let encoded_store = serialize_helios_store(helios_store)?;
-    println!("got encoded store");
     let mut fps = Vec::new();
 
     for chunk in encoded_store.chunks(31) {
         let mut bytes = [0u8; 32];
         bytes[..chunk.len()].copy_from_slice(chunk);
-        println!("le chunk {:?}", bytes);
         fps.push(Fp::from_bytes(&bytes)?);
     }
-
-    println!("got chunks");
 
     Ok(poseidon_hash(&fps).to_bytes())
 }

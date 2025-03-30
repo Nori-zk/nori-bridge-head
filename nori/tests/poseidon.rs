@@ -3,6 +3,7 @@ use nori::{
     helios::{get_client, get_latest_checkpoint},
     poseidon_hash::poseidon_hash_helios_store,
 };
+use tokio::time::Instant;
 use std::fmt::Write;
 
 fn bytes_to_hex(vec: &[u8]) -> String {
@@ -57,10 +58,11 @@ async fn serialize_helios_store_test() {
     // Get the client from the beacon checkpoint
     let helios_polling_client = get_client(helios_checkpoint).await.unwrap();
 
+    let before = Instant::now();
     let hash = poseidon_hash_helios_store(&helios_polling_client.store).unwrap();
+    let elapsed = Instant::now().duration_since(before).as_secs_f64();
 
     let hex = bytes_to_hex(&hash);
     
-
-    println!("hex {}", hex)
+    println!("hex {} calculate in {} seconds", hex, elapsed);
 }
