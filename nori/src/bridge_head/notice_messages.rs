@@ -55,6 +55,7 @@ pub struct NoticeExtensionBridgeHeadJobCreated {
     pub input_slot: u64,
     pub expected_output_slot: u64,
     pub job_idx: u64,
+    pub input_store_hash: FixedBytes<32>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobSucceeded {
@@ -64,6 +65,7 @@ pub struct NoticeExtensionBridgeHeadJobSucceeded {
     pub next_sync_committee: FixedBytes<32>,
     pub execution_state_root: FixedBytes<32>,
     pub elapsed_sec: f64,
+    pub output_store_hash: FixedBytes<32>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobFailed {

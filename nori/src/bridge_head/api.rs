@@ -253,6 +253,7 @@ impl BridgeHead {
                     next_sync_committee: proof_outputs.next_sync_committee_hash,
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
+                    output_store_hash: proof_outputs.store_hash
                 },
             ))
             .await;
@@ -360,6 +361,7 @@ impl BridgeHead {
                     input_slot: self.current_head,
                     job_idx,
                     expected_output_slot: self.next_slot,
+                    input_store_hash: store_hash
                 },
             ))
             .await;
@@ -369,12 +371,12 @@ impl BridgeHead {
 
     // Stage transition proof generation
     async fn stage_transition_proof(&mut self) {
-        if self.cold_start {
+        /*if self.cold_start {
             // If we started cold run the first job regardless of if our next_slot = current_head
             let _ = self.prepare_transition_proof().await;
             self.cold_start = false;
             return;
-        }
+        }*/
         
         if self.next_slot > self.current_head {
             // Immediately do the transition proof job.
