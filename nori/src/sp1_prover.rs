@@ -8,7 +8,7 @@ use sp1_helios_primitives::types::ProofInputs;
 use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
 use tree_hash::TreeHash;
 
-pub const ELF: &[u8] = include_bytes!("../../elf/sp1-helios-elf");
+pub const ELF: &[u8] = include_bytes!("../../nori-elf/sp1-helios-program"); // "../../elf/sp1-helios-elf"
 
 // Cache the proving key globally (initialized once)
 static PROVING_KEY: OnceLock<SP1ProvingKey> = OnceLock::new();
@@ -79,7 +79,7 @@ pub async fn finality_update_job(
     if !sync_committee_updates.is_empty() {
         let next_sync_committee = B256::from_slice(
             sync_committee_updates[0]
-                .next_sync_committee
+                .next_sync_committee()
                 .tree_hash_root()
                 .as_ref(),
         );

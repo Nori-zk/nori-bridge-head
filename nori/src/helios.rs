@@ -38,7 +38,7 @@ pub async fn get_client_latest_finality_head(
         .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
 
     // Extract latest slot
-    Ok(finality_update.finalized_header.beacon().slot)
+    Ok(finality_update.finalized_header().beacon().slot)
 }
 
 pub async fn get_finality_updates(

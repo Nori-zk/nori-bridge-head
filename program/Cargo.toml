@@ -5,17 +5,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
-[[bin]]
-name = "make"
-path = "./bin/make.rs"
-
 [dependencies]
-sp1-zkvm = "4.0.0"
-sp1-build = { workspace = true }
-sp1-sdk = { workspace = true }
+sp1-zkvm = "4.1.0"
 helios-consensus-core = { workspace = true }
 serde_cbor = { workspace = true }
 sp1-helios-primitives = { workspace = true }
 alloy-sol-types = { workspace = true }
-alloy-primitives = { workspace = true }
+alloy-primitives = { workspace = true, features = ["sha3-keccak"] }
 tree_hash = { workspace = true }

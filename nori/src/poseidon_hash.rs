@@ -173,6 +173,12 @@ fn serialize_helios_store(
             result.extend_from_slice(next.tree_hash_root().as_ref());
         }
 
+        if let Some(nb) = &best.next_sync_committee_branch {
+            nb.iter().for_each(|fb|{
+                result.extend_from_slice(fb.as_ref());
+            })
+        }
+
         // Pack best_valid_update.finalized_header
         if let Some(fh) = &best.finalized_header {
 
@@ -205,8 +211,11 @@ fn serialize_helios_store(
             );
         }
 
-        if let Some(fb) = &best.finality_branch {
-            result.extend_from_slice(fb.tree_hash_root().as_ref());
+        if let Some(fbb) = &best.finality_branch {
+            //result.extend_from_slice(fb.tree_hash_root().as_ref());
+            fbb.iter().for_each(|fb|{
+                result.extend_from_slice(fb.as_ref());
+            })
         }
 
     }

@@ -111,6 +111,8 @@ pub struct BridgeHead {
     event_tx: broadcast::Sender<BridgeHeadEvent>,
     /// Boolean for indicating a job should be issued on the next beacon slot change event
     stage_transition_proof: bool,
+    /// Boolean indicating a cold start (prevents waiting for transition)
+    cold_start: bool,
 }
 
 impl BridgeHead {
@@ -120,7 +122,7 @@ impl BridgeHead {
         // Initialise slot head / commitee vars
         let current_head;
         let mut next_sync_committee = FixedBytes::<32>::default();
-
+        let cold_start;
         // Start procedure
         if nb_checkpoint_exists() {
             // Warm start procedure
@@ -128,11 +130,13 @@ impl BridgeHead {
             let nb_checkpoint = load_nb_checkpoint().unwrap();
             current_head = nb_checkpoint.slot_head;
             next_sync_committee = nb_checkpoint.next_sync_committee;
+            cold_start = false;
         } else {
             // Cold start procedure
             // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
             current_head = get_latest_finality_head().await.unwrap();
+            cold_start = true;
         }
 
         // Setup command mpsc
@@ -167,6 +171,7 @@ impl BridgeHead {
                 job_tx,
                 event_tx,
                 stage_transition_proof: false,
+                cold_start
             }
         )
     }
@@ -353,6 +358,13 @@ impl BridgeHead {
 
     // Stage transition proof generation
     async fn stage_transition_proof(&mut self) {
+        if self.cold_start {
+            // If we started cold run the first job regardless of if our next_slot = current_head
+            let _ = self.prepare_transition_proof().await;
+            self.cold_start = false;
+            return;
+        }
+        
         if self.next_slot > self.current_head {
             // Immediately do the transition proof job.
             let _ = self.prepare_transition_proof().await;
