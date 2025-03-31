@@ -83,9 +83,10 @@ pub fn main() {
         nextSyncCommitteeHash: next_sync_committee_hash,
         newHead: U256::from(head),
         prevHeader: prev_header,
-        prevHead: U256::from(prev_head),
+        prevHead: U256::from(prev_head), // Matthew is this nessesary
         syncCommitteeHash: sync_committee_hash,
         startSyncCommitteeHash: start_sync_committee_hash,
+        // hash : parse(bytes-hash) 
     };
     sp1_zkvm::io::commit_slice(&proof_outputs.abi_encode());
 }
