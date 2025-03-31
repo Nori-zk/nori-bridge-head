@@ -83,6 +83,7 @@ pub struct NoticeExtensionBridgeHeadFinalityTransitionDetected {
 pub struct NoticeExtensionBridgeHeadAdvanced {
     pub head: u64,
     pub next_sync_committee: FixedBytes<32>,
+    pub store_hash: FixedBytes<32>
 }
 
 // ================ GENERATE MESSAGES VIA MACRO ================ //

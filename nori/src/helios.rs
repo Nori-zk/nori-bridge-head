@@ -1,4 +1,4 @@
-use alloy_primitives::B256;
+use alloy_primitives::{FixedBytes, B256};
 use helios_consensus_core::{
     calc_sync_period,
     consensus_spec::MainnetConsensusSpec,
@@ -15,8 +15,9 @@ use tokio::sync::{mpsc::channel, watch};
 use tree_hash::TreeHash;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 use anyhow::{Error, Result};
+use crate::poseidon_hash::poseidon_hash_helios_store;
 
-pub async fn get_latest_finality_head() -> Result<u64> {
+pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedBytes<32>)> {
     // Get latest beacon checkpoint
     let latest_checkpoint = get_latest_checkpoint().await?;
 
@@ -24,7 +25,12 @@ pub async fn get_latest_finality_head() -> Result<u64> {
     let helios_client = get_client(latest_checkpoint).await?;
 
     // Get slot head from checkpoint
-    Ok(helios_client.store.finalized_header.clone().beacon().slot)
+    let slot_head = helios_client.store.finalized_header.clone().beacon().slot;
+
+    // Get the store hash
+    let store_hash = poseidon_hash_helios_store(&helios_client.store)?;
+
+    Ok((slot_head,store_hash))
 }
 
 pub async fn get_client_latest_finality_head(

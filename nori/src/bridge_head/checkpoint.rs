@@ -10,6 +10,7 @@ const NB_CHECKPOINT_FILE: &str = "./checkpoint/nb_checkpoint.json";
 pub struct NoriBridgeCheckpoint {
     pub slot_head: u64,
     pub next_sync_committee: FixedBytes<32>,
+    pub store_hash: FixedBytes<32>
 }
 
 // Static method to check if the checkpoint file exists
@@ -34,7 +35,7 @@ pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
     Ok(nb_checkpoint)
 }
 
-pub fn save_nb_checkpoint(slot_head: u64, next_sync_committee: FixedBytes<32>) {
+pub fn save_nb_checkpoint(slot_head: u64, next_sync_committee: FixedBytes<32>, store_hash: FixedBytes<32>) {
     // Create dir if nessesary
     let checkpoint_dir = Path::new(NB_CHECKPOINT_FILE).parent().unwrap();
 
@@ -45,6 +46,7 @@ pub fn save_nb_checkpoint(slot_head: u64, next_sync_committee: FixedBytes<32>) {
     let checkpoint = NoriBridgeCheckpoint {
         slot_head,
         next_sync_committee,
+        store_hash
     };
 
     // Serialize the checkpoint to a byte vector

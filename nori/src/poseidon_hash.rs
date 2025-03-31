@@ -1,3 +1,4 @@
+use alloy_primitives::FixedBytes;
 use anyhow::Result;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
 use kimchi::{
@@ -227,7 +228,7 @@ fn serialize_helios_store(
 
 pub fn poseidon_hash_helios_store(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
-) -> Result<Vec<u8>> {
+) -> Result<FixedBytes<32>> {
     // Fp = Fp256<...>
 
     let encoded_store = serialize_helios_store(helios_store)?;
@@ -239,7 +240,9 @@ pub fn poseidon_hash_helios_store(
         fps.push(Fp::from_bytes(&bytes)?);
     }
 
-    Ok(poseidon_hash(&fps).to_bytes())
+    let mut fixed_bytes = [0u8; 32];
+    fixed_bytes[..32].copy_from_slice(&poseidon_hash(&fps).to_bytes());
+    Ok(FixedBytes::new(fixed_bytes))
 }
 
 // SP1 LOGIC -------------------------------------------------------------------

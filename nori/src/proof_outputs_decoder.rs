@@ -12,12 +12,14 @@ pub struct DecodedProofOutputs {
     pub prev_head: U256,
     pub sync_committee_hash: B256,
     pub start_sync_committee_hash: B256,
+    pub prev_store_hash: B256,
+    pub store_hash: B256,
 }
 
 impl DecodedProofOutputs {
     pub fn from_abi(bytes: &[u8]) -> Result<Self> {
         // Ensure the bytes have the correct length (224 bytes for all fields)
-        if bytes.len() != 256 {
+        if bytes.len() != 320 {
             return Err(anyhow::anyhow!("Invalid byte slice length"));
         }
 
@@ -42,6 +44,9 @@ impl DecodedProofOutputs {
         let sync_committee_hash = B256::from_slice(&bytes[192..224]);
         let start_sync_committee_hash = B256::from_slice(&bytes[224..256]);
 
+        let prev_store_hash = B256::from_slice(&bytes[256..288]);
+        let store_hash = B256::from_slice(&bytes[288..320]);
+
         // Return the decoded struct
         Ok(DecodedProofOutputs {
             execution_state_root,
@@ -52,6 +57,8 @@ impl DecodedProofOutputs {
             prev_head,
             sync_committee_hash,
             start_sync_committee_hash,
+            prev_store_hash,
+            store_hash
         })
     }
 }

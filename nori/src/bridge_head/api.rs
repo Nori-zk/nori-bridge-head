@@ -8,7 +8,7 @@ use super::notice_messages::{
     NoticeExtensionBridgeHeadStarted,
 };
 use super::validate::validate_env;
-use crate::helios::get_latest_finality_head;
+use crate::helios::get_latest_finality_head_and_store_hash;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::{FixedBytes, B256};
@@ -30,6 +30,7 @@ use tokio::time::Instant;
 pub struct ProofMessage {
     pub input_slot: u64,
     pub output_slot: u64,
+    pub output_store_hash: FixedBytes<32>,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
     pub next_sync_committee: FixedBytes<32>,
@@ -113,6 +114,8 @@ pub struct BridgeHead {
     stage_transition_proof: bool,
     /// Boolean indicating a cold start (prevents waiting for transition)
     cold_start: bool,
+    /// FixedBytes representing the store hash
+    store_hash: FixedBytes<32>,
 }
 
 impl BridgeHead {
@@ -122,7 +125,9 @@ impl BridgeHead {
         // Initialise slot head / commitee vars
         let current_head;
         let mut next_sync_committee = FixedBytes::<32>::default();
+        let store_hash;
         let cold_start;
+
         // Start procedure
         if nb_checkpoint_exists() {
             // Warm start procedure
@@ -130,12 +135,13 @@ impl BridgeHead {
             let nb_checkpoint = load_nb_checkpoint().unwrap();
             current_head = nb_checkpoint.slot_head;
             next_sync_committee = nb_checkpoint.next_sync_committee;
+            store_hash = nb_checkpoint.store_hash;
             cold_start = false;
         } else {
             // Cold start procedure
             // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
-            current_head = get_latest_finality_head().await.unwrap();
+            (current_head, store_hash) = get_latest_finality_head_and_store_hash().await.unwrap();
             cold_start = true;
         }
 
@@ -171,7 +177,8 @@ impl BridgeHead {
                 job_tx,
                 event_tx,
                 stage_transition_proof: false,
-                cold_start
+                cold_start,
+                store_hash
             }
         )
     }
@@ -233,6 +240,8 @@ impl BridgeHead {
             .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
         // Convert the bytes to u64 using big-endian interpretation
         let output_head = u64::from_be_bytes(new_head_u64_bytes);
+        // Get the store hash
+        let output_store_hash = proof_outputs.store_hash;
 
         // Notify of a succesful job
         let _ = self
@@ -257,6 +266,7 @@ impl BridgeHead {
                 execution_state_root: proof_outputs.execution_state_root,
                 next_sync_committee: proof_outputs.next_sync_committee_hash,
                 time_taken_seconds: elapsed_sec,
+                output_store_hash
             })
             .await;
 
@@ -326,11 +336,12 @@ impl BridgeHead {
         let tx = self.job_tx.clone();
         let current_head_clone = self.current_head;
         let next_sync_committee_clone = self.next_sync_committee;
+        let store_hash = self.store_hash;
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
             let proof_result =
-                finality_update_job(job_idx, current_head_clone, next_sync_committee_clone).await;
+                finality_update_job(job_idx, current_head_clone, next_sync_committee_clone, store_hash).await;
 
             match proof_result {
                 Ok(prover_job_output) => {
@@ -376,19 +387,23 @@ impl BridgeHead {
     }
 
     // Advance the bridge head
-    async fn advance(&mut self, head: u64, next_sync_committee: FixedBytes<32>) {
+    async fn advance(&mut self, head: u64, next_sync_committee: FixedBytes<32>, store_hash : FixedBytes<32>,) {
         // Update current head
         self.current_head = head;
+
+        // Update the store has
+        self.store_hash = store_hash;
 
         // If sync committee is valid then update it
         if next_sync_committee != B256::ZERO {
             // ONLY IF NON ZEROS
             self.next_sync_committee = next_sync_committee;
         }
+        
 
         // Save the checkpoint
         info!("Saving checkpoint.");
-        save_nb_checkpoint(self.current_head, self.next_sync_committee);
+        save_nb_checkpoint(self.current_head, self.next_sync_committee, self.store_hash);
 
         // Notify
         let _ = self
@@ -396,6 +411,7 @@ impl BridgeHead {
                 NoticeExtensionBridgeHeadAdvanced {
                     head,
                     next_sync_committee,
+                    store_hash
                 },
             ))
             .await;
@@ -456,7 +472,7 @@ impl BridgeHead {
                         }
                         Command::Advance(message) => {
                             // deal with advance invocation
-                            let _ = self.advance(message.head, message.next_sync_committee).await;
+                            let _ = self.advance(message.head, message.next_sync_committee, message.store_hash).await;
                         }
                     }
                 }

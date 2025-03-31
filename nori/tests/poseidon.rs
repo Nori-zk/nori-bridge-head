@@ -4,7 +4,7 @@ use nori::{
     poseidon_hash::poseidon_hash_helios_store,
 };
 use tokio::time::Instant;
-use std::fmt::Write;
+use std::fmt::{format, Write};
 
 fn bytes_to_hex(vec: &[u8]) -> String {
     vec.iter().fold(String::with_capacity(vec.len() * 2), |mut output, &byte| {
@@ -62,8 +62,9 @@ async fn serialize_helios_store_test() {
     let hash = poseidon_hash_helios_store(&helios_polling_client.store).unwrap();
     let elapsed = Instant::now().duration_since(before).as_secs_f64();
 
-    let hex = bytes_to_hex(&hash);
-    
+    //let hex = bytes_to_hex(&hash);
+    let hex = format!("{:02x}", hash);
+
     println!("hex {} calculate in {} seconds", hex, elapsed);
 
     assert!(hex == "a63ffae75aba725f2b7ddf91006c3266da81d46d61ecb9ee15ff52bebe56bc1b")

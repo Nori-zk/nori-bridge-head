@@ -6384,7 +6384,9 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
+ "anyhow",
  "helios-consensus-core",
+ "kimchi",
  "serde_cbor",
  "sp1-helios-primitives",
  "sp1-zkvm",

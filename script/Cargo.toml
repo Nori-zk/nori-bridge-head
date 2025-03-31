@@ -21,6 +21,10 @@ path = "./bin/test.rs"
 name = "vkey"
 path = "./bin/vkey.rs"
 
+[[bin]]
+name = "make"
+path = "./bin/make.rs"
+
 [dependencies]
 dotenv = { workspace = true }
 sp1-sdk = { workspace = true }
@@ -40,6 +44,7 @@ cargo_metadata = { workspace = true }
 reqwest = { workspace = true }
 tree_hash = { workspace = true }
 serde_json = { workspace = true }
+sp1-build = { workspace = true }
 
 [build-dependencies]
 sp1-build = { workspace = true }

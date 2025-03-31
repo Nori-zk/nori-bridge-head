@@ -6,6 +6,7 @@ use tokio::sync::mpsc::Sender;
 pub struct AdvanceMessage {
     pub head: u64,
     pub next_sync_committee: FixedBytes<32>,
+    pub store_hash: FixedBytes<32>,
 }
 
 pub enum Command {
@@ -27,12 +28,13 @@ impl CommandHandle {
         let _ = self.command_tx.send(Command::StageTransitionProof).await;
     }
 
-    pub async fn advance(&self, head: u64, next_sync_committee: FixedBytes<32>) {
+    pub async fn advance(&self, head: u64, next_sync_committee: FixedBytes<32>, store_hash: FixedBytes<32>) {
         let _ = self
             .command_tx
             .send(Command::Advance(AdvanceMessage {
                 head,
                 next_sync_committee,
+                store_hash
             }))
             .await;
     }

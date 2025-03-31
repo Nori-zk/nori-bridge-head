@@ -1,4 +1,4 @@
-use alloy_primitives::B256;
+use alloy_primitives::{FixedBytes, B256};
 use alloy_sol_types::sol;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::Forks;
@@ -13,6 +13,7 @@ pub struct ProofInputs {
     pub store: LightClientStore<MainnetConsensusSpec>,
     pub genesis_root: B256,
     pub forks: Forks,
+    pub store_hash: FixedBytes<32>
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -34,5 +35,7 @@ sol! {
         uint256 prevHead;
         bytes32 syncCommitteeHash;
         bytes32 startSyncCommitteeHash;
+        bytes32 prevStoreHash;
+        bytes32 storeHash;
     }
 }

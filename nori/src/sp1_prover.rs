@@ -8,7 +8,8 @@ use sp1_helios_primitives::types::ProofInputs;
 use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
 use tree_hash::TreeHash;
 
-pub const ELF: &[u8] = include_bytes!("../../nori-elf/sp1-helios-program"); // "../../elf/sp1-helios-elf"
+// Import nori sp1 helios program
+pub const ELF: &[u8] = include_bytes!("../../nori-elf/sp1-helios-program");
 
 // Cache the proving key globally (initialized once)
 static PROVING_KEY: OnceLock<SP1ProvingKey> = OnceLock::new();
@@ -52,6 +53,7 @@ pub async fn finality_update_job(
     job_idx: u64,
     input_head: u64,
     last_next_sync_committee: FixedBytes<32>,
+    store_hash: FixedBytes<32>
 ) -> Result<ProverJobOutput> {
     // Get latest beacon checkpoint
     let helios_checkpoint = get_checkpoint(input_head).await?;
@@ -106,6 +108,7 @@ pub async fn finality_update_job(
         store: helios_update_client.store.clone(),
         genesis_root: helios_update_client.config.chain.genesis_root,
         forks: helios_update_client.config.forks.clone(),
+        store_hash
     };
 
     // Encode proof inputs

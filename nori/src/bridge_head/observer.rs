@@ -66,10 +66,10 @@ impl ExampleBridgeHeadEventObserver {
     }
 
     // Advance nori head
-    async fn advance(&mut self, slot: u64, next_sync_commitee: FixedBytes<32>) {
+    async fn advance(&mut self, slot: u64, next_sync_commitee: FixedBytes<32>, store_hash: FixedBytes<32>) {
         let _ = self
             .bridge_head_handle
-            .advance(slot, next_sync_commitee)
+            .advance(slot, next_sync_commitee, store_hash)
             .await;
     }
 }
@@ -84,7 +84,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
 
         // Advance the head
         let _ = self
-            .advance(proof_data.output_slot, proof_data.next_sync_committee)
+            .advance(proof_data.output_slot, proof_data.next_sync_committee, proof_data.output_store_hash)
             .await;
 
         // Stage the next proof
