@@ -1,4 +1,4 @@
-use crate::helios::serialize_helios_store_serde as ser;
+use crate::helios::serialize_helios_store_serde;
 use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
@@ -32,7 +32,7 @@ pub fn poseidon_hash_helios_store(
 
     // Fp = Fp256<...>
 
-    let encoded_store = ser(helios_store)?;
+    let encoded_store = serialize_helios_store_serde(helios_store)?;
     let mut fps = Vec::new();
 
     for chunk in encoded_store.chunks(31) {
