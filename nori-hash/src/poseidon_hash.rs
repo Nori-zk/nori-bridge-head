@@ -1,3 +1,4 @@
+use crate::helios::serialize_helios_store_serde as ser;
 use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
@@ -10,7 +11,6 @@ use kimchi::{
     },
     o1_utils::FieldHelpers,
 };
-use crate::helios::serialize_helios_store;
 
 //use kimchi::ark_ff::{PrimeField, MontFp, Field};
 
@@ -28,11 +28,11 @@ pub fn poseidon_hash_helios_store(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
 ) -> Result<FixedBytes<32>> {
     // DEBUGGING PRINT REMOVE WHEN HASH TRANSITION ISSUE IS FIXED
-    print_helios_store(helios_store)?;
+    // print_helios_store(helios_store)?;
 
     // Fp = Fp256<...>
 
-    let encoded_store = serialize_helios_store(helios_store)?;
+    let encoded_store = ser(helios_store)?;
     let mut fps = Vec::new();
 
     for chunk in encoded_store.chunks(31) {

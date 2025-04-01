@@ -1,11 +1,11 @@
-use std::sync::OnceLock;
 use crate::helios::{get_checkpoint, get_client, get_finality_updates};
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{Error, Result};
 use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use sp1_helios_primitives::types::ProofInputs;
-use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
+use sp1_sdk::{utils, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
+use std::sync::OnceLock;
 use tree_hash::TreeHash;
 
 // Import nori sp1 helios program
@@ -53,7 +53,7 @@ pub async fn finality_update_job(
     job_idx: u64,
     input_head: u64,
     last_next_sync_committee: FixedBytes<32>,
-    store_hash: FixedBytes<32>
+    store_hash: FixedBytes<32>,
 ) -> Result<ProverJobOutput> {
     // Get latest beacon checkpoint
     let helios_checkpoint = get_checkpoint(input_head).await?;
@@ -108,7 +108,7 @@ pub async fn finality_update_job(
         store: helios_update_client.store.clone(),
         genesis_root: helios_update_client.config.chain.genesis_root,
         forks: helios_update_client.config.forks.clone(),
-        store_hash
+        store_hash,
     };
 
     // Encode proof inputs
@@ -126,11 +126,36 @@ pub async fn finality_update_job(
             let mut stdin = SP1Stdin::new();
             stdin.write_slice(&encoded_proof_inputs);
             let prover_client = ProverClient::from_env();
-
+            println!("Prover client setup complete, executing and report");
+            let (_, report) = prover_client
+                .execute(ELF, &stdin)
+                // .deferred_proof_verification(false)
+                .run()
+                .expect("executing failed");
+            println!(
+                "Execution total_instruction_count: {:?}",
+                report.total_instruction_count()
+            );
+            println!(
+                "Execution total_syscall_count: {:?}",
+                report.total_syscall_count()
+            );
+            // println!("Execution {:?}", report.cycle_tracker);
             // Generate proof.
             info!("Running sp1 proof.");
             let proof = prover_client.prove(pk, &stdin).plonk().run();
 
+            // Execution total_instruction_count: 158 744 490
+            // Execution total_syscall_count: 944 701
+
+            // Execution total_instruction_count: 204 913 815
+            // Execution total_syscall_count: 1 039 689
+
+            // Execution total_instruction_count: 202 589 987
+            // Execution total_syscall_count: 1 040 494
+
+            // Execution total_instruction_count: 167 312 444
+            // Execution total_syscall_count: 1 038 890
             proof // Explicitly return proof
         })
         .await??; // Await the blocking task and propagate errors properly

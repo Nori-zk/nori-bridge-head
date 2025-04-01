@@ -1,11 +1,11 @@
 #![no_main]
 sp1_zkvm::entrypoint!(main);
-use nori_hash::{poseidon_hash::poseidon_hash_helios_store, sha256_hash::sha256_hash_helios_store};
 use alloy_primitives::{B256, U256};
 use alloy_sol_types::SolValue;
 use helios_consensus_core::{
     apply_finality_update, apply_update, verify_finality_update, verify_update,
 };
+use nori_hash::{poseidon_hash::poseidon_hash_helios_store, sha256_hash::sha256_hash_helios_store};
 use sp1_helios_primitives::types::{ProofInputs, ProofOutputs};
 use tree_hash::TreeHash;
 
@@ -27,13 +27,14 @@ pub fn main() {
         mut store,
         genesis_root,
         forks,
-        store_hash: prev_store_hash
+        store_hash: prev_store_hash,
     } = serde_cbor::from_slice(&encoded_inputs).unwrap();
 
     // 0. Calculate old store hash and assert equality
     println!("Hashing old store state and comparing.");
     let calculated_prev_store_hash = sha256_hash_helios_store(&store).unwrap(); //  poseidon_hash_helios_store
     assert_eq!(calculated_prev_store_hash, prev_store_hash);
+    print!("Old store hash is valid.");
 
     let start_sync_committee_hash = store.current_sync_committee.tree_hash_root();
     let prev_header: B256 = store.finalized_header.beacon().tree_hash_root();
@@ -99,7 +100,7 @@ pub fn main() {
         syncCommitteeHash: sync_committee_hash,
         startSyncCommitteeHash: start_sync_committee_hash,
         prevStoreHash: prev_store_hash,
-        storeHash: store_hash        
+        storeHash: store_hash,
     };
     sp1_zkvm::io::commit_slice(&proof_outputs.abi_encode());
 }

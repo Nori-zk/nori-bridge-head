@@ -30,7 +30,7 @@ pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedByte
     // Get the store hash
     let store_hash = sha256_hash_helios_store(&helios_client.store)?; //  poseidon_hash_helios_store
 
-    Ok((slot_head,store_hash))
+    Ok((slot_head, store_hash))
 }
 
 pub async fn get_client_latest_finality_head(

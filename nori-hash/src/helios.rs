@@ -1,4 +1,3 @@
-
 // We need to go to bytes somehow
 // https://github.com/djkoloski/rust_serialization_benchmark
 // bitcode is the winner but not serde compatiable seems like only rmp_serde is the only compatible fastest
@@ -8,7 +7,7 @@ use anyhow::Result;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
 use tree_hash::TreeHash;
 
-fn serialize_helios_store_serde(
+pub fn serialize_helios_store_serde(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
 ) -> Result<Vec<u8>> {
     let mut result = Vec::new();
@@ -53,7 +52,7 @@ pub fn serialize_helios_store(
         }
 
     */
-
+    println!("Packing LightClientStore into Vec<u8>... ");
     let mut result = Vec::new();
 
     // Required fields ---------------------------------------------------------------------
@@ -216,5 +215,6 @@ pub fn serialize_helios_store(
         }
     }*/
 
+    println!("Packing LightClientStore  DONE... ");
     Ok(result)
 }
