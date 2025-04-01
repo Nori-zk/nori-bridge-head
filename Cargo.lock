@@ -4094,6 +4094,7 @@ dependencies = [
  "anyhow",
  "helios-consensus-core",
  "kimchi",
+ "rmp-serde",
  "serde_cbor",
  "serde_json",
  "sha2 0.10.8",
