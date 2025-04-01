@@ -31,6 +31,7 @@ pub fn main() {
     } = serde_cbor::from_slice(&encoded_inputs).unwrap();
 
     // 0. Calculate old store hash and assert equality
+    println!("Hashing old store state and comparing.");
     let calculated_prev_store_hash = poseidon_hash_helios_store(&store).unwrap();
     assert_eq!(calculated_prev_store_hash, prev_store_hash);
 
@@ -81,6 +82,7 @@ pub fn main() {
     let head = store.finalized_header.beacon().slot;
 
     // 4. Calculated updated store hash to be validated in the next round
+    println!("Hashing updated store.");
     let store_hash = poseidon_hash_helios_store(&store).unwrap();
 
     let proof_outputs = ProofOutputs {
