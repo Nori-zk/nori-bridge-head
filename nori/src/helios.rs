@@ -10,12 +10,12 @@ use helios_ethereum::{
     consensus::Inner,
     rpc::http_rpc::HttpRpc,
 };
+use nori_hash::poseidon_hash::poseidon_hash_helios_store;
 use std::sync::Arc;
 use tokio::sync::{mpsc::channel, watch};
 use tree_hash::TreeHash;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 use anyhow::{Error, Result};
-use crate::poseidon_hash::poseidon_hash_helios_store;
 
 pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedBytes<32>)> {
     // Get latest beacon checkpoint

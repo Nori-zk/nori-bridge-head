@@ -1,5 +1,5 @@
 use alloy_primitives::FixedBytes;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
 use kimchi::{
     mina_curves::pasta::Fp,
@@ -229,6 +229,9 @@ fn serialize_helios_store(
 pub fn poseidon_hash_helios_store(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
 ) -> Result<FixedBytes<32>> {
+    // DEBUGGING PRINT REMOVE WHEN HASH TRANSITION ISSUE IS FIXED
+    print_helios_store(helios_store)?;
+
     // Fp = Fp256<...>
 
     let encoded_store = serialize_helios_store(helios_store)?;
@@ -243,6 +246,17 @@ pub fn poseidon_hash_helios_store(
     let mut fixed_bytes = [0u8; 32];
     fixed_bytes[..32].copy_from_slice(&poseidon_hash(&fps).to_bytes());
     Ok(FixedBytes::new(fixed_bytes))
+}
+
+// Debugging logic
+
+pub fn print_helios_store(helios_store: &LightClientStore<MainnetConsensusSpec>) -> Result<()> {
+    // The easiest way would be to serialise it via serde json
+    let str_store = serde_json::to_string(&helios_store).context("Failed to serialize helios store")?;
+    println!("-----------------------------------------------------");
+    println!("{str_store}");
+    println!("-----------------------------------------------------");
+    Ok(())
 }
 
 // SP1 LOGIC -------------------------------------------------------------------

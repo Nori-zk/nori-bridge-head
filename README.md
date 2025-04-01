@@ -30,6 +30,10 @@ NORI_HELIOS_POLLING_INTERVAL=1.0
 - NORI_LOG, Nori logging level.
 - NORI_HELIOS_POLLING_INTERVAL, dictates the polling interval for latest Helios client beacon slot.
 
+## Build
+
+`cd scripts/ && cargo run --bin make && cd ..`
+
 ## Execution
 
 `cargo run --bin nbhead`

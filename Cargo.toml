@@ -1,5 +1,5 @@
 [workspace]
-members = ["primitives", "script", "program", "nori"]
+members = ["primitives", "script", "program", "nori", "nori-hash"]
 resolver = "2"
 
 [workspace.package]
@@ -11,8 +11,10 @@ repository = "https://github.com/succinctlabs/sp1-helios"
 
 [workspace.dependencies]
 
+# nori-hash
+nori-hash = { path = "nori-hash" }
 # nori-bridge-head
-nori = {path = "nori"}
+nori = { path = "nori" }
 
 # o1-js
 kimchi = { git = "https://github.com/o1-labs/proof-systems", branch = "master" }

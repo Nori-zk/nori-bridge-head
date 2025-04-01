@@ -4071,6 +4071,7 @@ dependencies = [
  "helios-ethereum",
  "kimchi",
  "log",
+ "nori-hash",
  "rand 0.9.0",
  "reqwest",
  "serde",
@@ -4081,6 +4082,21 @@ dependencies = [
  "sp1-helios-script",
  "sp1-sdk",
  "tokio",
+ "tree_hash",
+]
+
+[[package]]
+name = "nori-hash"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "helios-consensus-core",
+ "kimchi",
+ "serde_cbor",
+ "serde_json",
+ "sp1-helios-primitives",
  "tree_hash",
 ]
 
@@ -6386,7 +6402,7 @@ dependencies = [
  "alloy-sol-types",
  "anyhow",
  "helios-consensus-core",
- "kimchi",
+ "nori-hash",
  "serde_cbor",
  "sp1-helios-primitives",
  "sp1-zkvm",

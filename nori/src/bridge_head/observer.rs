@@ -1,3 +1,4 @@
+use std::process;
 use super::{
     api::{BridgeHeadEvent, ProofMessage},
     handles::CommandHandle,
@@ -119,6 +120,10 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     "NOTICE_TYPE| Job Failed: {:?}: {}",
                     data.extension.job_idx, data.extension.message
                 );
+
+                // REMOVE ME WHEN BUG IS SQUASHED
+                process::exit(1);
+
                 // If there are no other jobs in the queue retry the failure
                 if data.extension.n_job_in_buffer == 0 {
                     let _ = self.bridge_head_handle.stage_transition_proof().await;
