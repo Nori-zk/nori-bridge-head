@@ -371,12 +371,12 @@ impl BridgeHead {
 
     // Stage transition proof generation
     async fn stage_transition_proof(&mut self) {
-        /*if self.cold_start {
+        if self.cold_start {
             // If we started cold run the first job regardless of if our next_slot = current_head
             let _ = self.prepare_transition_proof().await;
             self.cold_start = false;
             return;
-        }*/
+        }
         
         if self.next_slot > self.current_head {
             // Immediately do the transition proof job.

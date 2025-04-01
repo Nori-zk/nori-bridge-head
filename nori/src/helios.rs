@@ -10,7 +10,7 @@ use helios_ethereum::{
     consensus::Inner,
     rpc::http_rpc::HttpRpc,
 };
-use nori_hash::poseidon_hash::poseidon_hash_helios_store;
+use nori_hash::{poseidon_hash::poseidon_hash_helios_store, sha256_hash::sha256_hash_helios_store};
 use std::sync::Arc;
 use tokio::sync::{mpsc::channel, watch};
 use tree_hash::TreeHash;
@@ -28,7 +28,7 @@ pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedByte
     let slot_head = helios_client.store.finalized_header.clone().beacon().slot;
 
     // Get the store hash
-    let store_hash = poseidon_hash_helios_store(&helios_client.store)?;
+    let store_hash = sha256_hash_helios_store(&helios_client.store)?; //  poseidon_hash_helios_store
 
     Ok((slot_head,store_hash))
 }
