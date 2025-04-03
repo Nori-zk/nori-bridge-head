@@ -7,6 +7,8 @@ use anyhow::Result;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
 use tree_hash::TreeHash;
 
+
+
 pub fn serialize_helios_store_serde(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
 ) -> Result<Vec<u8>> {
@@ -15,7 +17,7 @@ pub fn serialize_helios_store_serde(
     // Required fields
     result.extend(rmp_serde::to_vec(&helios_store.finalized_header)?);
     result.extend(rmp_serde::to_vec(&helios_store.current_sync_committee)?);
-    result.extend(rmp_serde::to_vec(&helios_store.optimistic_header)?);
+    //result.extend(rmp_serde::to_vec(&helios_store.optimistic_header)?);
     result.extend(rmp_serde::to_vec(
         &helios_store.previous_max_active_participants,
     )?);

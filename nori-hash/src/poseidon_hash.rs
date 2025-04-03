@@ -1,4 +1,4 @@
-use crate::helios::serialize_helios_store_serde;
+use crate::helios::{serialize_helios_store, serialize_helios_store_serde};
 use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
@@ -28,7 +28,7 @@ pub fn poseidon_hash_helios_store(
     helios_store: &LightClientStore<MainnetConsensusSpec>,
 ) -> Result<FixedBytes<32>> {
     // DEBUGGING PRINT REMOVE WHEN HASH TRANSITION ISSUE IS FIXED
-    // print_helios_store(helios_store)?;
+    //print_helios_store(helios_store)?;
 
     // Fp = Fp256<...>
 
