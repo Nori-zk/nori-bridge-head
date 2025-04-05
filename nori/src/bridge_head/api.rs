@@ -143,7 +143,7 @@ impl BridgeHead {
             // Cold start procedure
             // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
-            (current_head, store_hash, _) = get_latest_finality_head_and_store_hash().await.unwrap();
+            (current_head, store_hash) = get_latest_finality_head_and_store_hash().await.unwrap();
             cold_start = true;
         }
 

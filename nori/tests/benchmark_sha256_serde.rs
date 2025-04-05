@@ -7,8 +7,8 @@ use nori_sp1_helios_primitives::types::ProofInputs;
 use sp1_sdk::{ProverClient, SP1Stdin};
 use tree_hash::TreeHash;
 
-/// A stripped down version of finality_update_job used to generate cycle information
-pub async fn benchmark_finality_update_job(
+/// A stripped down version of finality_update_job used to generate cycle information without the opt
+pub async fn benchmark_finality_update(
     input_head: u64,
     last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
@@ -113,11 +113,8 @@ async fn benchmark_sha256_serde() {
     dotenv::dotenv().ok();
 
     // Get latest head and store_hash
-    let (current_head, store_hash, next_sync_committee) = get_latest_finality_head_and_store_hash().await.unwrap();
-
-    // Print next_sync_commitee
-    println!("Next sync committee: {}", next_sync_committee);
+    let (current_head, store_hash) = get_latest_finality_head_and_store_hash().await.unwrap();
 
     // Perform benchmark
-    benchmark_finality_update_job(current_head, next_sync_committee, store_hash).await.unwrap();
+    benchmark_finality_update(current_head, FixedBytes::default(), store_hash).await.unwrap();
 }
