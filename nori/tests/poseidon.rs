@@ -48,9 +48,6 @@ async fn serialize_helios_store_test() {
     let hex_str = "bd5c14018b693f33a389d9d63ce0033bd65bc0472fb06e07e1cf25f2945f4d84";
     let helios_checkpoint = hex_to_fixed_bytes(hex_str);
 
-    // Get latest beacon checkpoint
-    //let helios_checkpoint = get_latest_checkpoint().await.unwrap();
-
     println!("helios_checkpoint {}", helios_checkpoint);
 
     // Get the client from the beacon checkpoint

@@ -122,36 +122,18 @@ pub async fn finality_update_job(
     let proof: SP1ProofWithPublicValues =
         tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
             // Setup prover client
-            info!("Setting up prover client. Proving key {:?}", &pk.vk.vk);
+            info!("Setting up prover client");
             let mut stdin = SP1Stdin::new();
             stdin.write_slice(&encoded_proof_inputs);
             let prover_client = ProverClient::from_env();
-            println!("Prover client setup complete, executing and report");
+            println!("Prover client setup complete.");
 
             // Generate proof.
             info!("Running sp1 proof.");
             let proof = prover_client.prove(pk, &stdin).plonk().run();
             info!("Finished sp1 proof.");
 
-            info!("Starting diagnostics.");
-            // Do diagnostics after
-            let (_, report) = prover_client
-                .execute(ELF, &stdin)
-                // .deferred_proof_verification(false)
-                .run()
-                .expect("executing failed");
-            println!(
-                "Execution total_instruction_count: {:?}",
-                report.total_instruction_count()
-            );
-            println!(
-                "Execution total_syscall_count: {:?}",
-                report.total_syscall_count()
-            );
-            println!("Execution cycle_tracker {:?}", report.cycle_tracker);
-            info!("Finished diagnostics.");
-
-            proof // Explicitly return proof
+            proof
         })
         .await??; // Await the blocking task and propagate errors properly
 

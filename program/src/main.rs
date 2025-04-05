@@ -5,7 +5,7 @@ use alloy_sol_types::SolValue;
 use helios_consensus_core::{
     apply_finality_update, apply_update, verify_finality_update, verify_update,
 };
-use nori_hash::{poseidon_hash::poseidon_hash_helios_store, sha256_hash::sha256_hash_helios_store};
+use nori_hash::sha256_hash::sha256_hash_helios_store;
 use sp1_helios_primitives::types::{ProofInputs, ProofOutputs};
 use tree_hash::TreeHash;
 
@@ -32,7 +32,7 @@ pub fn main() {
 
     // 0. Calculate old store hash and assert equality
     println!("Hashing old store state and comparing.");
-    let calculated_prev_store_hash = poseidon_hash_helios_store(&store).unwrap();
+    let calculated_prev_store_hash = sha256_hash_helios_store(&store).unwrap();
     assert_eq!(calculated_prev_store_hash, prev_store_hash);
     print!("Old store hash is valid.");
 
@@ -84,7 +84,7 @@ pub fn main() {
 
     // 4. Calculated updated store hash to be validated in the next round
     println!("Hashing updated store.");
-    let store_hash = poseidon_hash_helios_store(&store).unwrap();
+    let store_hash = sha256_hash_helios_store(&store).unwrap();
 
     let proof_outputs = ProofOutputs {
         executionStateRoot: *store
