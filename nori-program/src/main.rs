@@ -34,7 +34,7 @@ pub fn main() {
     println!("Hashing old store state and comparing.");
     let calculated_prev_store_hash = sha256_hash_helios_store(&store).unwrap();
     assert_eq!(calculated_prev_store_hash, prev_store_hash);
-    print!("Old store hash is valid.");
+    println!("Old store hash is valid.");
 
     let start_sync_committee_hash = store.current_sync_committee.tree_hash_root();
     let prev_header: B256 = store.finalized_header.beacon().tree_hash_root();
