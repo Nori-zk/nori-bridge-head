@@ -24,6 +24,8 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
+// FIXME job_idx to job_id
+
 /// Proof types
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

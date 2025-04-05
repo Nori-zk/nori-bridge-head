@@ -32,7 +32,7 @@ pub fn main() {
 
     // 0. Calculate old store hash and assert equality
     println!("Hashing old store state and comparing.");
-    let calculated_prev_store_hash = sha256_hash_helios_store(&store).unwrap(); //  poseidon_hash_helios_store
+    let calculated_prev_store_hash = poseidon_hash_helios_store(&store).unwrap();
     assert_eq!(calculated_prev_store_hash, prev_store_hash);
     print!("Old store hash is valid.");
 
@@ -84,7 +84,7 @@ pub fn main() {
 
     // 4. Calculated updated store hash to be validated in the next round
     println!("Hashing updated store.");
-    let store_hash = sha256_hash_helios_store(&store).unwrap(); // poseidon_hash_helios_store
+    let store_hash = poseidon_hash_helios_store(&store).unwrap();
 
     let proof_outputs = ProofOutputs {
         executionStateRoot: *store

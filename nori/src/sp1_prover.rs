@@ -122,11 +122,19 @@ pub async fn finality_update_job(
     let proof: SP1ProofWithPublicValues =
         tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
             // Setup prover client
-            info!("Setting up prover client.");
+            info!("Setting up prover client. Proving key {:?}", &pk.vk.vk);
             let mut stdin = SP1Stdin::new();
             stdin.write_slice(&encoded_proof_inputs);
             let prover_client = ProverClient::from_env();
             println!("Prover client setup complete, executing and report");
+
+            // Generate proof.
+            info!("Running sp1 proof.");
+            let proof = prover_client.prove(pk, &stdin).plonk().run();
+            info!("Finished sp1 proof.");
+
+            info!("Starting diagnostics.");
+            // Do diagnostics after
             let (_, report) = prover_client
                 .execute(ELF, &stdin)
                 // .deferred_proof_verification(false)
@@ -140,22 +148,9 @@ pub async fn finality_update_job(
                 "Execution total_syscall_count: {:?}",
                 report.total_syscall_count()
             );
-            // println!("Execution {:?}", report.cycle_tracker);
-            // Generate proof.
-            info!("Running sp1 proof.");
-            let proof = prover_client.prove(pk, &stdin).plonk().run();
+            println!("Execution cycle_tracker {:?}", report.cycle_tracker);
+            info!("Finished diagnostics.");
 
-            // Execution total_instruction_count: 158 744 490
-            // Execution total_syscall_count: 944 701
-
-            // Execution total_instruction_count: 204 913 815
-            // Execution total_syscall_count: 1 039 689
-
-            // Execution total_instruction_count: 202 589 987
-            // Execution total_syscall_count: 1 040 494
-
-            // Execution total_instruction_count: 167 312 444
-            // Execution total_syscall_count: 1 038 890
             proof // Explicitly return proof
         })
         .await??; // Await the blocking task and propagate errors properly

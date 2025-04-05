@@ -52,26 +52,26 @@ pub struct NoticeExtensionBridgeHeadWarning {
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobCreated {
+    pub job_idx: u64,
     pub input_slot: u64,
     pub expected_output_slot: u64,
-    pub job_idx: u64,
     pub input_store_hash: FixedBytes<32>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobSucceeded {
+    pub job_idx: u64,
     pub input_slot: u64,
     pub output_slot: u64,
-    pub job_idx: u64,
+    pub output_store_hash: FixedBytes<32>,
     pub next_sync_committee: FixedBytes<32>,
     pub execution_state_root: FixedBytes<32>,
     pub elapsed_sec: f64,
-    pub output_store_hash: FixedBytes<32>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobFailed {
+    pub job_idx: u64,
     pub input_slot: u64,
     pub expected_output_slot: u64,
-    pub job_idx: u64,
     pub message: String,
     pub elapsed_sec: f64,
     pub n_job_in_buffer: u64,
