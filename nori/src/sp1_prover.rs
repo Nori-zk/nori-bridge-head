@@ -3,18 +3,18 @@ use alloy_primitives::{FixedBytes, B256};
 use anyhow::{Error, Result};
 use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
-use sp1_helios_primitives::types::ProofInputs;
-use sp1_sdk::{utils, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
+use nori_sp1_helios_primitives::types::ProofInputs;
+use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
 use std::sync::OnceLock;
 use tree_hash::TreeHash;
 
 // Import nori sp1 helios program
-pub const ELF: &[u8] = include_bytes!("../../nori-elf/sp1-helios-program");
+pub const ELF: &[u8] = include_bytes!("../../nori-elf/nori-sp1-helios-program");
 
 // Cache the proving key globally (initialized once)
 static PROVING_KEY: OnceLock<SP1ProvingKey> = OnceLock::new();
 
-async fn initialize_proving_key() -> &'static SP1ProvingKey {
+pub async fn initialize_proving_key() -> &'static SP1ProvingKey {
     PROVING_KEY.get_or_init(|| {
         // Initialize fresh client just for setup
         let client = ProverClient::from_env();
@@ -47,8 +47,10 @@ impl ProverJobOutput {
 /// Generates a ZK proof for a finality update at the given slot
 ///
 /// # Arguments
-/// * `slot` - Target slot number to prove
+/// * `job_id` - The identifier for this job
+/// * `input_head` - Target slot number to prove from up until current finality head
 /// * `last_next_sync_committee` -  The previous hash of next_sync_committee
+/// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
 pub async fn finality_update_job(
     job_idx: u64,
     input_head: u64,
@@ -62,7 +64,7 @@ pub async fn finality_update_job(
     let mut helios_update_client = get_client(helios_checkpoint).await?;
 
     // Get finality update
-    info!("Getting finality update.");
+    info!("Getting finality update from input_head {}", input_head);
     let finality_update = helios_update_client
         .rpc
         .get_finality_update()
@@ -87,7 +89,7 @@ pub async fn finality_update_job(
         );
 
         if last_next_sync_committee == next_sync_committee {
-            info!("Applying optimization, skipping sync committee update.");
+            info!("Applying optimization, skipping sync committee update. Sync committee hash: {:?}", next_sync_committee);
             let temp_update = sync_committee_updates.remove(0);
 
             helios_update_client

@@ -4072,14 +4072,14 @@ dependencies = [
  "kimchi",
  "log",
  "nori-hash",
+ "nori-sp1-helios-primitives",
+ "nori-sp1-helios-program",
  "rand 0.9.0",
  "reqwest",
  "serde",
  "serde_cbor",
  "serde_json",
  "sp1-build",
- "sp1-helios-primitives",
- "sp1-helios-script",
  "sp1-sdk",
  "tokio",
  "tree_hash",
@@ -4098,7 +4098,31 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "sha2 0.10.8",
- "sp1-helios-primitives",
+ "tree_hash",
+]
+
+[[package]]
+name = "nori-sp1-helios-primitives"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "helios-consensus-core",
+ "serde",
+]
+
+[[package]]
+name = "nori-sp1-helios-program"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "helios-consensus-core",
+ "nori-hash",
+ "nori-sp1-helios-primitives",
+ "serde_cbor",
+ "sp1-zkvm",
  "tree_hash",
 ]
 

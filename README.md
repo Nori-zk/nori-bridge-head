@@ -2,7 +2,7 @@
 
 Helios light client running inside SP1 zkVM generating consensus proofs used in Nori bridge.
 
-Note the relevant workspace is within the `/nori' folder.
+Note the relevant workspace is within the `/nori' folder. And nori specific library code have a prefix of `nori-`.
 
 ## Installation
 
@@ -30,9 +30,10 @@ NORI_HELIOS_POLLING_INTERVAL=1.0
 - NORI_LOG, Nori logging level.
 - NORI_HELIOS_POLLING_INTERVAL, dictates the polling interval for latest Helios client beacon slot.
 
-## Build
+## Build Nori-Sp1-Helios-ZK
 
-`cd scripts/ && cargo run --bin make && cd ..`
+1. Remove target directory in root `sudo rm -rf target && cargo clean` (to ensure a clean build)
+2. Build the ZK `cd scripts/ && cargo run --bin make && cd ..`
 
 ## Execution
 
