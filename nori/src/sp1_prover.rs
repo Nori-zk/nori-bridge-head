@@ -44,19 +44,16 @@ impl ProverJobOutput {
     }
 }
 
-/// Generates a ZK proof for a finality update at the given slot
-///
+/// Encodes a prepared helio store ready for a sp1 helio slot transition proof
 /// # Arguments
-/// * `job_id` - The identifier for this job
 /// * `input_head` - Target slot number to prove from up until current finality head
 /// * `last_next_sync_committee` -  The previous hash of next_sync_committee
 /// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
-pub async fn finality_update_job(
-    job_idx: u64,
+pub async fn prepare_zk_program_input(
     input_head: u64,
     last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
-) -> Result<ProverJobOutput> {
+) -> Result<Vec<u8>> {
     // Get latest beacon checkpoint
     let helios_checkpoint = get_checkpoint(input_head).await?;
 
@@ -117,6 +114,25 @@ pub async fn finality_update_job(
     // TODO make a peristant thread pool
     info!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
+    Ok(encoded_proof_inputs)
+}
+
+/// Generates a ZK proof for a finality update at the given slot
+///
+/// # Arguments
+/// * `job_id` - The identifier for this job
+/// * `input_head` - Target slot number to prove from up until current finality head
+/// * `last_next_sync_committee` -  The previous hash of next_sync_committee
+/// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
+pub async fn finality_update_job(
+    job_idx: u64,
+    input_head: u64,
+    last_next_sync_committee: FixedBytes<32>,
+    store_hash: FixedBytes<32>,
+) -> Result<ProverJobOutput> {
+    // Encode proof inputs
+    info!("Encoding sp1 proof inputs.");
+    let encoded_proof_inputs = prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
 
     // Get proving key
     let pk = initialize_proving_key().await;
