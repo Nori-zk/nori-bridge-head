@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use crate::helios::{serialize_helios_store, serialize_helios_store_serde};
 use alloy_primitives::FixedBytes;
 use anyhow::Result;

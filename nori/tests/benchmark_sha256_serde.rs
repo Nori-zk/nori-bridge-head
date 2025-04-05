@@ -109,12 +109,15 @@ pub async fn benchmark_finality_update_job(
 
 
 #[tokio::test]
-async fn benchmark_sha256_serde_sin_opt() {
+async fn benchmark_sha256_serde() {
     dotenv::dotenv().ok();
 
     // Get latest head and store_hash
-    let (current_head, store_hash) = get_latest_finality_head_and_store_hash().await.unwrap();
+    let (current_head, store_hash, next_sync_committee) = get_latest_finality_head_and_store_hash().await.unwrap();
+
+    // Print next_sync_commitee
+    println!("Next sync committee: {}", next_sync_committee);
 
     // Perform benchmark
-    benchmark_finality_update_job(current_head, FixedBytes::default(), store_hash).await.unwrap();
+    benchmark_finality_update_job(current_head, next_sync_committee, store_hash).await.unwrap();
 }

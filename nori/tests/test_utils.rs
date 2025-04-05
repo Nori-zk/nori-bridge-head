@@ -1,6 +1,7 @@
 use alloy_primitives::FixedBytes;
 use std::fmt::Write;
 
+#[allow(unused)]
 pub fn bytes_to_hex(vec: &[u8]) -> String {
     vec.iter()
         .fold(String::with_capacity(vec.len() * 2), |mut output, &byte| {
@@ -9,6 +10,7 @@ pub fn bytes_to_hex(vec: &[u8]) -> String {
         })
 }
 
+#[allow(unused)]
 pub fn hex_char_to_nibble(c: u8) -> Result<u8, String> {
     match c {
         b'0'..=b'9' => Ok(c - b'0'),
@@ -18,6 +20,7 @@ pub fn hex_char_to_nibble(c: u8) -> Result<u8, String> {
     }
 }
 
+#[allow(unused)]
 pub fn hex_to_fixed_bytes(hex_str: &str) -> FixedBytes<32> {
     // Strip 0x prefix and validate length
     let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
@@ -38,6 +41,7 @@ pub fn hex_to_fixed_bytes(hex_str: &str) -> FixedBytes<32> {
     FixedBytes::new(array)
 }
 
+#[allow(unused)]
 pub fn hex_to_u64(hex_str: &str) -> Result<u64, String> {
     // Strip 0x prefix if it exists
     let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);

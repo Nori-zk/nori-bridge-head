@@ -1,4 +1,4 @@
-use nori::helios::get_client;
+/*use nori::helios::get_client;
 use nori_hash::poseidon_hash::poseidon_hash_helios_store;
 use tokio::time::Instant;
 
@@ -6,7 +6,7 @@ use tokio::time::Instant;
 mod test_utils;
 use test_utils::hex_to_fixed_bytes;
 
-/*#[tokio::test]
+#[tokio::test]
 async fn serialize_helios_store_test() {
     dotenv::dotenv().ok();
 

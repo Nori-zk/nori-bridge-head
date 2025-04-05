@@ -1,6 +1,7 @@
+#[allow(unused_imports)]
 use crate::helios::{serialize_helios_store, serialize_helios_store_serde};
 use alloy_primitives::FixedBytes;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
 use kimchi::{
     mina_curves::pasta::Fp,

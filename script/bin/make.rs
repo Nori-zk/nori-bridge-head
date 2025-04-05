@@ -1,5 +1,5 @@
-use std::{env, fs, path::{Path, PathBuf}};
 #[allow(unused_imports)]
+use std::{env, fs};
 use sp1_build::{build_program_with_args, BuildArgs};
 use sp1_sdk::{HashableKey, ProverClient};
 

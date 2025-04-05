@@ -17,20 +17,27 @@ use tree_hash::TreeHash;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 use anyhow::{Error, Result};
 
-pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedBytes<32>)> {
+pub async fn get_latest_finality_head_and_store_hash(
+) -> Result<(u64, FixedBytes<32>, FixedBytes<32>)> {
     // Get latest beacon checkpoint
     let latest_checkpoint = get_latest_checkpoint().await?;
 
     // Get the client from the beacon checkpoint
     let helios_client = get_client(latest_checkpoint).await?;
 
-    // Get slot head from checkpoint
-    let slot_head = helios_client.store.finalized_header.clone().beacon().slot;
-
     // Get the store hash
     let store_hash = sha256_hash_helios_store(&helios_client.store)?;
 
-    Ok((slot_head, store_hash))
+    // Get slot head from checkpoint
+    let slot_head = helios_client.store.finalized_header.clone().beacon().slot;
+
+    // Get next_sync_committee
+    let next_sync_committee_hash = match &helios_client.store.next_sync_committee {
+        Some(next_sync_committee) => next_sync_committee.tree_hash_root(),
+        None => FixedBytes::default(),
+    };
+
+    Ok((slot_head, store_hash, next_sync_committee_hash))
 }
 
 pub async fn get_client_latest_finality_head(
