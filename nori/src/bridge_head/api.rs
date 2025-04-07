@@ -1,5 +1,7 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::finality_change_detector::{start_helios_finality_change_detector, FinalityChangeMessage};
+use super::finality_change_detector::{
+    start_helios_finality_change_detector, FinalityChangeMessage,
+};
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     BridgeHeadNoticeMessage, BridgeHeadNoticeMessageExtension, NoticeExtensionBridgeHeadAdvanced,
@@ -24,37 +26,36 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-// FIXME job_idx to job_id
-
 /// Proof types
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProofMessage {
     pub input_slot: u64,
+    pub input_store_hash: FixedBytes<32>,
     pub output_slot: u64,
     pub output_store_hash: FixedBytes<32>,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
     pub next_sync_committee: FixedBytes<32>,
-    pub time_taken_seconds: f64,
+    pub elapsed_sec: f64,
 }
 
 struct ProverJob {
-    start_instant: Instant,
     input_slot: u64,
+    input_store_hash: FixedBytes<32>,
+    start_instant: Instant,
     expected_output_slot: u64,
-    next_sync_committee: FixedBytes<32>,
 }
 
 pub struct ProverJobError {
-    pub job_idx: u64,
+    pub job_id: u64,
     pub error: Error,
 }
 
 // Implement Display trait for user-friendly error messages
 impl fmt::Display for ProverJobError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Prover job {} failed: {}", self.job_idx, self.error)
+        write!(f, "Prover job {} failed: {}", self.job_id, self.error)
     }
 }
 
@@ -63,8 +64,8 @@ impl fmt::Debug for ProverJobError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "ProverJobError {{ job_idx: {}, source: {:?} }}",
-            self.job_idx, self.error
+            "ProverJobError {{ job_id: {}, source: {:?} }}",
+            self.job_id, self.error
         )
     }
 }
@@ -97,7 +98,7 @@ pub struct BridgeHead {
     /// Target slot to advance to
     next_slot: u64,
     /// Unique identifier for prover jobs
-    job_idx: u64,
+    job_id: u64,
     /// Hash of the next sync committee
     next_sync_committee: FixedBytes<32>,
     /// Active prover jobs mapped by job ID
@@ -170,7 +171,7 @@ impl BridgeHead {
                 current_head,
                 init_latest_beacon_slot,
                 next_slot: init_latest_beacon_slot,
-                job_idx: 0,
+                job_id: 0,
                 next_sync_committee,
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
@@ -180,15 +181,14 @@ impl BridgeHead {
                 event_tx,
                 stage_transition_proof: false,
                 cold_start,
-                store_hash
-            }
+                store_hash,
+            },
         )
     }
 
     /// Event dispatchers
 
-    // Event receiver
-
+    // Create event job receiver
     pub fn event_receiver(&self) -> broadcast::Receiver<BridgeHeadEvent> {
         self.event_tx.subscribe()
     }
@@ -218,15 +218,31 @@ impl BridgeHead {
     // Handle prover job success
     async fn handle_prover_success(
         &mut self,
-        input_head: u64,
+        job_id: u64,
         proof: SP1ProofWithPublicValues,
-        job_idx: u64,
-        elapsed_sec: f64,
     ) -> Result<()> {
-        info!("Handling prover job output '{}'.", job_idx);
+        info!("Handling prover job output '{}'.", job_id);
 
-        // Remove completed job
-        self.prover_jobs.remove(&job_idx);
+        // Extract jobs details are remove job
+        let (input_slot, input_store_hash, elapsed_sec) = {
+            let job = self.prover_jobs.get(&job_id).unwrap();
+            let input_slot = job.input_slot;
+            let input_store_hash = job.input_store_hash;
+
+            let elapsed_sec = Instant::now()
+                .duration_since(job.start_instant)
+                .as_secs_f64();
+
+            self.prover_jobs.remove(&job_id);
+
+            (
+                input_slot,
+                input_store_hash,
+                elapsed_sec,
+            )
+        };
+
+        info!("Job '{}' finished in {} seconds.", job_id, elapsed_sec);
 
         // Extract the next sync committee out of the proof output
         let public_values: sp1_sdk::SP1PublicValues = proof.clone().public_values;
@@ -249,13 +265,14 @@ impl BridgeHead {
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobSucceeded(
                 NoticeExtensionBridgeHeadJobSucceeded {
-                    input_slot: input_head,
+                    input_slot,
+                    input_store_hash,
                     output_slot: output_head,
-                    job_idx,
+                    job_id,
                     next_sync_committee: proof_outputs.next_sync_committee_hash,
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
-                    output_store_hash: proof_outputs.store_hash
+                    output_store_hash: proof_outputs.store_hash,
                 },
             ))
             .await;
@@ -263,13 +280,14 @@ impl BridgeHead {
         // Emit proof
         let _ = self
             .trigger_listener_with_proof(ProofMessage {
-                input_slot: input_head,
+                input_slot,
+                input_store_hash,
                 output_slot: output_head,
+                output_store_hash,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
                 next_sync_committee: proof_outputs.next_sync_committee_hash,
-                time_taken_seconds: elapsed_sec,
-                output_store_hash
+                elapsed_sec,
             })
             .await;
 
@@ -278,37 +296,40 @@ impl BridgeHead {
 
     // Handle prover job failures
     async fn handle_prover_failure(&mut self, err: &ProverJobError) {
-        // Cache the fields needed from the job so we can release the immutable borrow.
-        let (input_slot, expected_output_slot, n_jobs, elapsed_sec) = {
-            // Immutable borrow to get the job.
-            let job = self.prover_jobs.get(&err.job_idx).unwrap();
+        // Extract job details and remove job
+        let (input_slot, input_store_hash, expected_output_slot, n_jobs, elapsed_sec) = {
+            let job = self.prover_jobs.get(&err.job_id).unwrap();
             let input_slot = job.input_slot;
+            let input_store_hash = job.input_store_hash;
             let expected_output_slot = job.expected_output_slot;
 
-            // Elapsed
             let elapsed_sec = Instant::now()
                 .duration_since(job.start_instant)
                 .as_secs_f64();
 
-            self.prover_jobs.remove(&err.job_idx);
+            self.prover_jobs.remove(&err.job_id);
 
             (
                 input_slot,
+                input_store_hash,
                 expected_output_slot,
                 self.prover_jobs.len(),
                 elapsed_sec,
             )
         };
 
-        let message = format!("Job '{}' failed with error: {}", err.job_idx, err);
-        error!("Job '{}' failed with error: {}", err.job_idx, err);
+        // Build job failure error message
+        let message = format!("Job '{}' failed with error: {}", err.job_id, err);
+        error!("{}", message);
 
+        // Notify of a job failure
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobFailed(
                 NoticeExtensionBridgeHeadJobFailed {
                     input_slot,
+                    input_store_hash,
                     expected_output_slot,
-                    job_idx: err.job_idx,
+                    job_id: err.job_id,
                     message,
                     elapsed_sec,
                     n_job_in_buffer: n_jobs as u64,
@@ -319,51 +340,66 @@ impl BridgeHead {
 
     // Create prover job
     async fn prepare_transition_proof(&mut self) {
-        self.job_idx += 1;
-        let job_idx: u64 = self.job_idx;
+        // Get job id
+        self.job_id += 1;
+        let job_id: u64 = self.job_id;
+
+        // Print received job message
         info!(
             "Nori head updater received a new job {}. Spawning a new worker.",
-            job_idx
+            job_id
         );
 
+        // Insert job details into map
         self.prover_jobs.insert(
-            job_idx,
+            job_id,
             ProverJob {
-                start_instant: Instant::now(),
-                next_sync_committee: self.next_sync_committee,
                 input_slot: self.current_head,
+                input_store_hash: self.store_hash,
+                start_instant: Instant::now(),
                 expected_output_slot: self.next_slot,
             },
         );
 
+        // Create job data tx
         let tx = self.job_tx.clone();
+
+        // Clone job arguments
         let current_head_clone = self.current_head;
         let next_sync_committee_clone = self.next_sync_committee;
         let store_hash = self.store_hash;
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
-            let proof_result =
-                finality_update_job(job_idx, current_head_clone, next_sync_committee_clone, store_hash).await;
+            // Execute job
+            let proof_result = finality_update_job(
+                job_id,
+                current_head_clone,
+                next_sync_committee_clone,
+                store_hash,
+            )
+            .await;
 
+            // Send appropriate tx Ok or Err
             match proof_result {
                 Ok(prover_job_output) => {
                     tx.send(Ok(prover_job_output)).unwrap();
                 }
                 Err(error) => {
-                    let job_error = ProverJobError { job_idx, error };
+                    let job_error = ProverJobError { job_id, error };
                     tx.send(Err(job_error)).unwrap();
                 }
             }
         });
 
+        // Notify of a job created
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::JobCreated(
                 NoticeExtensionBridgeHeadJobCreated {
                     input_slot: self.current_head,
-                    job_idx,
+                    job_id,
                     expected_output_slot: self.next_slot,
-                    input_store_hash: store_hash
+                    input_store_hash: store_hash,
                 },
             ))
             .await;
@@ -379,7 +415,7 @@ impl BridgeHead {
             self.cold_start = false;
             return;
         }
-        
+
         if self.next_slot > self.current_head {
             // Immediately do the transition proof job.
             let _ = self.prepare_transition_proof().await;
@@ -391,7 +427,12 @@ impl BridgeHead {
     }
 
     // Advance the bridge head
-    async fn advance(&mut self, head: u64, next_sync_committee: FixedBytes<32>, store_hash : FixedBytes<32>,) {
+    async fn advance(
+        &mut self,
+        head: u64,
+        next_sync_committee: FixedBytes<32>,
+        store_hash: FixedBytes<32>,
+    ) {
         // Update current head
         self.current_head = head;
 
@@ -403,19 +444,17 @@ impl BridgeHead {
             // ONLY IF NON ZEROS
             self.next_sync_committee = next_sync_committee;
         }
-        
 
         // Save the checkpoint
-        info!("Saving checkpoint.");
         save_nb_checkpoint(self.current_head, self.next_sync_committee, self.store_hash);
 
-        // Notify
+        // Notify of head advanced
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::HeadAdvanced(
                 NoticeExtensionBridgeHeadAdvanced {
                     head,
                     next_sync_committee,
-                    store_hash
+                    store_hash,
                 },
             ))
             .await;
@@ -452,6 +491,7 @@ impl BridgeHead {
                 NoticeExtensionBridgeHeadStarted {
                     latest_beacon_slot: self.init_latest_beacon_slot,
                     current_head: self.current_head,
+                    store_hash: self.store_hash,
                 },
             ))
             .await;
@@ -484,21 +524,9 @@ impl BridgeHead {
                 Some(job_result) = job_rx.recv() => {
                     match job_result {
                         Ok(result_data) => {
-                            let job: &ProverJob = self.prover_jobs.get(&result_data.job_idx()).unwrap();
-                            let time_taken_seconds = Instant::now()
-                                .duration_since(job.start_instant)
-                                .as_secs_f64();
-
-                            info!(
-                                "Job '{}' finished in {} seconds.",
-                                result_data.job_idx(), time_taken_seconds
-                            );
-
                             let _ = self.handle_prover_success(
-                                result_data.input_head(),
+                                result_data.job_id(),
                                 result_data.proof(),
-                                result_data.job_idx(),
-                                time_taken_seconds,
                             ).await;
                         }
                         Err(err) => {

@@ -14,7 +14,7 @@ pub const ELF: &[u8] = include_bytes!("../../nori-elf/nori-sp1-helios-program");
 // Cache the proving key globally (initialized once)
 static PROVING_KEY: OnceLock<SP1ProvingKey> = OnceLock::new();
 
-pub async fn initialize_proving_key() -> &'static SP1ProvingKey {
+pub async fn get_proving_key() -> &'static SP1ProvingKey {
     PROVING_KEY.get_or_init(|| {
         // Initialize fresh client just for setup
         let client = ProverClient::from_env();
@@ -25,7 +25,7 @@ pub async fn initialize_proving_key() -> &'static SP1ProvingKey {
 
 // Struct for ProverJobOutput
 pub struct ProverJobOutput {
-    job_idx: u64,
+    job_id: u64,
     input_head: u64,
     proof: SP1ProofWithPublicValues,
 }
@@ -39,8 +39,8 @@ impl ProverJobOutput {
         self.proof.clone()
     }
 
-    pub fn job_idx(&self) -> u64 {
-        self.job_idx
+    pub fn job_id(&self) -> u64 {
+        self.job_id
     }
 }
 
@@ -98,7 +98,6 @@ pub async fn prepare_zk_program_input(
 
     // Create program inputs
     info!("Building sp1 proof inputs.");
-
     let expected_current_slot = helios_update_client.expected_current_slot();
     let inputs = ProofInputs {
         sync_committee_updates,
@@ -109,11 +108,12 @@ pub async fn prepare_zk_program_input(
         forks: helios_update_client.config.forks.clone(),
         store_hash,
     };
+    info!("Built sp1 proof inputs.");
 
     // Encode proof inputs
-    // TODO make a peristant thread pool
     info!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
+    info!("Encoded sp1 proof inputs.");
     Ok(encoded_proof_inputs)
 }
 
@@ -125,7 +125,7 @@ pub async fn prepare_zk_program_input(
 /// * `last_next_sync_committee` -  The previous hash of next_sync_committee
 /// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
 pub async fn finality_update_job(
-    job_idx: u64,
+    job_id: u64,
     input_head: u64,
     last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
@@ -135,7 +135,7 @@ pub async fn finality_update_job(
     let encoded_proof_inputs = prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
 
     // Get proving key
-    let pk = initialize_proving_key().await;
+    let pk = get_proving_key().await;
 
     let proof: SP1ProofWithPublicValues =
         tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
@@ -158,6 +158,6 @@ pub async fn finality_update_job(
     Ok(ProverJobOutput {
         proof,
         input_head,
-        job_idx,
+        job_id,
     })
 }

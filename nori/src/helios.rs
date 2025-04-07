@@ -10,27 +10,32 @@ use helios_ethereum::{
     consensus::Inner,
     rpc::http_rpc::HttpRpc,
 };
+use log::info;
 use nori_hash::sha256_hash::sha256_hash_helios_store;
 use std::sync::Arc;
 use tokio::sync::{mpsc::channel, watch};
 use tree_hash::TreeHash;
-pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 use anyhow::{Error, Result};
+
+pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 
 pub async fn get_latest_finality_head_and_store_hash(
 ) -> Result<(u64, FixedBytes<32>)> {
     // Get latest beacon checkpoint
+    info!("Fetching cold start client from latest checkpoint");
     let latest_checkpoint = get_latest_checkpoint().await?;
 
     // Get the client from the beacon checkpoint
     let helios_client = get_client(latest_checkpoint).await?;
 
-    // Get the store hash
-    let store_hash = sha256_hash_helios_store(&helios_client.store)?;
-
     // Get slot head from checkpoint
     let slot_head = helios_client.store.finalized_header.clone().beacon().slot;
+    info!("Retrieved cold start head: {} ", slot_head);
 
+    // Get the store hash
+    info!("Calculating cold start store hash");
+    let store_hash = sha256_hash_helios_store(&helios_client.store)?;
+    info!("Calculated cold start store hash: {}", store_hash);
 
     Ok((slot_head, store_hash))
 }

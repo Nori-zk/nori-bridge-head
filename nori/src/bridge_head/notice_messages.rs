@@ -45,6 +45,7 @@ macro_rules! define_message {
 pub struct NoticeExtensionBridgeHeadStarted {
     pub latest_beacon_slot: u64,
     pub current_head: u64,
+    pub store_hash: FixedBytes<32>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadWarning {
@@ -52,15 +53,16 @@ pub struct NoticeExtensionBridgeHeadWarning {
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobCreated {
-    pub job_idx: u64,
+    pub job_id: u64,
     pub input_slot: u64,
-    pub expected_output_slot: u64,
     pub input_store_hash: FixedBytes<32>,
+    pub expected_output_slot: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobSucceeded {
-    pub job_idx: u64,
+    pub job_id: u64,
     pub input_slot: u64,
+    pub input_store_hash: FixedBytes<32>,
     pub output_slot: u64,
     pub output_store_hash: FixedBytes<32>,
     pub next_sync_committee: FixedBytes<32>,
@@ -69,8 +71,9 @@ pub struct NoticeExtensionBridgeHeadJobSucceeded {
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadJobFailed {
-    pub job_idx: u64,
+    pub job_id: u64,
     pub input_slot: u64,
+    pub input_store_hash: FixedBytes<32>,
     pub expected_output_slot: u64,
     pub message: String,
     pub elapsed_sec: f64,

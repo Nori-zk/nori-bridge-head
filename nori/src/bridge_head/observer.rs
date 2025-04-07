@@ -66,7 +66,12 @@ impl ExampleBridgeHeadEventObserver {
     }
 
     // Advance nori head
-    async fn advance(&mut self, slot: u64, next_sync_commitee: FixedBytes<32>, store_hash: FixedBytes<32>) {
+    async fn advance(
+        &mut self,
+        slot: u64,
+        next_sync_commitee: FixedBytes<32>,
+        store_hash: FixedBytes<32>,
+    ) {
         let _ = self
             .bridge_head_handle
             .advance(slot, next_sync_commitee, store_hash)
@@ -84,7 +89,11 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
 
         // Advance the head
         let _ = self
-            .advance(proof_data.output_slot, proof_data.next_sync_committee, proof_data.output_store_hash)
+            .advance(
+                proof_data.output_slot,
+                proof_data.next_sync_committee,
+                proof_data.output_store_hash,
+            )
             .await;
 
         // Stage the next proof
@@ -97,7 +106,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         // Do something specific
         match &notice_data {
             BridgeHeadNoticeMessage::Started(data) => {
-                println!(
+                info!(
                     "NOTICE_TYPE| Started. Current head: {:?} Finality slot: {:?}",
                     data.extension.current_head, data.extension.latest_beacon_slot
                 );
@@ -106,18 +115,18 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 let _ = self.bridge_head_handle.stage_transition_proof().await;
             }
             BridgeHeadNoticeMessage::Warning(data) => {
-                println!("NOTICE_TYPE| Warning: {:?}", data.extension.message);
+                info!("NOTICE_TYPE| Warning: {:?}", data.extension.message);
             }
             BridgeHeadNoticeMessage::JobCreated(data) => {
-                println!("NOTICE_TYPE| Job Created: {:?}", data.extension.job_idx);
+                info!("NOTICE_TYPE| Job Created: {:?}", data.extension.job_id);
             }
             BridgeHeadNoticeMessage::JobSucceeded(data) => {
-                println!("NOTICE_TYPE| Job Succeeded: {:?}", data.extension.job_idx);
+                info!("NOTICE_TYPE| Job Succeeded: {:?}", data.extension.job_id);
             }
             BridgeHeadNoticeMessage::JobFailed(data) => {
-                println!(
+                info!(
                     "NOTICE_TYPE| Job Failed: {:?}: {}",
-                    data.extension.job_idx, data.extension.message
+                    data.extension.job_id, data.extension.message
                 );
 
                 // If there are no other jobs in the queue retry the failure
@@ -126,20 +135,20 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 }
             }
             BridgeHeadNoticeMessage::FinalityTransitionDetected(data) => {
-                println!(
+                info!(
                     "NOTICE_TYPE| Finality Transition Detected: {:?}",
                     data.extension.slot
                 );
             }
             BridgeHeadNoticeMessage::HeadAdvanced(data) => {
-                println!("NOTICE_TYPE| Head Advanced: {:?}", data.extension.head);
+                info!("NOTICE_TYPE| Head Advanced: {:?}", data.extension.head);
             }
         }
 
         let json =
             serde_json::to_string(&notice_data).context("Failed to serialize notice data")?;
 
-        println!("NOTICE_DATA| {}", json);
+        info!("NOTICE_DATA| {}", json);
 
         Ok(())
     }

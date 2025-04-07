@@ -36,6 +36,8 @@ pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
 }
 
 pub fn save_nb_checkpoint(slot_head: u64, next_sync_committee: FixedBytes<32>, store_hash: FixedBytes<32>) {
+    info!("Saving checkpoint.");
+    
     // Create dir if nessesary
     let checkpoint_dir = Path::new(NB_CHECKPOINT_FILE).parent().unwrap();
 
