@@ -39,7 +39,7 @@ macro_rules! define_message {
     };
 }
 
-// ================ EXTENSION STRUCTS ================ //
+// ================ EXTENSIONS ================== //
 // Message extensions
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadStarted {
@@ -91,7 +91,19 @@ pub struct NoticeExtensionBridgeHeadAdvanced {
     pub store_hash: FixedBytes<32>
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub enum BridgeHeadNoticeMessageExtension {
+    Started(NoticeExtensionBridgeHeadStarted),
+    Warning(NoticeExtensionBridgeHeadWarning),
+    JobCreated(NoticeExtensionBridgeHeadJobCreated),
+    JobSucceeded(NoticeExtensionBridgeHeadJobSucceeded),
+    JobFailed(NoticeExtensionBridgeHeadJobFailed),
+    FinalityTransitionDetected(NoticeExtensionBridgeHeadFinalityTransitionDetected),
+    HeadAdvanced(NoticeExtensionBridgeHeadAdvanced),
+}
+
 // ================ GENERATE MESSAGES VIA MACRO ================ //
+
 define_message!(BridgeHeadStarted, NoticeExtensionBridgeHeadStarted);
 define_message!(BridgeHeadWarning, NoticeExtensionBridgeHeadWarning);
 define_message!(BridgeHeadJobCreated, NoticeExtensionBridgeHeadJobCreated);
@@ -106,6 +118,7 @@ define_message!(
 );
 define_message!(BridgeHeadAdvanced, NoticeExtensionBridgeHeadAdvanced);
 
+// =============== NOTICE TYPE ENUMS ============================= //
 #[derive(Clone)]
 pub enum BridgeHeadNoticeMessage {
     Started(BridgeHeadStarted),
@@ -116,6 +129,8 @@ pub enum BridgeHeadNoticeMessage {
     FinalityTransitionDetected(BridgeHeadFinalityTransitionDetected),
     HeadAdvanced(BridgeHeadAdvanced),
 }
+
+// =============== MARSHALLING =================================== //
 
 impl Serialize for BridgeHeadNoticeMessage {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -189,17 +204,6 @@ impl<'de> Deserialize<'de> for BridgeHeadNoticeMessage {
             }
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub enum BridgeHeadNoticeMessageExtension {
-    Started(NoticeExtensionBridgeHeadStarted),
-    Warning(NoticeExtensionBridgeHeadWarning),
-    JobCreated(NoticeExtensionBridgeHeadJobCreated),
-    JobSucceeded(NoticeExtensionBridgeHeadJobSucceeded),
-    JobFailed(NoticeExtensionBridgeHeadJobFailed),
-    FinalityTransitionDetected(NoticeExtensionBridgeHeadFinalityTransitionDetected),
-    HeadAdvanced(NoticeExtensionBridgeHeadAdvanced),
 }
 
 impl BridgeHeadNoticeMessageExtension {

@@ -144,7 +144,7 @@ pub async fn finality_update_job(
             let mut stdin = SP1Stdin::new();
             stdin.write_slice(&encoded_proof_inputs);
             let prover_client = ProverClient::from_env();
-            println!("Prover client setup complete.");
+            info!("Prover client setup complete.");
 
             // Generate proof.
             info!("Running sp1 proof.");
