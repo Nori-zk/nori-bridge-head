@@ -16,7 +16,6 @@ name = "nori"
 [dependencies]
 nori-hash = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }
-nori-sp1-helios-program = { workspace = true }
 dotenv = { workspace = true }
 sp1-sdk = { workspace = true }
 tokio = { workspace = true }

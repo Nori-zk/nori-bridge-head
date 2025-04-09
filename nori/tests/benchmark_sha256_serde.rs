@@ -1,34 +1,34 @@
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
-use log::info;
-use nori::{helios::get_latest_finality_head_and_store_hash, sp1_prover::{prepare_zk_program_input, ELF}};
-use sp1_sdk::{ProverClient, SP1Stdin};
+use nori::{helios::get_latest_finality_head_and_store_hash, proof_outputs_decoder::DecodedProofOutputs, sp1_prover::{prepare_zk_program_input, ELF}};
+use sp1_sdk::{ProverClient, SP1PublicValues, SP1Stdin};
 
-/// A stripped down version of finality_update_job used to generate cycle information without the opt
+/// A stripped down version of finality_update_job used to generate cycle printlnrmation without the opt
 pub async fn benchmark_finality_update(
     input_head: u64,
     last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
-) -> Result<()> {
+) -> Result<SP1PublicValues> {
 
     // Encode proof inputs
-    info!("Encoding sp1 proof inputs.");
+    println!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs = prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
 
-    tokio::task::spawn_blocking(move || -> Result<()> {
+    let public_values = tokio::task::spawn_blocking(move || -> Result<SP1PublicValues> {
         // Setup prover client
-        info!("Setting up prover client");
+        println!("Setting up prover client");
         let mut stdin = SP1Stdin::new();
         stdin.write_slice(&encoded_proof_inputs);
         let prover_client = ProverClient::from_env();
         println!("Prover client setup complete.");
 
         // Generate report
-        let (_, report) = prover_client
+        let (sp1_public_values, report) = prover_client
             .execute(ELF, &stdin)
             // .deferred_proof_verification(false)
             .run()
             .expect("executing failed");
+
         println!(
             "Execution total_instruction_count: {:?}",
             report.total_instruction_count()
@@ -38,11 +38,11 @@ pub async fn benchmark_finality_update(
             report.total_syscall_count()
         );
 
-        Ok(())
+        Ok(sp1_public_values)
     })
     .await??;
 
-    Ok(())
+    Ok(public_values)
 }
 
 
@@ -53,6 +53,23 @@ async fn benchmark_sha256_serde() {
     // Get latest head and store_hash
     let (current_head, store_hash) = get_latest_finality_head_and_store_hash().await.unwrap();
 
-    // Perform benchmark
-    benchmark_finality_update(current_head, FixedBytes::default(), store_hash).await.unwrap();
+    // Perform benchmark initial
+    println!("Round one sin opt");
+    let public_values = benchmark_finality_update(current_head, FixedBytes::default(), store_hash).await.unwrap();
+
+    // Decode public output
+    let public_values_bytes = public_values.as_slice(); 
+    let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes).unwrap();
+    let new_head = proof_outputs.new_head;
+    let new_head_bytes: [u8; 32] = new_head.to_be_bytes();
+    // Extract the last 8 bytes (least significant bytes in big-endian)
+    let new_head_u64_bytes: [u8; 8] = new_head_bytes[24..32]
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes")).unwrap();
+    // Convert the bytes to u64 using big-endian interpretation
+    let output_head = u64::from_be_bytes(new_head_u64_bytes);
+
+    // Perform benchmark 2nd round
+    println!("Round two with opt");
+    benchmark_finality_update(output_head, proof_outputs.next_sync_committee_hash, proof_outputs.store_hash).await.unwrap();
 }
