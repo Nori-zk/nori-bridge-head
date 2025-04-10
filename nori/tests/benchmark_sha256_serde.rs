@@ -3,7 +3,7 @@ use anyhow::Result;
 use nori::{helios::get_latest_finality_head_and_store_hash, proof_outputs_decoder::DecodedProofOutputs, sp1_prover::{prepare_zk_program_input, ELF}};
 use sp1_sdk::{ProverClient, SP1PublicValues, SP1Stdin};
 
-/// A stripped down version of finality_update_job used to generate cycle printlnrmation without the opt
+/// A stripped down version of finality_update_job used to generate cycle information without the opt
 pub async fn benchmark_finality_update(
     input_head: u64,
     last_next_sync_committee: FixedBytes<32>,
