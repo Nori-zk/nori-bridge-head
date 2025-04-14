@@ -40,8 +40,8 @@ pub fn main() {
 
     println!("Committing prev_header, prev_head and start_sync_committee_hash.");
     let prev_head = store.finalized_header.beacon().slot;
-    let prev_header: B256 = store.finalized_header.beacon().tree_hash_root();
-    let start_sync_committee_hash: alloy_primitives::FixedBytes<32> = store.current_sync_committee.tree_hash_root();
+    let prev_header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
+    let start_sync_committee_hash: alloy_primitives::FixedBytes<32> = store.current_sync_committee.tree_hash_root(); // Could deprecate
     println!("prev_head, prev_header and start_sync_committee_hash committed.");
 
     // 1. Apply sync committee updates, if any
@@ -82,8 +82,8 @@ pub fn main() {
     // 3. Commit new state root, header, and sync committee for usage in the on-chain contract
     println!("Committing head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root.");
     let head = store.finalized_header.beacon().slot;
-    let header: B256 = store.finalized_header.beacon().tree_hash_root();
-    let sync_committee_hash: B256 = store.current_sync_committee.tree_hash_root();
+    let header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
+    let sync_committee_hash: B256 = store.current_sync_committee.tree_hash_root(); // Could deprecate
     let next_sync_committee_hash: B256 = match &mut store.next_sync_committee {
         Some(next_sync_committee) => next_sync_committee.tree_hash_root(),
         None => B256::ZERO,

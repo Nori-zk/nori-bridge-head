@@ -1,6 +1,6 @@
 use crate::helios::{get_checkpoint, get_client, get_finality_updates};
 use alloy_primitives::{FixedBytes, B256};
-use anyhow::{Error, Result};
+use anyhow::{Context, Error, Result};
 use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use nori_sp1_helios_primitives::types::ProofInputs;
@@ -54,6 +54,7 @@ pub async fn prepare_zk_program_input(
     last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
 ) -> Result<Vec<u8>> {
+    println!("------------------------------------------------------");
     // Get latest beacon checkpoint
     let helios_checkpoint = get_checkpoint(input_head).await?;
 
@@ -61,16 +62,28 @@ pub async fn prepare_zk_program_input(
     let mut helios_update_client = get_client(helios_checkpoint).await?;
 
     // Get finality update
-    info!("Getting finality update from input_head {}", input_head);
+    info!(
+        "Getting finality update from input_head {}, last next sync committee {}, store hash {}",
+        input_head, last_next_sync_committee, store_hash
+    );
     let finality_update = helios_update_client
         .rpc
         .get_finality_update()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
 
+    // finality_update
+    let str_finality = serde_json::to_string(&finality_update)
+        .context("Failed to serialize helios finality updates")?;
+    println!("finality {}", str_finality);
+
     // Get sync commitee updates
     info!("Getting sync commitee updates.");
     let mut sync_committee_updates = get_finality_updates(&helios_update_client).await?;
+
+    let str_updates = serde_json::to_string(&sync_committee_updates)
+        .context("Failed to serialize helios sync committee updates")?;
+    println!("sync commitee updates {}", str_updates);
 
     // Taken from operator.rs
     // Optimization:
@@ -86,19 +99,43 @@ pub async fn prepare_zk_program_input(
         );
 
         if last_next_sync_committee == next_sync_committee {
-            info!("Applying optimization, skipping sync committee update. Sync committee hash: {:?}", next_sync_committee);
+            info!(
+                "Applying optimization, skipping sync committee update. Sync committee hash: {:?}",
+                next_sync_committee
+            );
             let temp_update = sync_committee_updates.remove(0);
+
+            let temp_update_str = serde_json::to_string(&temp_update)?;
+            println!("temp_update {}", temp_update_str);
 
             helios_update_client
                 .verify_update(&temp_update)
                 .map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
             helios_update_client.apply_update(&temp_update);
+
+            println!("store after update {}", serde_json::to_string(&helios_update_client.store)?)
         }
     }
+
+    /*
+    
+    If last_next_sync_committee == next_sync_committee is not reliable because after a lot of down time.... (because our finalised header in the zeroth update has a beacon slot gt our current slot)
+    
+     */
 
     // Create program inputs
     info!("Building sp1 proof inputs.");
     let expected_current_slot = helios_update_client.expected_current_slot();
+    println!("expected_current_slot {}", expected_current_slot);
+    println!(
+        "genesis root {}",
+        helios_update_client.config.chain.genesis_root
+    );
+    println!(
+        "forks {}",
+        serde_json::to_string(&helios_update_client.config.forks.clone())
+            .context("Failed to serialize forks")?
+    );
     let inputs = ProofInputs {
         sync_committee_updates,
         finality_update,
@@ -132,7 +169,8 @@ pub async fn finality_update_job(
 ) -> Result<ProverJobOutput> {
     // Encode proof inputs
     info!("Encoding sp1 proof inputs.");
-    let encoded_proof_inputs = prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
+    let encoded_proof_inputs =
+        prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
 
     // Get proving key
     let pk = get_proving_key().await;

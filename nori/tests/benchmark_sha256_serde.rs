@@ -1,6 +1,10 @@
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
-use nori::{helios::get_latest_finality_head_and_store_hash, proof_outputs_decoder::DecodedProofOutputs, sp1_prover::{prepare_zk_program_input, ELF}};
+use nori::{
+    helios::get_latest_finality_head_and_store_hash,
+    proof_outputs_decoder::DecodedProofOutputs,
+    sp1_prover::{prepare_zk_program_input, ELF},
+};
 use sp1_sdk::{ProverClient, SP1PublicValues, SP1Stdin};
 
 /// A stripped down version of finality_update_job used to generate cycle information without the opt
@@ -9,10 +13,10 @@ pub async fn benchmark_finality_update(
     last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
 ) -> Result<SP1PublicValues> {
-
     // Encode proof inputs
     println!("Encoding sp1 proof inputs.");
-    let encoded_proof_inputs = prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
+    let encoded_proof_inputs =
+        prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
 
     let public_values = tokio::task::spawn_blocking(move || -> Result<SP1PublicValues> {
         // Setup prover client
@@ -45,6 +49,21 @@ pub async fn benchmark_finality_update(
     Ok(public_values)
 }
 
+fn extract_public_values(public_values: SP1PublicValues) -> (u64, FixedBytes<32>, FixedBytes<32>) {
+    // Decode public output
+    let public_values_bytes = public_values.as_slice();
+    let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes).unwrap();
+    let new_head = proof_outputs.new_head;
+    let new_head_bytes: [u8; 32] = new_head.to_be_bytes();
+    // Extract the last 8 bytes (least significant bytes in big-endian)
+    let new_head_u64_bytes: [u8; 8] = new_head_bytes[24..32]
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))
+        .unwrap();
+    // Convert the bytes to u64 using big-endian interpretation
+    let output_head = u64::from_be_bytes(new_head_u64_bytes);
+    (output_head, proof_outputs.next_sync_committee_hash, proof_outputs.store_hash)
+}
 
 #[tokio::test]
 async fn benchmark_sha256_serde() {
@@ -55,21 +74,34 @@ async fn benchmark_sha256_serde() {
 
     // Perform benchmark initial
     println!("Round one sin opt");
-    let public_values = benchmark_finality_update(current_head, FixedBytes::default(), store_hash).await.unwrap();
+    let mut public_values =
+        benchmark_finality_update(current_head, FixedBytes::default(), store_hash)
+            .await
+            .unwrap();
 
     // Decode public output
-    let public_values_bytes = public_values.as_slice(); 
-    let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes).unwrap();
-    let new_head = proof_outputs.new_head;
-    let new_head_bytes: [u8; 32] = new_head.to_be_bytes();
-    // Extract the last 8 bytes (least significant bytes in big-endian)
-    let new_head_u64_bytes: [u8; 8] = new_head_bytes[24..32]
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes")).unwrap();
-    // Convert the bytes to u64 using big-endian interpretation
-    let output_head = u64::from_be_bytes(new_head_u64_bytes);
+    let (mut output_head, mut next_sync_committee_hash, mut store_hash) = extract_public_values(public_values);
 
-    // Perform benchmark 2nd round
+    // Perform benchmark 2nd round with optimisation
     println!("Round two with opt");
-    benchmark_finality_update(output_head, proof_outputs.next_sync_committee_hash, proof_outputs.store_hash).await.unwrap();
+    public_values = benchmark_finality_update(
+        output_head,
+        next_sync_committee_hash,
+        store_hash,
+    )
+    .await
+    .unwrap();
+
+    // Decode public output
+    (output_head, next_sync_committee_hash, store_hash) = extract_public_values(public_values);
+
+    // Perform benchmark 3rd round without optimisation
+    println!("Round two sin opt");
+    public_values = benchmark_finality_update(
+        output_head,
+        FixedBytes::default(),
+        store_hash,
+    )
+    .await
+    .unwrap();
 }
