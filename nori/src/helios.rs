@@ -2,7 +2,7 @@ use alloy_primitives::{FixedBytes, B256};
 use helios_consensus_core::{
     calc_sync_period,
     consensus_spec::MainnetConsensusSpec,
-    types::{BeaconBlock, FinalityUpdate, Update},
+    types::{BeaconBlock, FinalityUpdate, LightClientStore, SyncCommittee, Update},
 };
 use helios_ethereum::rpc::ConsensusRpc;
 use helios_ethereum::{
@@ -19,6 +19,72 @@ use anyhow::{Error, Result};
 
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 
+pub async fn get_store_with_next_sync_committee(
+    input_head: u64,
+) -> Result<LightClientStore<MainnetConsensusSpec>> {
+    // Get latest beacon checkpoint
+    let helios_checkpoint = get_checkpoint(input_head).await?;
+
+    // Re init helios client
+    let mut helios_update_client = get_client(helios_checkpoint).await?;
+
+    // Option for next_sync_committee
+    let mut next_sync_committee: Option<SyncCommittee<MainnetConsensusSpec>> = None;
+
+    // u64's for counts
+    let previous_max_active_participants: u64;
+    let current_max_active_participants: u64;
+
+    // Get sync committee updates
+    let mut sync_committee_updates = get_finality_updates(&helios_update_client).await?; // FIXME THIS IS GETTING LOTS OF UPDATES
+
+    if !sync_committee_updates.is_empty() {
+        let temp_update = sync_committee_updates.remove(0);
+
+        let finalized_beacon_slot = {
+            temp_update.finalized_header().beacon().slot
+        };
+
+        info!("Frankenstein update finality beacon slot {}", finalized_beacon_slot);
+
+        helios_update_client
+            .verify_update(&temp_update)
+            .map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
+        helios_update_client.apply_update(&temp_update);
+
+        next_sync_committee = helios_update_client.store.next_sync_committee.clone();
+        previous_max_active_participants = helios_update_client.store.previous_max_active_participants; // need to think abuot this refer to helios
+        current_max_active_participants = helios_update_client.store.current_max_active_participants;
+        // but alteast safety_threshold seems to only apply to optimism checkme
+
+        /*
+        store.current_max_active_participants =
+        u64::max(store.current_max_active_participants, committee_bits); ??
+         */
+        //return Ok(helios_update_client.store.next_sync_committee);
+    }
+    else {
+        // FIXME this should be zeros nessesarily
+        previous_max_active_participants = 0; // helios_update_client.store.previous_max_active_participants
+        current_max_active_participants = 0; // helios_update_client.store.current_max_active_participants
+        // perhaps this was the issue with the cold start?! we got an invalid update when we gave it the hash... think but might also be as we didnt remove the 0th update (pre apply)
+    }
+
+    // Get latest beacon checkpoint
+    let helios_checkpoint = get_checkpoint(input_head).await?;
+
+    // Re init helios client
+    let helios_update_client: Inner<MainnetConsensusSpec, HttpRpc> = get_client(helios_checkpoint).await?;
+
+    let mut helios_store = helios_update_client.store.clone();
+    helios_store.next_sync_committee = next_sync_committee;
+    helios_store.previous_max_active_participants = previous_max_active_participants;
+    helios_store.current_max_active_participants = current_max_active_participants;
+
+    Ok(helios_store)
+}
+
+
 pub async fn get_latest_finality_head_and_store_hash(
 ) -> Result<(u64, FixedBytes<32>)> {
     // Get latest beacon checkpoint
@@ -34,6 +100,7 @@ pub async fn get_latest_finality_head_and_store_hash(
 
     // Get the store hash
     info!("Calculating cold start store hash");
+    //let store = get_store_with_next_sync_committee(slot_head).await?; // ensures we put the next sync committee upon the cold start store.
     let store_hash = sha256_hash_helios_store(&helios_client.store)?;
     info!("Calculated cold start store hash: {}", store_hash);
 

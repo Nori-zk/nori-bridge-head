@@ -1,6 +1,7 @@
-use crate::helios::{get_checkpoint, get_client, get_finality_updates};
+use crate::helios::{get_checkpoint, get_client, get_finality_updates, get_store_with_next_sync_committee};
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{Context, Error, Result};
+use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::{LightClientStore, SyncCommittee}};
 use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use nori_sp1_helios_primitives::types::ProofInputs;
@@ -90,7 +91,7 @@ pub async fn prepare_zk_program_input(
     // Skip processing update inside program if next_sync_committee is already stored in contract.
     // We must still apply the update locally to "sync" the helios client, this is due to
     // next_sync_committee not being stored when the helios client is bootstrapped.
-    if !sync_committee_updates.is_empty() {
+    /*if !sync_committee_updates.is_empty() {
         let next_sync_committee = B256::from_slice(
             sync_committee_updates[0]
                 .next_sync_committee()
@@ -113,15 +114,90 @@ pub async fn prepare_zk_program_input(
                 .map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
             helios_update_client.apply_update(&temp_update);
 
-            println!("store after update {}", serde_json::to_string(&helios_update_client.store)?)
+            println!(
+                "store after update {}",
+                serde_json::to_string(&helios_update_client.store)?
+            )
         }
-    }
+    }*/
+
+    //
 
     /*
+
+       If last_next_sync_committee == next_sync_committee is not reliable because after a lot of down time.... (because our finalised header in the zeroth update has a beacon slot gt our current slot)
+        Frankenstein the next_sync_commitee onto our store
+
+    */
+
+    let store: LightClientStore<MainnetConsensusSpec>;
+    if !sync_committee_updates.is_empty() {
+        if sync_committee_updates[0].finalized_header().beacon().slot < input_head {
+            let next_sync_committee = B256::from_slice(
+                sync_committee_updates[0]
+                    .next_sync_committee()
+                    .tree_hash_root()
+                    .as_ref(),
+            );
     
-    If last_next_sync_committee == next_sync_committee is not reliable because after a lot of down time.... (because our finalised header in the zeroth update has a beacon slot gt our current slot)
+            if last_next_sync_committee == FixedBytes::default() { // cold start
+                store = helios_update_client.store.clone();
+            }
+            else if last_next_sync_committee == next_sync_committee { // do we want this comparison ... should we just always apply it like helios does...
+                info!(
+                    "Applying optimization, skipping sync committee update. Sync committee hash: {:?}",
+                    next_sync_committee
+                );
+                let temp_update = sync_committee_updates.remove(0);
+
+                let finalized_beacon_slot = {
+                    temp_update.finalized_header().beacon().slot
+                };
+
+                info!("Optimisation update finality beacon slot {}", finalized_beacon_slot);
     
-     */
+                let temp_update_str = serde_json::to_string(&temp_update)?;
+                println!("temp_update {}", temp_update_str);
+    
+                helios_update_client
+                    .verify_update(&temp_update)
+                    .map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
+                helios_update_client.apply_update(&temp_update);
+    
+                println!(
+                    "store after update {}",
+                    serde_json::to_string(&helios_update_client.store)?
+                );
+                store = helios_update_client.store.clone();
+            }
+            else {
+                info!("Frankensteining our next sync commitee et al store properties. Sync committee changed!"); // Not sure about this branch alternative is store = helios_update_client.store.clone();
+                // i think cold start will hit this method! not anymore.... but this is quite possibly where it may fail....
+                // could possibly null out the next_sync_committee in the zk if by calculation it will disspear in the next finality update but then wouldnt we want to check the currenct sync committee against that value.. how might they differe
+                store = get_store_with_next_sync_committee(input_head).await?;
+
+                // what about removing 0th (pre applying) the update?
+    
+                println!(
+                    "store after Frankensteining {}",
+                    serde_json::to_string(&store)?
+                );
+            }
+            
+        }
+        else { // Our update is very old and we need to bootstrap our store using the frankenstein method...
+            info!("Frankensteining our next sync commitee et al store properties. Old store");
+            store = get_store_with_next_sync_committee(input_head).await?;
+
+            println!(
+                "store after Frankensteining {}",
+                serde_json::to_string(&store)?
+            );
+        }
+    }
+    else {
+        store = helios_update_client.store.clone();
+    }
 
     // Create program inputs
     info!("Building sp1 proof inputs.");
@@ -140,7 +216,7 @@ pub async fn prepare_zk_program_input(
         sync_committee_updates,
         finality_update,
         expected_current_slot,
-        store: helios_update_client.store.clone(),
+        store: store.clone(),
         genesis_root: helios_update_client.config.chain.genesis_root,
         forks: helios_update_client.config.forks.clone(),
         store_hash,

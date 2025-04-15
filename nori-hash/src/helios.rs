@@ -18,12 +18,12 @@ pub fn serialize_helios_store_serde(
     result.extend(rmp_serde::to_vec(&helios_store.finalized_header)?);
     result.extend(rmp_serde::to_vec(&helios_store.current_sync_committee)?);
     //result.extend(rmp_serde::to_vec(&helios_store.optimistic_header)?);
-    result.extend(rmp_serde::to_vec(
+    /*result.extend(rmp_serde::to_vec(
         &helios_store.previous_max_active_participants,
     )?);
     result.extend(rmp_serde::to_vec(
         &helios_store.current_max_active_participants,
-    )?);
+    )?);*/ // These are problematic when frankensteining the next_sync_committee
 
     // Optional fields
     if let Some(next) = &helios_store.next_sync_committee {
@@ -31,7 +31,7 @@ pub fn serialize_helios_store_serde(
     }
     /*if let Some(best) = &helios_store.best_valid_update {
         result.extend(rmp_serde::to_vec(best)?);
-    }*/
+    }*/ // This can appear in the zk program after we have applied our updates+finality update
 
     Ok(result)
 }

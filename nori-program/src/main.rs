@@ -46,10 +46,15 @@ pub fn main() {
 
     // 1. Apply sync committee updates, if any
     for (index, update) in sync_committee_updates.iter().enumerate() {
+        // update.finalized_header.beacon().slot; introduce printing this so we can see if we are applying updates beyond our head
+        let finalized_beacon_slot = {
+            update.finalized_header().beacon().slot
+        };
         println!(
-            "Processing update {} of {}.",
+            "Processing update {} of {}. Update beacon finalized slot: {}",
             index + 1,
-            sync_committee_updates.len()
+            sync_committee_updates.len(),
+            finalized_beacon_slot
         );
         let update_is_valid =
             verify_update(update, expected_current_slot, &store, genesis_root, &forks).is_ok();
@@ -78,6 +83,8 @@ pub fn main() {
     println!("Finality update is valid.");
     apply_finality_update(&mut store, &finality_update);
     println!("Applied finality update.");
+
+    // Should do an assertion here to ensure we have increased our head (we do check this downstream later)
 
     // 3. Commit new state root, header, and sync committee for usage in the on-chain contract
     println!("Committing head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root.");
