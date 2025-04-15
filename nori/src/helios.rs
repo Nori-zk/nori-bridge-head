@@ -31,6 +31,8 @@ pub async fn get_store_with_next_sync_committee(
     // Option for next_sync_committee
     let mut next_sync_committee: Option<SyncCommittee<MainnetConsensusSpec>> = None;
 
+    println!("current_max_active_participants before changes {}", helios_update_client.store.current_max_active_participants);
+
     // u64's for counts
     let previous_max_active_participants: u64;
     let current_max_active_participants: u64;
