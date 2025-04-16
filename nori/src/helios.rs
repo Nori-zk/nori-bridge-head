@@ -6,7 +6,7 @@ use helios_consensus_core::{
     types::{BeaconBlock, FinalityUpdate, Forks, LightClientStore, Update},
     verify_update,
 };
-use helios_ethereum::{config::cli, rpc::ConsensusRpc};
+use helios_ethereum::rpc::ConsensusRpc;
 use helios_ethereum::{
     config::{checkpoints, networks::Network, Config},
     consensus::Inner,
@@ -105,9 +105,23 @@ pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedByte
     let slot_head = helios_client.store.finalized_header.clone().beacon().slot;
     info!("Retrieved cold start head: {} ", slot_head);
 
+    // Get sync update
+    info!("Getting cold start first update");
+    let first_update = get_first_update(&helios_client).await?;
+
+    // Get synced store
+    info!("Syncing bootstrapped cold start store");
+    let synced_store = get_store_with_next_sync_committee(
+        helios_client.expected_current_slot(),
+        helios_client.store,
+        &helios_client.config.chain.genesis_root,
+        &helios_client.config.forks,
+        &first_update,
+    )?;
+
     // Get the store hash
     info!("Calculating cold start store hash");
-    let store_hash = sha256_hash_helios_store(&helios_client.store)?;
+    let store_hash = sha256_hash_helios_store(&synced_store)?;
     info!("Calculated cold start store hash: {}", store_hash);
 
     Ok((slot_head, store_hash))
@@ -144,6 +158,26 @@ pub async fn get_updates(
     match updates_result {
         Ok(updates) => Ok(updates.clone()), // Clone the updates if the result is Ok
         Err(e) => Err(e),                   // Propagate error if it's an Err
+    }
+}
+
+/// Fetch first update for client
+pub async fn get_first_update(
+    client: &Inner<MainnetConsensusSpec, HttpRpc>,
+) -> Result<Update<MainnetConsensusSpec>> {
+    let period =
+        calc_sync_period::<MainnetConsensusSpec>(client.store.finalized_header.beacon().slot);
+
+    // Handling the result and converting errors to anyhow::Error
+    let updates_result = client
+        .rpc
+        .get_updates(period, 1)
+        .await
+        .map_err(|e| Error::msg(e.to_string())); // Convert error to anyhow::Error
+
+    match updates_result {
+        Ok(mut updates) => Ok(updates.get_mut(0).unwrap().clone()), // Clone the updates if the result is Ok
+        Err(e) => Err(e), // Propagate error if it's an Err
     }
 }
 

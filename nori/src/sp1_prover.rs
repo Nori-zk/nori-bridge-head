@@ -1,6 +1,6 @@
 use crate::helios::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates};
-use alloy_primitives::{FixedBytes, B256};
-use anyhow::{Error, Result};
+use alloy_primitives::FixedBytes;
+use anyhow::Result;
 use helios_consensus_core::{
     apply_update, consensus_spec::MainnetConsensusSpec, types::LightClientStore, verify_update,
 };
@@ -9,7 +9,6 @@ use log::info;
 use nori_sp1_helios_primitives::types::ProofInputs;
 use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
 use std::sync::OnceLock;
-use tree_hash::TreeHash;
 
 // Import nori sp1 helios program
 pub const ELF: &[u8] = include_bytes!("../../nori-elf/nori-sp1-helios-program");
@@ -54,7 +53,6 @@ impl ProverJobOutput {
 /// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
 pub async fn prepare_zk_program_input(
     input_head: u64,
-    last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
 ) -> Result<Vec<u8>> {
     // Get latest beacon checkpoint
@@ -95,7 +93,8 @@ pub async fn prepare_zk_program_input(
         // next_sync_committee onto our store as well as other state and bring the store up to date
         // with its state restored back to the same condition as the terminal ("updated") store state in
         // the last zk programs invocation
-        if first_update_slot < input_head {
+        if first_update_slot < input_head { // FIXME should this be <= ?
+            info!("First update finalized header beacon slot is less than our input head.");
             // Remove the zeroth update from the updates.
             let first_update = sync_committee_updates.remove(0);
             // Validate the update.
@@ -106,10 +105,11 @@ pub async fn prepare_zk_program_input(
                 *genesis_root,
                 forks,
             ).map_err(|e| anyhow::anyhow!("Verify update failed: {}", e))?;
-            // Apply the update to the client... mutating its store*/
+            // Apply the update to the client... mutating its store
             apply_update(&mut helios_update_client.store, &first_update);
             helios_update_client.store
         } else {
+            info!("First update finalized header beacon slot is greater than or equal to our input head.");
             // The 0th update is ahead of the input_head, the next_sync_committee and other store state
             // need to be restored without advancing the store in terms of slot.
             // This can happen if either we are exactly on a period transition (every 32*256 slots) or
@@ -150,18 +150,16 @@ pub async fn prepare_zk_program_input(
 /// # Arguments
 /// * `job_id` - The identifier for this job
 /// * `input_head` - Target slot number to prove from up until current finality head
-/// * `last_next_sync_committee` -  The previous hash of next_sync_committee
 /// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
 pub async fn finality_update_job(
     job_id: u64,
     input_head: u64,
-    last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
 ) -> Result<ProverJobOutput> {
     // Encode proof inputs
     info!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs =
-        prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
+        prepare_zk_program_input(input_head, store_hash).await?;
 
     // Get proving key
     let pk = get_proving_key().await;

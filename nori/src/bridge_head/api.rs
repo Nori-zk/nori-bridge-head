@@ -13,7 +13,7 @@ use super::validate::validate_env;
 use crate::helios::get_latest_finality_head_and_store_hash;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
-use alloy_primitives::{FixedBytes, B256};
+use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use log::{error, info};
@@ -99,8 +99,6 @@ pub struct BridgeHead {
     next_slot: u64,
     /// Unique identifier for prover jobs
     job_id: u64,
-    /// Hash of the next sync committee
-    next_sync_committee: FixedBytes<32>,
     /// Active prover jobs mapped by job ID
     prover_jobs: HashMap<u64, ProverJob>,
     /// Channel for receiving bridge head commands
@@ -127,7 +125,6 @@ impl BridgeHead {
 
         // Initialise slot head / commitee vars
         let current_head;
-        let mut next_sync_committee = FixedBytes::<32>::default();
         let store_hash;
         let cold_start;
 
@@ -137,7 +134,6 @@ impl BridgeHead {
             info!("Loading nori slot checkpoint from file.");
             let nb_checkpoint = load_nb_checkpoint().unwrap();
             current_head = nb_checkpoint.slot_head;
-            next_sync_committee = nb_checkpoint.next_sync_committee;
             store_hash = nb_checkpoint.store_hash;
             cold_start = false;
         } else {
@@ -172,7 +168,6 @@ impl BridgeHead {
                 init_latest_beacon_slot,
                 next_slot: init_latest_beacon_slot,
                 job_id: 0,
-                next_sync_committee,
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
                 finality_rx: Some(finality_rx),
@@ -366,7 +361,6 @@ impl BridgeHead {
 
         // Clone job arguments
         let current_head_clone = self.current_head;
-        let next_sync_committee_clone = self.next_sync_committee;
         let store_hash = self.store_hash;
 
         // Spawn proof job in worker thread (check for blocking)
@@ -375,7 +369,6 @@ impl BridgeHead {
             let proof_result = finality_update_job(
                 job_id,
                 current_head_clone,
-                next_sync_committee_clone,
                 store_hash,
             )
             .await;
@@ -430,7 +423,6 @@ impl BridgeHead {
     async fn advance(
         &mut self,
         head: u64,
-        next_sync_committee: FixedBytes<32>,
         store_hash: FixedBytes<32>,
     ) {
         // Update current head
@@ -439,21 +431,14 @@ impl BridgeHead {
         // Update the store has
         self.store_hash = store_hash;
 
-        // If sync committee is valid then update it
-        if next_sync_committee != B256::ZERO {
-            // ONLY IF NON ZEROS
-            self.next_sync_committee = next_sync_committee;
-        }
-
         // Save the checkpoint
-        save_nb_checkpoint(self.current_head, self.next_sync_committee, self.store_hash);
+        save_nb_checkpoint(self.current_head, self.store_hash);
 
         // Notify of head advanced
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::HeadAdvanced(
                 NoticeExtensionBridgeHeadAdvanced {
                     head,
-                    next_sync_committee,
                     store_hash,
                 },
             ))
@@ -516,7 +501,7 @@ impl BridgeHead {
                         }
                         Command::Advance(message) => {
                             // deal with advance invocation
-                            let _ = self.advance(message.head, message.next_sync_committee, message.store_hash).await;
+                            let _ = self.advance(message.head, message.store_hash).await;
                         }
                     }
                 }

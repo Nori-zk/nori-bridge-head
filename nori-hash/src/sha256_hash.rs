@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
-use crate::helios::{serialize_helios_store, serialize_helios_store_serde};
+use crate::helios::serialize_helios_store_serde;
+use crate::utils::print_helios_store;
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};

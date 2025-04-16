@@ -6,13 +6,12 @@ use sp1_sdk::{ProverClient, SP1PublicValues, SP1Stdin};
 /// A stripped down version of finality_update_job used to generate cycle information without the opt
 pub async fn benchmark_finality_update(
     input_head: u64,
-    last_next_sync_committee: FixedBytes<32>,
     store_hash: FixedBytes<32>,
 ) -> Result<SP1PublicValues> {
 
     // Encode proof inputs
     println!("Encoding sp1 proof inputs.");
-    let encoded_proof_inputs = prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
+    let encoded_proof_inputs = prepare_zk_program_input(input_head, store_hash).await?;
 
     let public_values = tokio::task::spawn_blocking(move || -> Result<SP1PublicValues> {
         // Setup prover client
@@ -55,7 +54,7 @@ async fn benchmark_sha256_serde() {
 
     // Perform benchmark initial
     println!("Round one sin opt");
-    let public_values = benchmark_finality_update(current_head, FixedBytes::default(), store_hash).await.unwrap();
+    let public_values = benchmark_finality_update(current_head, store_hash).await.unwrap();
 
     // Decode public output
     let public_values_bytes = public_values.as_slice(); 
@@ -71,5 +70,5 @@ async fn benchmark_sha256_serde() {
 
     // Perform benchmark 2nd round
     println!("Round two with opt");
-    benchmark_finality_update(output_head, proof_outputs.next_sync_committee_hash, proof_outputs.store_hash).await.unwrap();
+    benchmark_finality_update(output_head, proof_outputs.store_hash).await.unwrap();
 }

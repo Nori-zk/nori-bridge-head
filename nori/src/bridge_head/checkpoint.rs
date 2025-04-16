@@ -9,7 +9,6 @@ const NB_CHECKPOINT_FILE: &str = "./checkpoint/nb_checkpoint.json";
 #[derive(Serialize, Deserialize)]
 pub struct NoriBridgeCheckpoint {
     pub slot_head: u64,
-    pub next_sync_committee: FixedBytes<32>,
     pub store_hash: FixedBytes<32>
 }
 
@@ -35,7 +34,7 @@ pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
     Ok(nb_checkpoint)
 }
 
-pub fn save_nb_checkpoint(slot_head: u64, next_sync_committee: FixedBytes<32>, store_hash: FixedBytes<32>) {
+pub fn save_nb_checkpoint(slot_head: u64, store_hash: FixedBytes<32>) {
     info!("Saving checkpoint.");
     
     // Create dir if nessesary
@@ -47,7 +46,6 @@ pub fn save_nb_checkpoint(slot_head: u64, next_sync_committee: FixedBytes<32>, s
     // Define the current checkpoint
     let checkpoint = NoriBridgeCheckpoint {
         slot_head,
-        next_sync_committee,
         store_hash
     };
 

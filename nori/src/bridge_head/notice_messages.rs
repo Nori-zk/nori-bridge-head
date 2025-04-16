@@ -87,7 +87,6 @@ pub struct NoticeExtensionBridgeHeadFinalityTransitionDetected {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadAdvanced {
     pub head: u64,
-    pub next_sync_committee: FixedBytes<32>,
     pub store_hash: FixedBytes<32>
 }
 
