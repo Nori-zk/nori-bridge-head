@@ -32,7 +32,7 @@ fn main() {
 
         // Setup the client to generate the VK
         let client = ProverClient::from_env();
-        let (pk, vk) = client.setup(&elf_bytes);
+        let (_pk, vk) = client.setup(&elf_bytes);
 
         // Print the VK
         println!("VK: {}", vk.vk.bytes32());

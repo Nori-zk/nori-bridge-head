@@ -16,14 +16,12 @@ name = "nori"
 [dependencies]
 nori-hash = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }
+nori-sp1-helios-program = { workspace = true }
 dotenv = { workspace = true }
 sp1-sdk = { workspace = true }
 tokio = { workspace = true }
 helios-consensus-core = { workspace = true }
 helios-ethereum = { workspace = true }
-#sp1-helios-primitives = { workspace = true }
-#sp1-helios-script = { workspace = true}
-kimchi = { workspace = true }
 serde = { workspace = true }
 serde_cbor = { workspace = true }
 clap = { workspace = true }

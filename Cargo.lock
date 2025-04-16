@@ -981,24 +981,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 
 [[package]]
-name = "ark-ec"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "defd9a439d56ac24968cca0571f598a61bc8c55f71d50a89cda591cb750670ba"
-dependencies = [
- "ark-ff 0.4.2",
- "ark-poly",
- "ark-serialize 0.4.2",
- "ark-std 0.4.0",
- "derivative",
- "hashbrown 0.13.2",
- "itertools 0.10.5",
- "num-traits",
- "rayon",
- "zeroize",
-]
-
-[[package]]
 name = "ark-ff"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1032,7 +1014,6 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-traits",
  "paste",
- "rayon",
  "rustc_version 0.4.1",
  "zeroize",
 ]
@@ -1083,20 +1064,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark-poly"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d320bfc44ee185d899ccbadfa8bc31aab923ce1558716e1997a1e74057fe86bf"
-dependencies = [
- "ark-ff 0.4.2",
- "ark-serialize 0.4.2",
- "ark-std 0.4.0",
- "derivative",
- "hashbrown 0.13.2",
- "rayon",
-]
-
-[[package]]
 name = "ark-serialize"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1112,21 +1079,9 @@ version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb7b85a02b83d2f22f89bd5cac66c9c89474240cb6207cb1efc16d098e822a5"
 dependencies = [
- "ark-serialize-derive",
  "ark-std 0.4.0",
  "digest 0.10.7",
  "num-bigint 0.4.6",
-]
-
-[[package]]
-name = "ark-serialize-derive"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae3281bc6d0fd7e549af32b52511e1302185bd688fd3359fa36423346ff682ea"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -1147,7 +1102,6 @@ checksum = "94893f1e0c6eeab764ade8dc4c0db24caf4fe7cbbaafc0eba0a9030f447b5185"
 dependencies = [
  "num-traits",
  "rand 0.8.5",
- "rayon",
 ]
 
 [[package]]
@@ -1374,16 +1328,6 @@ name = "base64ct"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
-
-[[package]]
-name = "bcs"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85b6598a2f5d564fb7855dc6b06fd1c38cff5a72bd8b863a4d021938497b440a"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "beef"
@@ -2122,7 +2066,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b42b6fa04a440b495c8b04d0e71b707c585f83cb9cb28cf8cd0d976c315e31b4"
 dependencies = [
  "powerfmt",
- "serde",
 ]
 
 [[package]]
@@ -2838,16 +2781,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "groupmap"
-version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems?branch=master#103901a6a5b91988ffb537fc811a0354f259c20e"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "rand 0.8.5",
-]
-
-[[package]]
 name = "h2"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2925,9 +2858,6 @@ name = "hashbrown"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
-dependencies = [
- "ahash",
-]
 
 [[package]]
 name = "hashbrown"
@@ -3478,7 +3408,6 @@ checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
 dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
- "serde",
 ]
 
 [[package]]
@@ -3519,11 +3448,6 @@ checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
 dependencies = [
  "cfg-if",
 ]
-
-[[package]]
-name = "internal-tracing"
-version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems?branch=master#103901a6a5b91988ffb537fc811a0354f259c20e"
 
 [[package]]
 name = "interprocess"
@@ -3808,42 +3732,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kimchi"
-version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems?branch=master#103901a6a5b91988ffb537fc811a0354f259c20e"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-poly",
- "ark-serialize 0.4.2",
- "blake2",
- "groupmap",
- "hex",
- "internal-tracing",
- "itertools 0.12.1",
- "log",
- "mina-curves",
- "mina-poseidon",
- "num-bigint 0.4.6",
- "num-derive",
- "num-integer",
- "num-traits",
- "o1-utils",
- "once_cell",
- "poly-commitment",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rayon",
- "rmp-serde",
- "serde",
- "serde_with",
- "strum",
- "strum_macros",
- "thiserror 1.0.69",
- "turshi",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3955,34 +3843,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
-name = "mina-curves"
-version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems?branch=master#103901a6a5b91988ffb537fc811a0354f259c20e"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "num-bigint 0.4.6",
-]
-
-[[package]]
-name = "mina-poseidon"
-version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems?branch=master#103901a6a5b91988ffb537fc811a0354f259c20e"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-poly",
- "ark-serialize 0.4.2",
- "mina-curves",
- "o1-utils",
- "once_cell",
- "rand 0.8.5",
- "rayon",
- "serde",
- "serde_with",
-]
-
-[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4069,10 +3929,10 @@ dependencies = [
  "futures",
  "helios-consensus-core",
  "helios-ethereum",
- "kimchi",
  "log",
  "nori-hash",
  "nori-sp1-helios-primitives",
+ "nori-sp1-helios-program",
  "rand 0.9.0",
  "reqwest",
  "serde",
@@ -4092,7 +3952,6 @@ dependencies = [
  "alloy-sol-types",
  "anyhow",
  "helios-consensus-core",
- "kimchi",
  "rmp-serde",
  "serde_cbor",
  "serde_json",
@@ -4177,8 +4036,6 @@ checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
  "num-integer",
  "num-traits",
- "rand 0.8.5",
- "serde",
 ]
 
 [[package]]
@@ -4195,17 +4052,6 @@ name = "num-conv"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51d515d32fb182ee37cda2ccdcb92950d6a3c2893aa280e540671c2cd0f3b1d9"
-
-[[package]]
-name = "num-derive"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.98",
-]
 
 [[package]]
 name = "num-integer"
@@ -4330,30 +4176,6 @@ dependencies = [
  "proptest",
  "serde",
  "smallvec",
-]
-
-[[package]]
-name = "o1-utils"
-version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems?branch=master#103901a6a5b91988ffb537fc811a0354f259c20e"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-poly",
- "ark-serialize 0.4.2",
- "bcs",
- "hex",
- "num-bigint 0.4.6",
- "num-integer",
- "num-traits",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rayon",
- "rmp-serde",
- "serde",
- "serde_with",
- "sha2 0.10.8",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -4920,31 +4742,6 @@ name = "pkg-config"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
-
-[[package]]
-name = "poly-commitment"
-version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems?branch=master#103901a6a5b91988ffb537fc811a0354f259c20e"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-poly",
- "ark-serialize 0.4.2",
- "blake2",
- "groupmap",
- "itertools 0.12.1",
- "mina-curves",
- "mina-poseidon",
- "o1-utils",
- "once_cell",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rayon",
- "rmp-serde",
- "serde",
- "serde_with",
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "portable-atomic"
@@ -6033,8 +5830,6 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "hex",
- "indexmap 1.9.3",
- "indexmap 2.7.1",
  "serde",
  "serde_derive",
  "serde_json",
@@ -7485,16 +7280,6 @@ dependencies = [
  "sha1",
  "thiserror 1.0.69",
  "utf-8",
-]
-
-[[package]]
-name = "turshi"
-version = "0.1.0"
-source = "git+https://github.com/o1-labs/proof-systems?branch=master#103901a6a5b91988ffb537fc811a0354f259c20e"
-dependencies = [
- "ark-ff 0.4.2",
- "hex",
- "o1-utils",
 ]
 
 [[package]]

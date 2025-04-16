@@ -93,6 +93,7 @@ pub fn get_store_with_next_sync_committee(
     Ok(store_clone)
 }
 
+/// Get the latest slot & store hash from the latest finality checkpoint.
 pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedBytes<32>)> {
     // Get latest beacon checkpoint
     info!("Fetching cold start client from latest checkpoint");
@@ -127,6 +128,7 @@ pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedByte
     Ok((slot_head, store_hash))
 }
 
+/// Fetch the latest finality slot height.
 pub async fn get_client_latest_finality_head(
     client: &Inner<MainnetConsensusSpec, HttpRpc>,
 ) -> Result<u64> {
@@ -141,7 +143,7 @@ pub async fn get_client_latest_finality_head(
     Ok(finality_update.finalized_header().beacon().slot)
 }
 
-/// Fetch updates for client
+/// Fetch updates for client.
 pub async fn get_updates(
     client: &Inner<MainnetConsensusSpec, HttpRpc>,
 ) -> Result<Vec<Update<MainnetConsensusSpec>>> {

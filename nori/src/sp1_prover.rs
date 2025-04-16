@@ -80,8 +80,10 @@ pub async fn prepare_zk_program_input(
         panic!("Error updates were missing 0th update.")
     }
 
+    // Get the expected current slot from the client
     let expected_current_slot = helios_update_client.expected_current_slot();
 
+    // Get a synced bootstrapped store.
     let store: LightClientStore<MainnetConsensusSpec> = {
         // Get a reference to the first update
         let first_update = &sync_committee_updates[0];
