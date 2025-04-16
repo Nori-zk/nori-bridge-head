@@ -1,6 +1,9 @@
-use crate::helios::{get_checkpoint, get_client, get_finality_updates};
+use crate::helios::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates};
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{Error, Result};
+use helios_consensus_core::{
+    apply_update, consensus_spec::MainnetConsensusSpec, types::LightClientStore, verify_update,
+};
 use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
 use nori_sp1_helios_primitives::types::ProofInputs;
@@ -57,8 +60,10 @@ pub async fn prepare_zk_program_input(
     // Get latest beacon checkpoint
     let helios_checkpoint = get_checkpoint(input_head).await?;
 
-    // Re init helios client
+    // Re init helios client and extract references
     let mut helios_update_client = get_client(helios_checkpoint).await?;
+    let genesis_root = &helios_update_client.config.chain.genesis_root;
+    let forks = &helios_update_client.config.forks;
 
     // Get finality update
     info!("Getting finality update from input_head {}", input_head);
@@ -70,42 +75,65 @@ pub async fn prepare_zk_program_input(
 
     // Get sync commitee updates
     info!("Getting sync commitee updates.");
-    let mut sync_committee_updates = get_finality_updates(&helios_update_client).await?;
+    let mut sync_committee_updates = get_updates(&helios_update_client).await?;
 
-    // Taken from operator.rs
-    // Optimization:
-    // Skip processing update inside program if next_sync_committee is already stored in contract.
-    // We must still apply the update locally to "sync" the helios client, this is due to
-    // next_sync_committee not being stored when the helios client is bootstrapped.
-    if !sync_committee_updates.is_empty() {
-        let next_sync_committee = B256::from_slice(
-            sync_committee_updates[0]
-                .next_sync_committee()
-                .tree_hash_root()
-                .as_ref(),
-        );
-
-        if last_next_sync_committee == next_sync_committee {
-            info!("Applying optimization, skipping sync committee update. Sync committee hash: {:?}", next_sync_committee);
-            let temp_update = sync_committee_updates.remove(0);
-
-            helios_update_client
-                .verify_update(&temp_update)
-                .map_err(|e| Error::msg(format!("Proof invalid: {}", e)))?; // FIXME what to do with this!
-            helios_update_client.apply_update(&temp_update);
-        }
+    // Panic if our updates were empty (not sure how to deal with this yet)
+    if sync_committee_updates.is_empty() {
+        panic!("Error updates were missing 0th update.")
     }
+
+    let expected_current_slot = helios_update_client.expected_current_slot();
+
+    let store: LightClientStore<MainnetConsensusSpec> = {
+        // Get a reference to the first update
+        let first_update = &sync_committee_updates[0];
+        // Get the finalized_header beacon slot of the first update
+        let first_update_slot = first_update.finalized_header().beacon().slot;
+
+        // If the 0th updates finalized_header beacon slot is lower than our input_head then we can apply
+        // this update to our bootstrapped client to bring it in sync with the input_head. This puts the
+        // next_sync_committee onto our store as well as other state and bring the store up to date
+        // with its state restored back to the same condition as the terminal ("updated") store state in
+        // the last zk programs invocation
+        if first_update_slot < input_head {
+            // Remove the zeroth update from the updates.
+            let first_update = sync_committee_updates.remove(0);
+            // Validate the update.
+            verify_update(
+                &first_update,
+                expected_current_slot,
+                &helios_update_client.store,
+                *genesis_root,
+                forks,
+            ).map_err(|e| anyhow::anyhow!("Verify update failed: {}", e))?;
+            // Apply the update to the client... mutating its store*/
+            apply_update(&mut helios_update_client.store, &first_update);
+            helios_update_client.store
+        } else {
+            // The 0th update is ahead of the input_head, the next_sync_committee and other store state
+            // need to be restored without advancing the store in terms of slot.
+            // This can happen if either we are exactly on a period transition (every 32*256 slots) or
+            // if our client is very behind due to being offline while a period transition (or more than one)
+            // has occured.
+            get_store_with_next_sync_committee(
+                expected_current_slot,
+                helios_update_client.store,
+                genesis_root,
+                forks,
+                first_update,
+            )?
+        }
+    };
 
     // Create program inputs
     info!("Building sp1 proof inputs.");
-    let expected_current_slot = helios_update_client.expected_current_slot();
     let inputs = ProofInputs {
         sync_committee_updates,
         finality_update,
         expected_current_slot,
-        store: helios_update_client.store.clone(),
-        genesis_root: helios_update_client.config.chain.genesis_root,
-        forks: helios_update_client.config.forks.clone(),
+        store,
+        genesis_root: *genesis_root,
+        forks: forks.clone(),
         store_hash,
     };
     info!("Built sp1 proof inputs.");
@@ -132,7 +160,8 @@ pub async fn finality_update_job(
 ) -> Result<ProverJobOutput> {
     // Encode proof inputs
     info!("Encoding sp1 proof inputs.");
-    let encoded_proof_inputs = prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
+    let encoded_proof_inputs =
+        prepare_zk_program_input(input_head, last_next_sync_committee, store_hash).await?;
 
     // Get proving key
     let pk = get_proving_key().await;

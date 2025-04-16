@@ -1,10 +1,12 @@
 use alloy_primitives::{FixedBytes, B256};
+use anyhow::{Error, Result};
 use helios_consensus_core::{
-    calc_sync_period,
+    apply_update, calc_sync_period,
     consensus_spec::MainnetConsensusSpec,
-    types::{BeaconBlock, FinalityUpdate, Update},
+    types::{BeaconBlock, FinalityUpdate, Forks, LightClientStore, Update},
+    verify_update,
 };
-use helios_ethereum::rpc::ConsensusRpc;
+use helios_ethereum::{config::cli, rpc::ConsensusRpc};
 use helios_ethereum::{
     config::{checkpoints, networks::Network, Config},
     consensus::Inner,
@@ -15,12 +17,83 @@ use nori_hash::sha256_hash::sha256_hash_helios_store;
 use std::sync::Arc;
 use tokio::sync::{mpsc::channel, watch};
 use tree_hash::TreeHash;
-use anyhow::{Error, Result};
 
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 
-pub async fn get_latest_finality_head_and_store_hash(
-) -> Result<(u64, FixedBytes<32>)> {
+/// Updates a cloned `LightClientStore` with next sync committee data from the provided update.
+///
+/// This function:
+/// 1. Creates a clone of the input store
+/// 2. Verifies the provided update against the original store
+/// 3. Applies the update to the original store (mutating it)
+/// 4. Copies the restored next sync committee data and other state to the cloned store
+/// 5. Returns the cloned store with restored next sync committee data
+///
+/// The original store is modified during this process, but the returned store maintains
+/// the original slot while containing the new committee information.
+///
+/// # Arguments
+///
+/// * `expected_current_slot` - The slot the light client expects to be current
+/// * `store` - The store to clone and update (will be modified during verification)
+/// * `genesis_root` - The genesis root of the chain
+/// * `forks` - The fork schedule for the chain
+/// * `first_update` - The update containing the new sync committee information
+///
+/// # Returns
+///
+/// Returns a `Result` containing:
+/// - `Ok(LightClientStore)` with:
+///   - Original slot information
+///   - Updated `next_sync_committee` from the applied update
+///   - Updated participant counts from the applied update
+/// - `Err(anyhow::Error)` if:
+///   - Update verification fails
+///
+/// # Example
+///
+/// ```rust
+/// let updated_store = get_store_with_next_sync_committee(
+///     expected_slot,
+///     original_store,
+///     &genesis_root,
+///     &forks,
+///     &first_update
+/// )?;
+/// ```
+pub fn get_store_with_next_sync_committee(
+    expected_current_slot: u64,
+    mut store: LightClientStore<MainnetConsensusSpec>,
+    genesis_root: &FixedBytes<32>,
+    forks: &Forks,
+    first_update: &Update<MainnetConsensusSpec>,
+) -> Result<LightClientStore<MainnetConsensusSpec>> {
+    // Copy the original store
+    let mut store_clone = store.clone();
+
+    // Verify the first update
+    verify_update(
+        first_update,
+        expected_current_slot,
+        &store,
+        *genesis_root,
+        forks,
+    )
+    .map_err(|e| anyhow::anyhow!("Verify update failed: {}", e))?;
+
+    // Apply first update (get our bootstrapped client in sync, this gives us the missing next_sync_committee etc)
+    apply_update(&mut store, first_update);
+
+    // Copy our next sync committee and other store state to the cloned store (which has not advanced compared to the original bootstrapped slot)
+    store_clone.next_sync_committee = store.next_sync_committee;
+    store_clone.previous_max_active_participants = store.previous_max_active_participants;
+    store_clone.current_max_active_participants = store.current_max_active_participants;
+    //store_clone.best_valid_update = client.store.best_valid_update; // Perhaps re introduce this
+
+    Ok(store_clone)
+}
+
+pub async fn get_latest_finality_head_and_store_hash() -> Result<(u64, FixedBytes<32>)> {
     // Get latest beacon checkpoint
     info!("Fetching cold start client from latest checkpoint");
     let latest_checkpoint = get_latest_checkpoint().await?;
@@ -54,7 +127,8 @@ pub async fn get_client_latest_finality_head(
     Ok(finality_update.finalized_header().beacon().slot)
 }
 
-pub async fn get_finality_updates(
+/// Fetch updates for client
+pub async fn get_updates(
     client: &Inner<MainnetConsensusSpec, HttpRpc>,
 ) -> Result<Vec<Update<MainnetConsensusSpec>>> {
     let period =
@@ -70,25 +144,6 @@ pub async fn get_finality_updates(
     match updates_result {
         Ok(updates) => Ok(updates.clone()), // Clone the updates if the result is Ok
         Err(e) => Err(e),                   // Propagate error if it's an Err
-    }
-}
-
-/// Fetch updates for client
-pub async fn get_updates(
-    client: &Inner<MainnetConsensusSpec, HttpRpc>,
-) -> anyhow::Result<Vec<Update<MainnetConsensusSpec>>> {
-    let updates_result = client
-        .rpc
-        .get_updates(
-            calc_sync_period::<MainnetConsensusSpec>(client.store.finalized_header.beacon().slot),
-            MAX_REQUEST_LIGHT_CLIENT_UPDATES,
-        )
-        .await
-        .map_err(|e| Error::msg(e.to_string())); // Convert the error into anyhow::Error
-
-    match updates_result {
-        Ok(updates) => Ok(updates.clone()), // Clone only the Vec<Update> inside the Ok variant
-        Err(e) => Err(e),                   // Propagate the error if it's an Err
     }
 }
 
