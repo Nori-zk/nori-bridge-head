@@ -139,7 +139,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 );
             }
             BridgeHeadNoticeMessage::HeadAdvanced(data) => {
-                info!("NOTICE_TYPE| Head Advanced: {:?}", data.extension.head);
+                info!("NOTICE_TYPE| Head Advanced: {:?}", data.extension.slot);
             }
         }
 

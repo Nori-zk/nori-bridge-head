@@ -36,7 +36,6 @@ pub struct ProofMessage {
     pub output_store_hash: FixedBytes<32>,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
-    pub next_sync_committee: FixedBytes<32>,
     pub elapsed_sec: f64,
 }
 
@@ -264,7 +263,6 @@ impl BridgeHead {
                     input_store_hash,
                     output_slot: output_head,
                     job_id,
-                    next_sync_committee: proof_outputs.next_sync_committee_hash,
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
                     output_store_hash: proof_outputs.store_hash,
@@ -281,7 +279,6 @@ impl BridgeHead {
                 output_store_hash,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
-                next_sync_committee: proof_outputs.next_sync_committee_hash,
                 elapsed_sec,
             })
             .await;
@@ -438,7 +435,7 @@ impl BridgeHead {
         let _ = self
             .trigger_listener_with_notice(BridgeHeadNoticeMessageExtension::HeadAdvanced(
                 NoticeExtensionBridgeHeadAdvanced {
-                    head,
+                    slot: head,
                     store_hash,
                 },
             ))

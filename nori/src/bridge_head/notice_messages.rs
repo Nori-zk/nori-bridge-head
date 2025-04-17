@@ -65,7 +65,6 @@ pub struct NoticeExtensionBridgeHeadJobSucceeded {
     pub input_store_hash: FixedBytes<32>,
     pub output_slot: u64,
     pub output_store_hash: FixedBytes<32>,
-    pub next_sync_committee: FixedBytes<32>,
     pub execution_state_root: FixedBytes<32>,
     pub elapsed_sec: f64,
 }
@@ -86,7 +85,7 @@ pub struct NoticeExtensionBridgeHeadFinalityTransitionDetected {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NoticeExtensionBridgeHeadAdvanced {
-    pub head: u64,
+    pub slot: u64,
     pub store_hash: FixedBytes<32>
 }
 
