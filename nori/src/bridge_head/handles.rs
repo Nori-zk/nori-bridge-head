@@ -4,7 +4,7 @@ use tokio::sync::mpsc::Sender;
 /// Event loop commands
 
 pub struct AdvanceMessage {
-    pub head: u64,
+    pub slot: u64,
     pub store_hash: FixedBytes<32>,
 }
 
@@ -27,11 +27,11 @@ impl CommandHandle {
         let _ = self.command_tx.send(Command::StageTransitionProof).await;
     }
 
-    pub async fn advance(&self, head: u64, store_hash: FixedBytes<32>) {
+    pub async fn advance(&self, slot: u64, store_hash: FixedBytes<32>) {
         let _ = self
             .command_tx
             .send(Command::Advance(AdvanceMessage {
-                head,
+                slot,
                 store_hash
             }))
             .await;

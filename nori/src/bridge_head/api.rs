@@ -10,7 +10,7 @@ use super::notice_messages::{
     TransitionNoticeExtensionBridgeHeadStarted,
 };
 use super::validate::validate_env;
-use crate::helios::get_latest_finality_head_and_store_hash;
+use crate::helios::get_latest_finality_slot_and_store_hash;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::FixedBytes;
@@ -91,7 +91,7 @@ pub enum BridgeHeadEvent {
 /// - Event observation
 pub struct BridgeHead {
     /// Current finalized slot head
-    current_head: u64,
+    current_slot: u64,
     /// Latest beacon slot when bridge head inited
     init_latest_beacon_slot: u64,
     /// Target slot to advance to
@@ -123,7 +123,7 @@ impl BridgeHead {
         validate_env(&["SOURCE_CONSENSUS_RPC_URL", "SP1_PROVER"]);
 
         // Initialise slot head / commitee vars
-        let current_head;
+        let current_slot;
         let store_hash;
         let cold_start;
 
@@ -132,14 +132,14 @@ impl BridgeHead {
             // Warm start procedure
             info!("Loading nori slot checkpoint from file.");
             let nb_checkpoint = load_nb_checkpoint().unwrap();
-            current_head = nb_checkpoint.slot_head;
+            current_slot = nb_checkpoint.slot;
             store_hash = nb_checkpoint.store_hash;
             cold_start = false;
         } else {
             // Cold start procedure
             // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
-            (current_head, store_hash) = get_latest_finality_head_and_store_hash().await.unwrap();
+            (current_slot, store_hash) = get_latest_finality_slot_and_store_hash().await.unwrap();
             cold_start = true;
         }
 
@@ -158,12 +158,12 @@ impl BridgeHead {
         // Setup polling client for finality change detection
         info!("Starting helios polling client.");
         let (init_latest_beacon_slot, finality_rx) =
-            start_helios_finality_change_detector(current_head).await;
+            start_helios_finality_change_detector(current_slot).await;
 
         (
             input_command_handle,
             BridgeHead {
-                current_head,
+                current_slot,
                 init_latest_beacon_slot,
                 next_slot: init_latest_beacon_slot,
                 job_id: 0,
@@ -244,14 +244,14 @@ impl BridgeHead {
         let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes)?;
 
         // need to cast new head to a u64 // FIXME change the decoder later.......
-        let new_head = proof_outputs.new_head;
-        let new_head_bytes: [u8; 32] = new_head.to_be_bytes();
+        let new_slot = proof_outputs.new_head;
+        let new_slot_bytes: [u8; 32] = new_slot.to_be_bytes();
         // Extract the last 8 bytes (least significant bytes in big-endian)
-        let new_head_u64_bytes: [u8; 8] = new_head_bytes[24..32]
+        let new_slot_u64_bytes: [u8; 8] = new_slot_bytes[24..32]
             .try_into()
             .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
         // Convert the bytes to u64 using big-endian interpretation
-        let output_head = u64::from_be_bytes(new_head_u64_bytes);
+        let output_slot = u64::from_be_bytes(new_slot_u64_bytes);
         // Get the store hash
         let output_store_hash = proof_outputs.store_hash;
 
@@ -261,7 +261,7 @@ impl BridgeHead {
                 TransitionNoticeExtensionBridgeHeadJobSucceeded {
                     input_slot,
                     input_store_hash,
-                    output_slot: output_head,
+                    output_slot,
                     job_id,
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
@@ -275,7 +275,7 @@ impl BridgeHead {
             .trigger_listener_with_proof(ProofMessage {
                 input_slot,
                 input_store_hash,
-                output_slot: output_head,
+                output_slot,
                 output_store_hash,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
@@ -338,7 +338,7 @@ impl BridgeHead {
 
         // Print received job message
         info!(
-            "Nori head updater received a new job {}. Spawning a new worker.",
+            "Nori bridge head updater received a new job {}. Spawning a new worker.",
             job_id
         );
 
@@ -346,7 +346,7 @@ impl BridgeHead {
         self.prover_jobs.insert(
             job_id,
             ProverJob {
-                input_slot: self.current_head,
+                input_slot: self.current_slot,
                 input_store_hash: self.store_hash,
                 start_instant: Instant::now(),
                 expected_output_slot: self.next_slot,
@@ -357,7 +357,7 @@ impl BridgeHead {
         let tx = self.job_tx.clone();
 
         // Clone job arguments
-        let current_head_clone = self.current_head;
+        let current_slot_clone = self.current_slot;
         let store_hash = self.store_hash;
 
         // Spawn proof job in worker thread (check for blocking)
@@ -365,7 +365,7 @@ impl BridgeHead {
             // Execute job
             let proof_result = finality_update_job(
                 job_id,
-                current_head_clone,
+                current_slot_clone,
                 store_hash,
             )
             .await;
@@ -386,7 +386,7 @@ impl BridgeHead {
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobCreated(
                 TransitionNoticeExtensionBridgeHeadJobCreated {
-                    input_slot: self.current_head,
+                    input_slot: self.current_slot,
                     job_id,
                     expected_output_slot: self.next_slot,
                     input_store_hash: store_hash,
@@ -406,7 +406,7 @@ impl BridgeHead {
             return;
         }
 
-        if self.next_slot > self.current_head {
+        if self.next_slot > self.current_slot {
             // Immediately do the transition proof job.
             let _ = self.prepare_transition_proof().await;
             self.stage_transition_proof = false;
@@ -419,23 +419,23 @@ impl BridgeHead {
     // Advance the bridge head
     async fn advance(
         &mut self,
-        head: u64,
+        slot: u64,
         store_hash: FixedBytes<32>,
     ) {
         // Update current head
-        self.current_head = head;
+        self.current_slot = slot;
 
         // Update the store has
         self.store_hash = store_hash;
 
         // Save the checkpoint
-        save_nb_checkpoint(self.current_head, self.store_hash);
+        save_nb_checkpoint(self.current_slot, self.store_hash);
 
         // Notify of head advanced
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::HeadAdvanced(
                 TransitionNoticeExtensionBridgeHeadAdvanced {
-                    slot: head,
+                    slot,
                     store_hash,
                 },
             ))
@@ -457,7 +457,7 @@ impl BridgeHead {
         self.next_slot = slot;
 
         // Print the head change detection
-        info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_head, self.next_slot);
+        info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
 
         // If we have a staged transition proof then attempt to run that job
         if self.stage_transition_proof {
@@ -472,7 +472,7 @@ impl BridgeHead {
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::Started(
                 TransitionNoticeExtensionBridgeHeadStarted {
                     latest_beacon_slot: self.init_latest_beacon_slot,
-                    current_head: self.current_head,
+                    current_slot: self.current_slot,
                     store_hash: self.store_hash,
                 },
             ))
@@ -498,7 +498,7 @@ impl BridgeHead {
                         }
                         Command::Advance(message) => {
                             // deal with advance invocation
-                            let _ = self.advance(message.head, message.store_hash).await;
+                            let _ = self.advance(message.slot, message.store_hash).await;
                         }
                     }
                 }

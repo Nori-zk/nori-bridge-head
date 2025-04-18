@@ -106,7 +106,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             TransitionNoticeBridgeHeadMessage::Started(data) => {
                 info!(
                     "NOTICE_TYPE| Started. Current head: {:?} Finality slot: {:?}",
-                    data.extension.current_head, data.extension.latest_beacon_slot
+                    data.extension.current_slot, data.extension.latest_beacon_slot
                 );
                 // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
                 // that happened while this process was offline

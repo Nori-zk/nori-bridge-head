@@ -1,4 +1,4 @@
-use crate::helios::{get_client, get_client_latest_finality_head, get_latest_checkpoint};
+use crate::helios::{get_client, get_client_latest_finality_slot, get_latest_checkpoint};
 use log::{error, info};
 use std::{env, time::Duration};
 use tokio::sync::mpsc;
@@ -10,7 +10,7 @@ pub struct FinalityChangeMessage {
 
 /// Finality change detector
 pub async fn start_helios_finality_change_detector(
-    current_head: u64,
+    current_slot: u64,
 ) -> (u64, tokio::sync::mpsc::Receiver<FinalityChangeMessage>) {
     dotenv::dotenv().ok();
 
@@ -31,13 +31,13 @@ pub async fn start_helios_finality_change_detector(
     info!("Fetching helios latest finality head.");
 
     // Get latest slot
-    let mut init_latest_beacon_slot = get_client_latest_finality_head(&helios_polling_client)
+    let mut init_latest_beacon_slot = get_client_latest_finality_slot(&helios_polling_client)
         .await
         .unwrap();
 
     // If we get an erronous slot from get_client_latest_finality_head then override it with the current_head
-    if current_head > init_latest_beacon_slot {
-        init_latest_beacon_slot = current_head;
+    if current_slot > init_latest_beacon_slot {
+        init_latest_beacon_slot = current_slot;
     }
 
     // Setup helios finality change mspc
@@ -47,7 +47,7 @@ pub async fn start_helios_finality_change_detector(
     tokio::spawn(async move {
         let mut current_slot = init_latest_beacon_slot;
         loop {
-            match get_client_latest_finality_head(&helios_polling_client).await {
+            match get_client_latest_finality_slot(&helios_polling_client).await {
                 Ok(next_slot) => {
                     if next_slot > current_slot {
                         current_slot = next_slot;
@@ -57,7 +57,7 @@ pub async fn start_helios_finality_change_detector(
                     }
                 }
                 Err(e) => {
-                    error!("Error checking finality slot head: {}", e);
+                    error!("Error checking latest finality slot: {}", e);
                 }
             }
             tokio::time::sleep(Duration::from_secs_f64(polling_interval_sec)).await;

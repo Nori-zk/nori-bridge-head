@@ -44,7 +44,7 @@ macro_rules! define_message {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadStarted {
     pub latest_beacon_slot: u64,
-    pub current_head: u64,
+    pub current_slot: u64,
     pub store_hash: FixedBytes<32>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
