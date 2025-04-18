@@ -1,7 +1,7 @@
 use super::{
     api::{BridgeHeadEvent, ProofMessage},
     handles::CommandHandle,
-    notice_messages::BridgeHeadNoticeMessage,
+    notice_messages::TransitionNoticeBridgeHeadMessage,
 };
 use crate::utils::handle_nori_proof;
 use alloy_primitives::FixedBytes;
@@ -15,7 +15,7 @@ pub trait EventObserver: Send + Sync {
     /// Called when a new proof is generated
     async fn on_proof(&mut self, proof_job_data: ProofMessage) -> anyhow::Result<()>;
     /// Called when a system notice is generated
-    async fn on_notice(&mut self, notice_data: BridgeHeadNoticeMessage) -> anyhow::Result<()>;
+    async fn on_notice(&mut self, notice_data: TransitionNoticeBridgeHeadMessage) -> anyhow::Result<()>;
 
     /// Run method default for handling event messages
     async fn run(
@@ -100,10 +100,10 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         Ok(())
     }
 
-    async fn on_notice(&mut self, notice_data: BridgeHeadNoticeMessage) -> Result<()> {
+    async fn on_notice(&mut self, notice_data: TransitionNoticeBridgeHeadMessage) -> Result<()> {
         // Do something specific
         match &notice_data {
-            BridgeHeadNoticeMessage::Started(data) => {
+            TransitionNoticeBridgeHeadMessage::Started(data) => {
                 info!(
                     "NOTICE_TYPE| Started. Current head: {:?} Finality slot: {:?}",
                     data.extension.current_head, data.extension.latest_beacon_slot
@@ -112,16 +112,16 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 // that happened while this process was offline
                 let _ = self.bridge_head_handle.stage_transition_proof().await;
             }
-            BridgeHeadNoticeMessage::Warning(data) => {
+            TransitionNoticeBridgeHeadMessage::Warning(data) => {
                 info!("NOTICE_TYPE| Warning: {:?}", data.extension.message);
             }
-            BridgeHeadNoticeMessage::JobCreated(data) => {
+            TransitionNoticeBridgeHeadMessage::JobCreated(data) => {
                 info!("NOTICE_TYPE| Job Created: {:?}", data.extension.job_id);
             }
-            BridgeHeadNoticeMessage::JobSucceeded(data) => {
+            TransitionNoticeBridgeHeadMessage::JobSucceeded(data) => {
                 info!("NOTICE_TYPE| Job Succeeded: {:?}", data.extension.job_id);
             }
-            BridgeHeadNoticeMessage::JobFailed(data) => {
+            TransitionNoticeBridgeHeadMessage::JobFailed(data) => {
                 info!(
                     "NOTICE_TYPE| Job Failed: {:?}: {}",
                     data.extension.job_id, data.extension.message
@@ -132,13 +132,13 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     let _ = self.bridge_head_handle.stage_transition_proof().await;
                 }
             }
-            BridgeHeadNoticeMessage::FinalityTransitionDetected(data) => {
+            TransitionNoticeBridgeHeadMessage::FinalityTransitionDetected(data) => {
                 info!(
                     "NOTICE_TYPE| Finality Transition Detected: {:?}",
                     data.extension.slot
                 );
             }
-            BridgeHeadNoticeMessage::HeadAdvanced(data) => {
+            TransitionNoticeBridgeHeadMessage::HeadAdvanced(data) => {
                 info!("NOTICE_TYPE| Head Advanced: {:?}", data.extension.slot);
             }
         }
