@@ -13,9 +13,9 @@ use log::{info, warn};
 #[async_trait]
 pub trait EventObserver: Send + Sync {
     /// Called when a new proof is generated
-    async fn on_proof(&mut self, proof_job_data: ProofMessage) -> anyhow::Result<()>;
-    /// Called when a system notice is generated
-    async fn on_notice(&mut self, notice_data: TransitionNoticeBridgeHeadMessage) -> anyhow::Result<()>;
+    async fn on_transition_proof_succeeded(&mut self, proof_job_data: ProofMessage) -> anyhow::Result<()>;
+    /// Called when a bridge head transition notice is generated
+    async fn on_bridge_head_transition_notice(&mut self, notice_data: TransitionNoticeBridgeHeadMessage) -> anyhow::Result<()>;
 
     /// Run method default for handling event messages
     async fn run(
@@ -31,13 +31,13 @@ pub trait EventObserver: Send + Sync {
                             match event {
                                 BridgeHeadEvent::ProofMessage(proof_msg) => {
                                     // Call on_proof for a Proof event.
-                                    if let Err(e) = self.on_proof(proof_msg).await {
+                                    if let Err(e) = self.on_transition_proof_succeeded(proof_msg).await {
                                         warn!("Error handling proof event: {}", e);
                                     }
                                 },
                                 BridgeHeadEvent::NoticeMessage(notice_msg) => {
                                     // Call on_notice for a Notice event.
-                                    if let Err(e) = self.on_notice(notice_msg).await {
+                                    if let Err(e) = self.on_bridge_head_transition_notice(notice_msg).await {
                                         warn!("Error handling notice event: {}", e);
                                     }
                                 },
@@ -80,7 +80,7 @@ impl ExampleBridgeHeadEventObserver {
 
 #[async_trait]
 impl EventObserver for ExampleBridgeHeadEventObserver {
-    async fn on_proof(&mut self, proof_data: ProofMessage) -> Result<()> {
+    async fn on_transition_proof_succeeded(&mut self, proof_data: ProofMessage) -> Result<()> {
         println!("PROOF| {}", proof_data.input_slot);
 
         info!("Saving Nori sp1 proof");
@@ -100,7 +100,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         Ok(())
     }
 
-    async fn on_notice(&mut self, notice_data: TransitionNoticeBridgeHeadMessage) -> Result<()> {
+    async fn on_bridge_head_transition_notice(&mut self, notice_data: TransitionNoticeBridgeHeadMessage) -> Result<()> {
         // Do something specific
         match &notice_data {
             TransitionNoticeBridgeHeadMessage::Started(data) => {
