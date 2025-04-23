@@ -111,8 +111,10 @@ pub struct BridgeHead {
     /// Channel for emitting proof and notice events
     event_tx: broadcast::Sender<BridgeHeadEvent>,
     /// Boolean for indicating a job should be issued on the next beacon slot change event
+    #[deprecated]
     stage_transition_proof: bool,
     /// Boolean indicating a cold start (prevents waiting for transition)
+    #[deprecated]
     cold_start: bool,
     /// FixedBytes representing the store hash
     store_hash: FixedBytes<32>,
@@ -331,7 +333,7 @@ impl BridgeHead {
     }
 
     // Create prover job
-    async fn prepare_transition_proof(&mut self) {
+    async fn prepare_transition_proof(&mut self, slot: u64, store_hash: FixedBytes<32>) {
         // Get job id
         self.job_id += 1;
         let job_id: u64 = self.job_id;
@@ -346,8 +348,8 @@ impl BridgeHead {
         self.prover_jobs.insert(
             job_id,
             ProverJob {
-                input_slot: self.current_slot,
-                input_store_hash: self.store_hash,
+                input_slot: slot,
+                input_store_hash: store_hash,
                 start_instant: Instant::now(),
                 expected_output_slot: self.next_slot,
             },
@@ -398,8 +400,8 @@ impl BridgeHead {
     /// Commands
 
     // Stage transition proof generation
-    async fn stage_transition_proof(&mut self) {
-        if self.cold_start {
+    async fn stage_transition_proof(&mut self, slot: u64, store_hash: FixedBytes<32>) {
+        /*if self.cold_start {
             // If we started cold run the first job regardless of if our next_slot = current_head
             let _ = self.prepare_transition_proof().await;
             self.cold_start = false;
@@ -413,7 +415,8 @@ impl BridgeHead {
         } else {
             // Wait for finality transition before doing the transition proof job.
             self.stage_transition_proof = true;
-        }
+        }*/
+        let _ = self.prepare_transition_proof(slot, store_hash).await;
     }
 
     // Advance the bridge head
@@ -460,9 +463,9 @@ impl BridgeHead {
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
 
         // If we have a staged transition proof then attempt to run that job
-        if self.stage_transition_proof {
+        /*if self.stage_transition_proof {
             let _ = self.stage_transition_proof().await;
-        }
+        }*/
     }
 
     /// Event loop
@@ -493,8 +496,8 @@ impl BridgeHead {
                 // Read the command receiver for input commands
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
-                        Command::StageTransitionProof => {
-                            let _ = self.stage_transition_proof().await;
+                        Command::StageTransitionProof(message) => {
+                            let _ = self.stage_transition_proof(message.slot, message.store_hash).await;
                         }
                         Command::Advance(message) => {
                             // deal with advance invocation

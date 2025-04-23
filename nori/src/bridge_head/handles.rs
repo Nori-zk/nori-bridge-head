@@ -8,8 +8,13 @@ pub struct AdvanceMessage {
     pub store_hash: FixedBytes<32>,
 }
 
+pub struct StageTransitionProofMessage {
+    pub slot: u64,
+    pub store_hash: FixedBytes<32>,
+}
+
 pub enum Command {
-    StageTransitionProof,
+    StageTransitionProof(StageTransitionProofMessage),
     Advance(AdvanceMessage),
 }
 
@@ -23,8 +28,8 @@ impl CommandHandle {
         Self { command_tx }
     }
 
-    pub async fn stage_transition_proof(&self) {
-        let _ = self.command_tx.send(Command::StageTransitionProof).await;
+    pub async fn stage_transition_proof(&self, slot: u64, store_hash: FixedBytes<32>) {
+        let _ = self.command_tx.send(Command::StageTransitionProof(StageTransitionProofMessage { slot, store_hash })).await;
     }
 
     pub async fn advance(&self, slot: u64, store_hash: FixedBytes<32>) {
