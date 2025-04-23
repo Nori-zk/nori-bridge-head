@@ -111,7 +111,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             let _ = handle_nori_proof(&proof_data.proof, proof_data.input_slot).await;
 
             // Advance the head
-            info!("Saving advancing the bridge head.");
+            info!("Advancing the bridge head.");
             let _ = self
                 .advance(proof_data.output_slot, proof_data.output_store_hash)
                 .await;
@@ -146,6 +146,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     "NOTICE_TYPE| Started. Current head: {:?} Finality slot: {:?}",
                     data.extension.current_slot, data.extension.latest_beacon_slot
                 );
+
                 self.started = true;
                 self.current_slot = data.extension.current_slot;
                 self.store_hash = data.extension.store_hash;
@@ -155,6 +156,8 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 }
                 // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
                 // that happened while this process was offline
+
+                info!("Staging a transition proof with input slot {}", self.current_slot);
                 let _ = self
                     .bridge_head_handle
                     .stage_transition_proof(self.current_slot, self.store_hash)
