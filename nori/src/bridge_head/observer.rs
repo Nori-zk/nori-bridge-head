@@ -116,7 +116,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 .advance(proof_data.output_slot, proof_data.output_store_hash)
                 .await;
 
-            // We should wait until finality has advanced to trigger our next proof.
+            // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
             if self.latest_beacon_finality_slot > self.current_slot {
                 info!("Latest beacon finality slot is advanced of our proofs output slot, starting a new job.");
                 let _ = self
