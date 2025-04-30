@@ -60,7 +60,7 @@ use tree_hash::TreeHash;
 pub fn zk_program(encoded_inputs: Vec<u8>) -> ProofOutputs {
     println!("Decoding inputs");
     let ProofInputs {
-        sync_committee_updates,
+        updates: sync_committee_updates,
         finality_update,
         expected_current_slot,
         mut store,

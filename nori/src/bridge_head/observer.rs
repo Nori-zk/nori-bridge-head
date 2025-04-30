@@ -112,14 +112,14 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
 
             // Advance the head
             info!("Advancing the bridge head.");
-            let _ = self
+            self
                 .advance(proof_data.output_slot, proof_data.output_store_hash)
                 .await;
 
             // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
             if self.latest_beacon_finality_slot > self.current_slot {
                 info!("Latest beacon finality slot is advanced of our proofs output slot, starting a new job.");
-                let _ = self
+                self
                     .bridge_head_handle
                     .stage_transition_proof(self.current_slot, self.store_hash)
                     .await;
@@ -128,7 +128,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 self.stage_transition_proof = true;
             }
         } else {
-            info!("Proof failed to advance the bridge head. Queuing another job for the next finality transition.");
+            info!("Proof failed to advance the bridge head. Proof slot {}, bridge head slot {}. Queuing another job for the next finality transition.", proof_data.output_slot, self.current_slot);
             self.stage_transition_proof = true;
         }
 
@@ -157,11 +157,17 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
                 // that happened while this process was offline
 
-                info!("Staging a transition proof with input slot {}", self.current_slot);
-                let _ = self
+                if data.extension.latest_beacon_slot > self.current_slot {
+                    info!("Staging a transition proof with input slot {}", self.current_slot);
+                    let _ = self
                     .bridge_head_handle
                     .stage_transition_proof(self.current_slot, self.store_hash)
                     .await;
+                }
+                else {
+                    info!("Current slot is {}, staging a job at the next finality transition.", self.current_slot);
+                    self.stage_transition_proof = true;
+                }
             }
             TransitionNoticeBridgeHeadMessage::Warning(data) => {
                 info!("NOTICE_TYPE| Warning: {:?}", data.extension.message);

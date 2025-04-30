@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ProofInputs {
-    pub sync_committee_updates: Vec<Update<MainnetConsensusSpec>>,
+    pub updates: Vec<Update<MainnetConsensusSpec>>,
     pub finality_update: FinalityUpdate<MainnetConsensusSpec>,
     pub expected_current_slot: u64,
     pub store: LightClientStore<MainnetConsensusSpec>,
