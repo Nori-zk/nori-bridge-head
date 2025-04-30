@@ -49,7 +49,7 @@ pub async fn benchmark_finality_update(
 async fn benchmark_sha256_serde() {
     dotenv::dotenv().ok();
 
-    // Get latest heaslotd and store_hash
+    // Get latest head slot and store_hash
     let (current_slot, store_hash) = get_latest_finality_slot_and_store_hash().await.unwrap();
 
     // Perform benchmark initial
