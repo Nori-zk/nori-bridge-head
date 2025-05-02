@@ -23,6 +23,7 @@ pgo-data.profdata
 
 # Sp1 Proofs
 sp1-helios-proofs/
+sp1-helios-proof-messages/
 
 # Ignore infra
 nori-bridge-head-rabbit/

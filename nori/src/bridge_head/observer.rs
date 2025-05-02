@@ -3,7 +3,7 @@ use super::{
     handles::CommandHandle,
     notice_messages::TransitionNoticeBridgeHeadMessage,
 };
-use crate::utils::handle_nori_proof;
+use crate::utils::{handle_nori_proof, handle_nori_proof_message};
 use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -109,6 +109,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
 
             info!("Saving Nori sp1 proof.");
             let _ = handle_nori_proof(&proof_data.proof, proof_data.input_slot).await;
+            let _ = handle_nori_proof_message(&proof_data).await;
 
             // Advance the head
             info!("Advancing the bridge head.");
