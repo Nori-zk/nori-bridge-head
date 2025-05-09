@@ -24,9 +24,9 @@ pub fn serialize_helios_store_serde(
         result.extend(rmp_serde::to_vec(next)?);
     } // This is reconstructed in all scenarios with the get_store_with_next_sync_committee where nessesary.
 
-    /*if let Some(best) = &helios_store.best_valid_update {
+    if let Some(best) = &helios_store.best_valid_update {
         result.extend(rmp_serde::to_vec(best)?);
-    }*/ // This might be able to be reintroduced due to the introduction of the get_store_with_next_sync_committee reconstruction method.
+    } // This might be able to be reintroduced due to the introduction of the get_store_with_next_sync_committee reconstruction method.
 
     Ok(result)
 }

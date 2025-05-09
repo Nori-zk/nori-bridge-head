@@ -88,7 +88,7 @@ pub fn get_store_with_next_sync_committee(
     store_clone.next_sync_committee = store.next_sync_committee;
     store_clone.previous_max_active_participants = store.previous_max_active_participants;
     store_clone.current_max_active_participants = store.current_max_active_participants;
-    //store_clone.best_valid_update = client.store.best_valid_update; // Perhaps re introduce this
+    store_clone.best_valid_update = store.best_valid_update; // Perhaps re introduce this
 
     Ok(store_clone)
 }
