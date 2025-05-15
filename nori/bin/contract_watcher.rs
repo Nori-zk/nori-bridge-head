@@ -17,11 +17,10 @@ async fn main() -> Result<()> {
                      Timestamp: {}",
                     evt.user, evt.amount, evt.when
                 );
-                // Add your custom logic here
             }
             Err(e) => {
                 eprintln!("⚠️ Error processing event: {}", e);
-                // Add error recovery logic here if needed
+                // Add error recovery logic here
             }
         }
     }
