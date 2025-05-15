@@ -47,3 +47,11 @@ Gas used for deployment: 296589
 ```
 
 A file `.env.nori-token-bridge` will have been created with `NORI_TOKEN_BRIDGE_ADDRESS` set within it.
+
+## Lock (for testing purposes)
+
+Make sure your .env is set to deploy to the correct testing network. Copy NORI_TOKEN_BRIDGE_ADDRESS from the deploy stage. Also you must add `NORI_TOKEN_BRIDGE_TEST_MODE=true` to run this test facility.
+
+`npm run lock`
+
+**Caution** this is just a test facility, don't lock real ETH using this process.
