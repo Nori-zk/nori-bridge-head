@@ -24,6 +24,10 @@ async function main() {
   // Cast to ethers Signer
   const signer = hardhatSigner as unknown as Signer;
 
+  // Print signer address
+  const balance = await hre.ethers.provider.getBalance(signer.getAddress());
+  console.log(`Signer balance: ${hre.ethers.formatEther(balance)} ETH`);
+
   // This is the correct way to get an existing deployed contract instance
   const tokenBridge = await hre.ethers.getContractAt(
     "NoriTokenBridge",
