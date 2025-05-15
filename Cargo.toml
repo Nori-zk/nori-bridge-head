@@ -28,6 +28,7 @@ helios-consensus-core = { git = "https://github.com/a16z/helios", tag = "0.8.6" 
 helios-ethereum = { git = "https://github.com/a16z/helios", tag = "0.8.6" }
 
 # general
+ethers = { version = "2.0", features = ["abigen", "ws"] }
 dotenv = "0.15.0"
 eyre = "0.6.12"
 sp1-sdk = "4.1.7"

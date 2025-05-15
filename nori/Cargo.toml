@@ -13,11 +13,16 @@ path = "./bin/nori_bridge_head.rs"
 name = "extract_zeroth_public_input"
 path = "./bin/extract_zeroth_public_input.rs"
 
+[[bin]]
+name = "contract_watcher"
+path = "./bin/contract_watcher.rs"
+
 [lib]
 path = "src/lib.rs"
 name = "nori"
 
 [dependencies]
+ethers = { workspace = true }
 nori-hash = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }
 nori-sp1-helios-program = { workspace = true }
