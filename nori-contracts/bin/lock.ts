@@ -16,7 +16,7 @@ if (!deployedAddress || !deployedAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
   );
 }
 
-const testLockAmount = "0.0001";
+const testLockAmount = "0.000001";
 
 async function main() {
   const [hardhatSigner] = await hre.ethers.getSigners();
