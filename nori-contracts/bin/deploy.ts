@@ -15,14 +15,14 @@ async function main() {
   const network = await hre.ethers.provider.getNetwork();
   console.log(`Network: ${network.name} (chainId: ${network.chainId})`);
 
-  // Get the ContractFactory for your Ignition contract name
+  // Get the ContractFactory via the Ignition contract name
   const NoriTokenBridge = await hre.ethers.getContractFactory(
     "NoriTokenBridge"
   );
   // Deploy contract
-  const noriTokenBridge = await NoriTokenBridge.deploy();
+  const noriTokenBridgeDeployedContract = await NoriTokenBridge.deploy();
 
-  const deployTx = noriTokenBridge.deploymentTransaction();
+  const deployTx = noriTokenBridgeDeployedContract.deploymentTransaction();
   if (!deployTx) throw new Error(`NoriTokenBridge did not deploy`);
 
   // Wait for deployment transaction to be mined
@@ -30,13 +30,13 @@ async function main() {
   if (!receipt) throw new Error("NoriTokenBridge receipt invalid");
 
   // tokenBridge.target is the deployed address in Ignition typings
-  console.log(`NoriTokenBridge deployed to: ${noriTokenBridge.target}`);
+  console.log(`NoriTokenBridge deployed to: ${noriTokenBridgeDeployedContract.target}`);
   console.log(`Deployed in block: ${receipt.blockNumber}`);
   console.log(`Gas used for deployment: ${receipt.gasUsed.toString()}`);
 
   // Write the contract address to .env.nori-token-bridge file
   const envFilePath = path.resolve(__dirname, "..", ".env.nori-token-bridge");
-  const envContent = `NORI_TOKEN_BRIDGE_ADDRESS=${noriTokenBridge.target}\n`;
+  const envContent = `NORI_TOKEN_BRIDGE_ADDRESS=${noriTokenBridgeDeployedContract.target}\n`;
 
   writeFileSync(envFilePath, envContent, { encoding: "utf8" });
 }

@@ -2,7 +2,7 @@ import "dotenv/config";
 import hre from "hardhat";
 import { Signer } from "ethers";
 
-const testMode = process.env.NORI_TOKEN_BRIDGE_TEST_MODE !== "false";
+const testMode = (process.env.NORI_TOKEN_BRIDGE_TEST_MODE || 'false') === "true";
 if (!testMode) {
   throw new Error(
     "Not in test mode! Denied the use of the deposit facility. It's just for testing!"
@@ -28,18 +28,21 @@ async function main() {
   const balance = await hre.ethers.provider.getBalance(signer.getAddress());
   console.log(`Signer balance: ${hre.ethers.formatEther(balance)} ETH`);
 
-  // This is the correct way to get an existing deployed contract instance
-  const tokenBridge = await hre.ethers.getContractAt(
+  // Get an existing deployed contract instance
+  const noriTokenBridge = await hre.ethers.getContractAt(
     "NoriTokenBridge",
     deployedAddress,
     signer
   );
 
+  // Convert amount from human readable
   const amount = hre.ethers.parseEther(testLockAmount);
 
-  const tx = await tokenBridge.lockTokens({ value: amount });
+  // Lock amount in the token bridge
+  const tx = await noriTokenBridge.lockTokens({ value: amount });
   console.log(`Lock tx sent: ${tx.hash}`);
 
+  // Await tx
   await tx.wait();
   console.log(`Lock confirmed with ${testLockAmount} ETH`);
 }
