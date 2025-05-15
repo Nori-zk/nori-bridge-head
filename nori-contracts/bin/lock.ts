@@ -1,0 +1,46 @@
+import "dotenv/config";
+import hre from "hardhat";
+import { Signer } from "ethers";
+
+const testMode = process.env.NORI_TOKEN_BRIDGE_TEST_MODE !== "false";
+if (!testMode) {
+  throw new Error(
+    "Not in test mode! Denied the use of the deposit facility. It's just for testing!"
+  );
+}
+
+const deployedAddress = process.env.NORI_TOKEN_BRIDGE_ADDRESS as string;
+if (!deployedAddress || !deployedAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+  throw new Error(
+    "Invalid or missing environment variable NORI_TOKEN_BRIDGE_ADDRESS. Must be a valid Ethereum address."
+  );
+}
+
+const testLockAmount = "0.0001";
+
+async function main() {
+  const [hardhatSigner] = await hre.ethers.getSigners();
+
+  // Cast to ethers Signer
+  const signer = hardhatSigner as unknown as Signer;
+
+  // This is the correct way to get an existing deployed contract instance
+  const tokenBridge = await hre.ethers.getContractAt(
+    "NoriTokenBridge",
+    deployedAddress,
+    signer
+  );
+
+  const amount = hre.ethers.parseEther(testLockAmount);
+
+  const tx = await tokenBridge.lockTokens({ value: amount });
+  console.log(`Lock tx sent: ${tx.hash}`);
+
+  await tx.wait();
+  console.log(`Lock confirmed with ${testLockAmount} ETH`);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
