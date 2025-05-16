@@ -8,8 +8,8 @@ use nori::contract_watcher::{
 };
 use std::{env, sync::Arc};
 
-//#[tokio::main]
-async fn main_old() -> Result<()> {
+#[tokio::main]
+async fn main_ws() -> Result<()> {
     let mut contract_update_rx = get_source_contract_listener().await?;
 
     println!("Started listening for contract events...");

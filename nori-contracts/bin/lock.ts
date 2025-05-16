@@ -43,8 +43,12 @@ async function main() {
   console.log(`Lock tx sent: ${tx.hash}`);
 
   // Await tx
-  await tx.wait();
+  const receipt = await tx.wait();
+
+  if (!receipt) throw new Error('No tx receipt was generated');
+  
   console.log(`Lock confirmed with ${testLockAmount} ETH`);
+  console.log(`Transaction included in block number: ${receipt.blockNumber}`);
 }
 
 main().catch((error) => {
