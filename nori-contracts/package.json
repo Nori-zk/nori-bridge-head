@@ -4,7 +4,7 @@
   "description": "NoriTokenBridge contract",
   "main": "index.js",
   "scripts": {
-    "build": "npm run clean && hardhat compile",
+    "build": "npm run clean && hardhat compile && cd ../nori && cargo test generate_token_bridge_bindings -- --nocapture",
     "test": "ETH_NETWORK=hardhat hardhat test",
     "clean": "hardhat clean",
     "deploy": "dotenv -e .env -- sh -c 'npx hardhat run bin/deploy.ts --network $ETH_NETWORK'",
