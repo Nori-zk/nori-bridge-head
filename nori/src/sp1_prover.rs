@@ -141,6 +141,20 @@ pub async fn prepare_zk_program_input(
         }
     };
 
+    let finalized_input_block_number = store
+        .finalized_header
+        .execution()
+        .map_err(|_| anyhow::Error::msg("Failed to get input finalized execution header".to_string()))?
+        .block_number();
+
+    // Need to validate that we will advance!
+
+    let finalized_output_block_number = finality_update
+        .finalized_header()
+        .execution()
+        .map_err(|_| anyhow::Error::msg("Failed to get output finalized execution header".to_string()))?
+        .block_number();
+
     // Create program inputs
     info!("Building sp1 proof inputs.");
     let inputs = ProofInputs {

@@ -210,6 +210,9 @@ pub async fn get_latest_checkpoint() -> Result<B256> {
     // Convert error with context
 }
 
+/// Fetch block number from a slot number. ??
+
+
 /// Fetch checkpoint from a slot number.
 pub async fn get_checkpoint(slot: u64) -> Result<B256> {
     // Fetching environment variables
