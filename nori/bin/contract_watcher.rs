@@ -4,7 +4,7 @@ use ethers::{
     types::Address,
 };
 use nori::contract_watcher::{
-    http::get_source_contract_events_between_blocks, watcher::get_source_contract_listener,
+    http::get_source_contract_events_between_blocks, ws::get_source_contract_listener,
 };
 use std::{env, sync::Arc};
 
