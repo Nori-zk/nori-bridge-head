@@ -7,8 +7,6 @@ fn generate_token_bridge_bindings() {
     // Get the project root from cargo manifest dir
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let project_root = Path::new(manifest_dir).parent().unwrap();
-
-    println!("fuck {}", project_root.display());
     
     // Input ABI path (relative to project root)
     let abi_path = project_root
