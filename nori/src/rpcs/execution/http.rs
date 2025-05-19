@@ -26,7 +26,7 @@ pub struct ExecutionHttpProxy {
     source_state_bridge_contract_address: Address,
 }
 
-pub async fn query_with_fallback<F, C, R>(
+async fn query_with_fallback<F, C, R>(
     principle_provider: &C,
     backup_providers: &[C],
     f: F,
