@@ -1,37 +1,38 @@
-use super::bindings::nori_token_bridge::TokensLockedFilter;
+use super::bindings::NoriTokenBridge::{self, TokensLocked};
+use alloy_primitives::{Address, Log};
 use anyhow::Result;
-use ethers::{abi::RawLog, prelude::*, providers::Http};
-use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+use reqwest::Client;
+use alloy::{
+    providers::{Provider, ProviderBuilder, RootProvider}, rpc::types::Filter, sol_types::SolEvent,
+    transports::http::Http
+};
 
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 
 async fn try_get_chunk(
-    provider: &Arc<Provider<Http>>,
-    address: Address,
+    provider: &RootProvider<Http<Client>>,
+    address: &Address,
     start: u64,
     end: u64,
-) -> Result<Vec<TokensLockedFilter>> {
-    let event_signature = <TokensLockedFilter as EthEvent>::abi_signature();
-    
+) -> Result<Vec<Log<TokensLocked>>> {
+
+    let event_signature = NoriTokenBridge::TokensLocked::SIGNATURE;
+
     let filter = Filter::new()
-        .address(address)
-        .event(&event_signature)
-        .from_block(BlockNumber::Number(start.into()))
-        .to_block(BlockNumber::Number(end.into()));
+        .address(*address)
+        .event(event_signature)
+        .from_block(start)
+        .to_block(end);
 
     let logs = provider.get_logs(&filter).await?;
-
-    let events = logs
-        .into_iter()
+    
+    let events =
+        logs.into_iter()
         .filter_map(|log| {
-            let raw_log = RawLog {
-                topics: log.topics,
-                data: log.data.to_vec(),
-            };
-            <TokensLockedFilter as EthEvent>::decode_log(&raw_log).ok()
+            NoriTokenBridge::TokensLocked::decode_log(&log.inner, true).ok()            
         })
         .collect();
 
@@ -43,30 +44,32 @@ pub async fn get_source_contract_events_between_blocks(
     token_bridge_address: &Address,
     start_block: u64,
     end_block: u64,
-) -> Result<Vec<TokensLockedFilter>> {
-    let provider = Provider::<Http>::try_from(eth_http_rpc)?;
-    let provider = Arc::new(provider);
-    
+) -> Result<Vec<Log<TokensLocked>>> {
+    // Vec<TokensLockedFilter>
+
+    let rpc_url = eth_http_rpc.parse()?;
+    let provider = ProviderBuilder::new().on_http(rpc_url);
+
     let mut all_events = Vec::new();
     let mut current_block = start_block;
 
     while current_block <= end_block {
         let chunk_end = (current_block + CHUNK_SIZE).min(end_block);
-        
+
         println!("Processing blocks {}-{}", current_block, chunk_end);
 
         let mut retries = 0;
         let events = loop {
             match try_get_chunk(
                 &provider,
-                *token_bridge_address,
+                token_bridge_address,
                 current_block,
                 chunk_end
             ).await {
                 Ok(events) => break events,
                 Err(e) if retries < MAX_RETRIES => {
                     let delay = RETRY_BASE_DELAY * 2u32.pow(retries as u32);
-                    eprintln!("Error fetching chunk (retry {} in {:?}): {:?}", 
+                    eprintln!("Error fetching chunk (retry {} in {:?}): {:?}",
                         retries + 1, delay, e);
                     sleep(delay).await;
                     retries += 1;
@@ -82,8 +85,6 @@ pub async fn get_source_contract_events_between_blocks(
     Ok(all_events)
 }
 
-
-
 /*
     BE AWARE OF API LIMITS
     Developer plan — 100 blocks
@@ -92,7 +93,6 @@ pub async fn get_source_contract_events_between_blocks(
     Business plan — 10,000 blocks
     Enterprise — 10,000 blocks.
 */
-
 
 /*
 

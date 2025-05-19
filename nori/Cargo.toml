@@ -22,7 +22,6 @@ path = "src/lib.rs"
 name = "nori"
 
 [dependencies]
-ethers = { workspace = true }
 nori-hash = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }
 nori-sp1-helios-program = { workspace = true }
