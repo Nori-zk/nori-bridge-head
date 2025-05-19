@@ -1,4 +1,3 @@
-use super::bindings::NoriTokenBridge::{self, TokensLocked};
 use alloy::eips::BlockNumberOrTag;
 use alloy::providers::Provider;
 use alloy::sol_types::SolEvent;
@@ -8,6 +7,8 @@ use alloy_primitives::{Address, Log};
 use anyhow::{anyhow, Result};
 use futures::StreamExt;
 use tokio::sync::mpsc;
+
+use crate::contract::bindings::NoriTokenBridge::{self, TokensLocked};
 
 
 pub async fn get_source_contract_listener(

@@ -1,9 +1,7 @@
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy_primitives::Address;
 use anyhow::{Context, Result};
-use nori::contract_watcher::{
-    http::get_source_contract_events_between_blocks, ws::get_source_contract_listener,
-};
+use nori::rpcs::execution::{http::get_source_contract_events_between_blocks, ws::get_source_contract_listener};
 use std::env;
 
 async fn main_ws() -> Result<()> {

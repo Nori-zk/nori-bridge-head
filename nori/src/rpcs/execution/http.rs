@@ -1,4 +1,3 @@
-use super::bindings::NoriTokenBridge::{self, TokensLocked};
 use alloy_primitives::{Address, Log};
 use anyhow::Result;
 use tokio::time::{sleep, Duration};
@@ -7,6 +6,8 @@ use alloy::{
     providers::{Provider, ProviderBuilder, RootProvider}, rpc::types::Filter, sol_types::SolEvent,
     transports::http::Http
 };
+
+use crate::contract::bindings::NoriTokenBridge::{self, TokensLocked};
 
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
