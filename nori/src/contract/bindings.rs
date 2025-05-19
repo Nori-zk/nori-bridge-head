@@ -3,7 +3,6 @@ use alloy::sol;
 sol!(
     #[allow(missing_docs)]
     #[sol(rpc)]
-    NoriTokenBridge,
+    NoriStateBridge,
     "../nori-contracts/artifacts/contracts/NoriTokenBridge.sol/NoriTokenBridge.json"
 );
-

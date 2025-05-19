@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use futures::StreamExt;
 use tokio::sync::mpsc;
 
-use crate::contract::bindings::NoriTokenBridge::{self, TokensLocked};
+use crate::contract::bindings::NoriStateBridge::{self, TokensLocked};
 
 
 pub async fn get_source_contract_listener(
@@ -21,7 +21,7 @@ pub async fn get_source_contract_listener(
         .on_ws(WsConnect::new(eth_ws_rpc))
         .await?;
 
-    let event_signature = NoriTokenBridge::TokensLocked::SIGNATURE;
+    let event_signature = NoriStateBridge::TokensLocked::SIGNATURE;
 
     let filter = Filter::new().address(*address).event(event_signature);
 
@@ -39,7 +39,7 @@ pub async fn get_source_contract_listener(
                 while let Some(log) = stream.next().await {
                     println!("Got a log {}", log.address());
                     let result: Result<Log<TokensLocked>> =
-                        NoriTokenBridge::TokensLocked::decode_log(&log.inner, true)
+                        NoriStateBridge::TokensLocked::decode_log(&log.inner, true)
                             .map_err(|e| anyhow!("Failed to decode TokensLocked: {:?}", e));
 
                     let send_result = tx.send(result).await;
