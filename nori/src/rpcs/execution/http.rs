@@ -1,10 +1,11 @@
 use alloy::{
+    eips::BlockId,
     providers::{Provider, ProviderBuilder, RootProvider},
-    rpc::types::Filter,
+    rpc::types::{EIP1186AccountProofResponse, Filter},
     sol_types::SolEvent,
     transports::http::Http,
 };
-use alloy_primitives::{Address, Log};
+use alloy_primitives::{Address, Log, B256};
 use anyhow::{anyhow, Context, Result};
 use futures::{
     future::{select_ok, BoxFuture},
@@ -19,7 +20,7 @@ const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 pub struct ExecutionHttpProxy {
-    principle_provider: RootProvider<Http<Client>>,
+    principal_provider: RootProvider<Http<Client>>,
     backup_providers: Vec<RootProvider<Http<Client>>>,
     source_state_bridge_contract_address: Address,
 }
@@ -27,7 +28,7 @@ pub struct ExecutionHttpProxy {
 const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn query_with_fallback<F, C, R>(
-    principle_provider: &C,
+    principal_provider: &C,
     backup_providers: &[C],
     f: F,
 ) -> Result<R>
@@ -36,7 +37,7 @@ where
     C: Clone,
     R: 'static,
 {
-    match timeout(PROVIDER_TIMEOUT, f(principle_provider.clone())).await {
+    match timeout(PROVIDER_TIMEOUT, f(principal_provider.clone())).await {
         Ok(Ok(result)) => return Ok(result),
         Ok(Err(err)) => {
             warn!("Principal provider failed: {}.", err);
@@ -99,7 +100,7 @@ impl ExecutionHttpProxy {
             ));
         }
 
-        let principle_provider = providers.remove(0);
+        let principal_provider = providers.remove(0);
 
         let source_state_bridge_contract_address =
             env::var("NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS")
@@ -109,7 +110,7 @@ impl ExecutionHttpProxy {
 
         Ok(ExecutionHttpProxy {
             source_state_bridge_contract_address,
-            principle_provider,
+            principal_provider,
             backup_providers: providers,
         })
     }
@@ -118,7 +119,7 @@ impl ExecutionHttpProxy {
         ExecutionHttpProxy::from_env().unwrap()
     }
 
-    async fn get_source_contract_event_chunk<T>(
+    async fn _get_source_contract_event_chunk<T>(
         provider: RootProvider<Http<Client>>,
         source_state_bridge_contract_address: Address,
         start: u64,
@@ -169,12 +170,12 @@ impl ExecutionHttpProxy {
             let mut retries = 0;
             let events = loop {
                 match query_with_fallback(
-                    &self.principle_provider,
+                    &self.principal_provider,
                     &self.backup_providers,
                     |provider| {
                         let contract_address = self.source_state_bridge_contract_address;
                         async move {
-                            Self::get_source_contract_event_chunk(
+                            Self::_get_source_contract_event_chunk(
                                 provider,
                                 contract_address,
                                 current_block,
@@ -208,5 +209,43 @@ impl ExecutionHttpProxy {
         }
 
         Ok(all_events)
+    }
+
+    async fn _get_proof(
+        client: RootProvider<Http<Client>>,
+        source_state_bridge_contract_address: Address,
+        storage_keys: Vec<B256>,
+        block_id: BlockId,
+    ) -> Result<EIP1186AccountProofResponse> {
+        let proof = client
+            .get_proof(source_state_bridge_contract_address, storage_keys)
+            .block_id(block_id)
+            .await;
+
+        match proof {
+            Ok(proof) => Ok(proof),
+            Err(e) => Err(anyhow!("ExecutionHttp RPC error: {e}")),
+        }
+    }
+
+    pub async fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<B256>,
+        block_id: BlockId,
+    ) -> Result<EIP1186AccountProofResponse> {
+        let proof = query_with_fallback(
+            &self.principal_provider,
+            &self.backup_providers,
+            |provider| {
+                let keys = keys.clone();
+                // use provider as the client here
+                async move { Self::_get_proof(provider, address, keys, block_id).await }
+                    .boxed()
+            },
+        )
+        .await?;
+
+        Ok(proof)
     }
 }
