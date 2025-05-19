@@ -1,6 +1,3 @@
-use std::{env, ops::Add};
-
-use crate::contract::bindings::NoriStateBridge::{self, TokensLocked};
 use alloy::{
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::Filter,
@@ -15,7 +12,8 @@ use futures::{
 };
 use log::{error, info, warn};
 use reqwest::{Client, Url};
-use tokio::time::{sleep, Duration};
+use std::env;
+use tokio::time::{sleep, timeout, Duration};
 
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
@@ -26,7 +24,9 @@ pub struct ExecutionHttpProxy {
     source_state_bridge_contract_address: Address,
 }
 
-async fn query_with_fallback<F, C, R>(
+const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub async fn query_with_fallback<F, C, R>(
     principle_provider: &C,
     backup_providers: &[C],
     f: F,
@@ -36,21 +36,39 @@ where
     C: Clone,
     R: 'static,
 {
-    match f(principle_provider.clone()).await {
-        Ok(result) => Ok(result),
-        Err(err) => {
+    match timeout(PROVIDER_TIMEOUT, f(principle_provider.clone())).await {
+        Ok(Ok(result)) => return Ok(result),
+        Ok(Err(err)) => {
             warn!("Principal provider failed: {}.", err);
-            if backup_providers.is_empty() {
-                return Err(err);
-            }
-            warn!("Trying backup providers...");
-            let backup_futures = backup_providers.iter().map(|provider| f(provider.clone()));
-
-            match select_ok(backup_futures).await {
-                Ok((result, _)) => Ok(result),
-                Err(e) => Err(anyhow!("All backups failed: {}", e)),
-            }
         }
+        Err(_) => {
+            warn!("Principal provider timed out after {:?}", PROVIDER_TIMEOUT);
+        }
+    }
+
+    if backup_providers.is_empty() {
+        return Err(anyhow!(
+            "Principal provider failed and no backups available."
+        ));
+    }
+
+    warn!("Trying backup providers...");
+
+    let backup_futures: Vec<BoxFuture<'static, Result<R>>> = backup_providers
+        .iter()
+        .map(|provider| {
+            let fut = f(provider.clone());
+            Box::pin(async move {
+                timeout(PROVIDER_TIMEOUT, fut)
+                    .await
+                    .map_err(|_| anyhow!("Provider timed out after {:?}", PROVIDER_TIMEOUT))?
+            }) as BoxFuture<'static, Result<R>>
+        })
+        .collect();
+
+    match select_ok(backup_futures).await {
+        Ok((result, _)) => Ok(result),
+        Err(e) => Err(anyhow!("All backups failed: {}", e)),
     }
 }
 
