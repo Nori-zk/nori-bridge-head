@@ -19,13 +19,13 @@ use tokio::time::{sleep, timeout, Duration};
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
+const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub struct ExecutionHttpProxy {
     principal_provider: RootProvider<Http<Client>>,
     backup_providers: Vec<RootProvider<Http<Client>>>,
     source_state_bridge_contract_address: Address,
 }
-
-const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub async fn query_with_fallback<F, C, R>(
     principal_provider: &C,
