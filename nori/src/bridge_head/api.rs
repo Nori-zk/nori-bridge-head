@@ -1,7 +1,5 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::finality_change_detector::{
-    start_helios_finality_change_detector, FinalityChangeMessage,
-};
+use super::finality_change_detector::start_helios_finality_change_detector;
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension, TransitionNoticeExtensionBridgeHeadAdvanced,
@@ -10,7 +8,7 @@ use super::notice_messages::{
     TransitionNoticeExtensionBridgeHeadStarted,
 };
 use super::validate::validate_env;
-use crate::helios::get_latest_finality_slot_and_store_hash;
+use crate::helios::{get_latest_finality_slot_and_store_hash, FinalityUpdateAndSlot};
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::FixedBytes;
@@ -103,19 +101,13 @@ pub struct BridgeHead {
     /// Channel for receiving bridge head commands
     command_rx: Option<mpsc::Receiver<Command>>,
     /// Chanel for receiving helios finality transition events
-    finality_rx: Option<mpsc::Receiver<FinalityChangeMessage>>,
+    finality_rx: Option<mpsc::Receiver<FinalityUpdateAndSlot>>,
     /// Channel for receiving job results
     job_rx: Option<mpsc::UnboundedReceiver<Result<ProverJobOutput, ProverJobError>>>,
     /// Channel for sending job results
     job_tx: mpsc::UnboundedSender<Result<ProverJobOutput, ProverJobError>>,
     /// Channel for emitting proof and notice events
     event_tx: broadcast::Sender<BridgeHeadEvent>,
-    /// Boolean for indicating a job should be issued on the next beacon slot change event
-    #[deprecated]
-    stage_transition_proof: bool,
-    /// Boolean indicating a cold start (prevents waiting for transition)
-    #[deprecated]
-    cold_start: bool,
     /// FixedBytes representing the store hash
     store_hash: FixedBytes<32>,
 }
@@ -127,7 +119,6 @@ impl BridgeHead {
         // Initialise slot head / commitee vars
         let current_slot;
         let store_hash;
-        let cold_start;
 
         // Start procedure
         if nb_checkpoint_exists() {
@@ -136,13 +127,11 @@ impl BridgeHead {
             let nb_checkpoint = load_nb_checkpoint().unwrap();
             current_slot = nb_checkpoint.slot;
             store_hash = nb_checkpoint.store_hash;
-            cold_start = false;
         } else {
             // Cold start procedure
             // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
             (current_slot, store_hash) = get_latest_finality_slot_and_store_hash().await.unwrap();
-            cold_start = true;
         }
 
         // Setup command mpsc
@@ -175,8 +164,6 @@ impl BridgeHead {
                 job_rx: Some(job_rx),
                 job_tx,
                 event_tx,
-                stage_transition_proof: false,
-                cold_start,
                 store_hash,
             },
         )
@@ -399,26 +386,6 @@ impl BridgeHead {
 
     /// Commands
 
-    // Stage transition proof generation
-    async fn stage_transition_proof(&mut self, slot: u64, store_hash: FixedBytes<32>) {
-        /*if self.cold_start {
-            // If we started cold run the first job regardless of if our next_slot = current_head
-            let _ = self.prepare_transition_proof().await;
-            self.cold_start = false;
-            return;
-        }
-
-        if self.next_slot > self.current_slot {
-            // Immediately do the transition proof job.
-            let _ = self.prepare_transition_proof().await;
-            self.stage_transition_proof = false;
-        } else {
-            // Wait for finality transition before doing the transition proof job.
-            self.stage_transition_proof = true;
-        }*/
-        let _ = self.prepare_transition_proof(slot, store_hash).await;
-    }
-
     // Advance the bridge head
     async fn advance(
         &mut self,
@@ -446,26 +413,21 @@ impl BridgeHead {
     }
 
     // Update next slot logic
-    async fn on_beacon_finality_change(&mut self, slot: u64) {
+    async fn on_beacon_finality_change(&mut self, event: FinalityUpdateAndSlot) {
         // Notify of transition
         let _ = self
             .trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
-                    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected { slot },
+                    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected { slot: event.slot, finality_update: event.finality_update },
                 ),
             )
             .await;
 
         // Update next head
-        self.next_slot = slot;
+        self.next_slot = event.slot;
 
         // Print the head change detection
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
-
-        // If we have a staged transition proof then attempt to run that job
-        /*if self.stage_transition_proof {
-            let _ = self.stage_transition_proof().await;
-        }*/
     }
 
     /// Event loop
@@ -491,13 +453,13 @@ impl BridgeHead {
             tokio::select! {
                 // Read the finality reciever for finality change events
                 Some(event) = finality_rx.recv() => {
-                    let _ = self.on_beacon_finality_change(event.slot).await;
+                    let _ = self.on_beacon_finality_change(event).await;
                 }
                 // Read the command receiver for input commands
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         Command::StageTransitionProof(message) => {
-                            let _ = self.stage_transition_proof(message.slot, message.store_hash).await;
+                            let _ = self.prepare_transition_proof(message.slot, message.store_hash).await;
                         }
                         Command::Advance(message) => {
                             // deal with advance invocation

@@ -143,6 +143,40 @@ pub async fn get_client_latest_finality_slot(
     Ok(finality_update.finalized_header().beacon().slot)
 }
 
+pub struct FinalityUpdateAndSlot {
+    pub finality_update: FinalityUpdate<MainnetConsensusSpec>,
+    pub slot: u64,
+}
+
+/// Fetch the latest finality update.
+pub async fn get_client_latest_finality_update_and_slot(
+    client: &Inner<MainnetConsensusSpec, HttpRpc>,
+) -> Result<FinalityUpdateAndSlot> {
+    // Get finality slot
+    let finality_update: FinalityUpdate<MainnetConsensusSpec> = client
+        .rpc
+        .get_finality_update()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
+
+    // Extract latest slot
+    Ok(FinalityUpdateAndSlot {slot: finality_update.finalized_header().beacon().slot, finality_update})
+}
+
+pub async fn get_client_latest_finality_update(
+    client: &Inner<MainnetConsensusSpec, HttpRpc>,
+) -> Result<FinalityUpdate<MainnetConsensusSpec> > {
+    // Get finality slot
+    let finality_update: FinalityUpdate<MainnetConsensusSpec> = client
+        .rpc
+        .get_finality_update()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
+
+    // Extract latest slot
+    Ok(finality_update)
+}
+
 /// Fetch updates for client.
 pub async fn get_updates(
     client: &Inner<MainnetConsensusSpec, HttpRpc>,

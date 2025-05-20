@@ -1,3 +1,5 @@
+use std::process;
+
 use super::{
     api::{BridgeHeadEvent, ProofMessage},
     handles::CommandHandle,
@@ -7,7 +9,8 @@ use crate::utils::{handle_nori_proof, handle_nori_proof_message};
 use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use log::{info, warn};
+use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::FinalityUpdate};
+use log::{info, warn, error};
 
 /// Event observer trait for handling bridge head events
 #[async_trait]
@@ -74,6 +77,8 @@ pub struct ExampleBridgeHeadEventObserver {
     store_hash: FixedBytes<32>,
     /// Boolean for indicating a job should be issued on the next beacon slot change event
     stage_transition_proof: bool,
+    /// Finality update
+    latest_finality_update: Option<FinalityUpdate<MainnetConsensusSpec>>,
 }
 
 impl ExampleBridgeHeadEventObserver {
@@ -85,6 +90,7 @@ impl ExampleBridgeHeadEventObserver {
             current_slot: 0,
             store_hash: FixedBytes::default(),
             stage_transition_proof: false,
+            latest_finality_update: None,
         }
     }
 
@@ -113,16 +119,14 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
 
             // Advance the head
             info!("Advancing the bridge head.");
-            self
-                .advance(proof_data.output_slot, proof_data.output_store_hash)
+            self.advance(proof_data.output_slot, proof_data.output_store_hash)
                 .await;
 
             // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
             if self.latest_beacon_finality_slot > self.current_slot {
                 info!("Latest beacon finality slot is advanced of our proofs output slot, starting a new job.");
-                self
-                    .bridge_head_handle
-                    .stage_transition_proof(self.current_slot, self.store_hash)
+                self.bridge_head_handle
+                    .stage_transition_proof(self.current_slot, self.store_hash, self.latest_finality_update.as_ref().unwrap().clone())
                     .await;
             } else {
                 info!("Latest beacon finality slot not is advanced of our proofs output slot, queuing a job for the next finality transition.");
@@ -158,7 +162,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
                 // that happened while this process was offline
 
-                if data.extension.latest_beacon_slot > self.current_slot {
+                /*if data.extension.latest_beacon_slot > self.current_slot {
                     info!("Staging a transition proof with input slot {}", self.current_slot);
                     let _ = self
                     .bridge_head_handle
@@ -168,7 +172,9 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 else {
                     info!("Current slot is {}, staging a job at the next finality transition.", self.current_slot);
                     self.stage_transition_proof = true;
-                }
+                }*/
+
+                self.stage_transition_proof = true;
             }
             TransitionNoticeBridgeHeadMessage::Warning(data) => {
                 info!("NOTICE_TYPE| Warning: {:?}", data.extension.message);
@@ -187,10 +193,16 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
 
                 // If there are no other jobs in the queue retry the failure
                 if data.extension.n_job_in_buffer == 0 {
-                    let _ = self
-                        .bridge_head_handle
-                        .stage_transition_proof(self.current_slot, self.store_hash)
-                        .await;
+                    if let Some(finality_update) = self.latest_finality_update.clone() {
+                        let _ = self
+                            .bridge_head_handle
+                            .stage_transition_proof(self.current_slot, self.store_hash, finality_update)
+                            .await;
+                    }
+                    else {
+                        error!("Tried to redo a job but finality update was not defined");
+                        process::exit(1);
+                    }
                 }
             }
             TransitionNoticeBridgeHeadMessage::FinalityTransitionDetected(data) => {
@@ -199,11 +211,12 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     data.extension.slot
                 );
                 self.latest_beacon_finality_slot = data.extension.slot;
+                self.latest_finality_update = Some(data.extension.finality_update.clone());
 
                 if self.stage_transition_proof {
                     let _ = self
                         .bridge_head_handle
-                        .stage_transition_proof(self.current_slot, self.store_hash)
+                        .stage_transition_proof(self.current_slot, self.store_hash, data.extension.finality_update.clone())
                         .await;
                     self.stage_transition_proof = false;
                 }

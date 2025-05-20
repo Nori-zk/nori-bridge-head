@@ -1,4 +1,6 @@
 use alloy_primitives::FixedBytes;
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
+use helios_consensus_core::types::FinalityUpdate;
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -81,6 +83,8 @@ pub struct TransitionNoticeExtensionBridgeHeadJobFailed {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected {
     pub slot: u64,
+    #[serde(skip_serializing)]
+    pub finality_update: FinalityUpdate<MainnetConsensusSpec>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -1,17 +1,12 @@
-use crate::helios::{get_client, get_client_latest_finality_slot, get_latest_checkpoint};
+use crate::helios::{get_client, get_client_latest_finality_slot, get_client_latest_finality_update_and_slot, get_latest_checkpoint, FinalityUpdateAndSlot};
 use log::{error, info};
 use std::{env, time::Duration};
 use tokio::sync::mpsc;
 
-/// Finality change message
-pub struct FinalityChangeMessage {
-    pub slot: u64,
-}
-
 /// Finality change detector
 pub async fn start_helios_finality_change_detector(
-    current_slot: u64,
-) -> (u64, tokio::sync::mpsc::Receiver<FinalityChangeMessage>) {
+    mut current_slot: u64,
+) -> (u64, tokio::sync::mpsc::Receiver<FinalityUpdateAndSlot>) {
     dotenv::dotenv().ok();
 
     // Define helios polling sleep interval
@@ -31,28 +26,31 @@ pub async fn start_helios_finality_change_detector(
     info!("Fetching helios latest finality head.");
 
     // Get latest slot
-    let mut init_latest_beacon_slot = get_client_latest_finality_slot(&helios_polling_client)
+
+    
+    let mut init_latest_beacon_slot  = get_client_latest_finality_slot(&helios_polling_client)
         .await
         .unwrap();
 
     // If we get an erronous slot from get_client_latest_finality_head then override it with the current_head
-    if current_slot > init_latest_beacon_slot {
+    /*if current_slot > init_latest_beacon_slot {
         init_latest_beacon_slot = current_slot;
-    }
+    }*/
 
     // Setup helios finality change mspc
     let (finality_tx, finality_rx) = mpsc::channel(1);
 
     // Create finality change detector
     tokio::spawn(async move {
-        let mut current_slot = init_latest_beacon_slot;
+        //let mut current_slot = init_latest_beacon_slot;
         loop {
-            match get_client_latest_finality_slot(&helios_polling_client).await {
-                Ok(next_slot) => {
-                    if next_slot > current_slot {
-                        current_slot = next_slot;
+            match get_client_latest_finality_update_and_slot(&helios_polling_client).await {
+                Ok(finality_and_slot_update) => {
+                    println!("What is going on with latest finality slot then...{}!!!!!!!!", finality_and_slot_update.slot);
+                    if finality_and_slot_update.slot > current_slot {
+                        current_slot = finality_and_slot_update.slot;
                         let _ = finality_tx
-                            .send(FinalityChangeMessage { slot: next_slot })
+                            .send(finality_and_slot_update)
                             .await;
                     }
                 }
