@@ -1,8 +1,11 @@
-use crate::helios::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates};
+use crate::{contract::bindings::{addresses_to_storage_slots, NoriStateBridge}, helios::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates}, rpcs::execution::http::ExecutionHttpProxy};
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
 use helios_consensus_core::{
-    apply_update, consensus_spec::MainnetConsensusSpec, types::LightClientStore, verify_update,
+    apply_update,
+    consensus_spec::MainnetConsensusSpec,
+    types::{FinalityUpdate, LightClientStore},
+    verify_update,
 };
 use helios_ethereum::rpc::ConsensusRpc;
 use log::info;
@@ -54,6 +57,7 @@ impl ProverJobOutput {
 pub async fn prepare_zk_program_input(
     input_slot: u64,
     store_hash: FixedBytes<32>,
+    finality_update: FinalityUpdate<MainnetConsensusSpec>,
 ) -> Result<Vec<u8>> {
     // Get latest beacon checkpoint
     let helios_checkpoint = get_checkpoint(input_slot).await?;
@@ -65,11 +69,11 @@ pub async fn prepare_zk_program_input(
 
     // Get finality update
     info!("Getting finality update from input slot {}", input_slot);
-    let finality_update = helios_update_client
-        .rpc
-        .get_finality_update()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;
+    /*let finality_update = helios_update_client
+    .rpc
+    .get_finality_update()
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to fetch finality update via RPC: {}", e))?;*/
 
     // Try and throw early if our finality_update beacon slot is not ahead of our input slot. As doing the proof would not yield any progress.
     // In operator/strategy make sure to prevent this.
@@ -141,19 +145,37 @@ pub async fn prepare_zk_program_input(
         }
     };
 
-    let finalized_input_block_number = store
+    let finalized_input_block_number = *store
         .finalized_header
         .execution()
-        .map_err(|_| anyhow::Error::msg("Failed to get input finalized execution header".to_string()))?
+        .map_err(|_| {
+            anyhow::Error::msg("Failed to get input finalized execution header".to_string())
+        })?
         .block_number();
 
     // Need to validate that we will advance!
 
-    let finalized_output_block_number = finality_update
+    let finalized_output_block_number = *finality_update
         .finalized_header()
         .execution()
-        .map_err(|_| anyhow::Error::msg("Failed to get output finalized execution header".to_string()))?
+        .map_err(|_| {
+            anyhow::Error::msg("Failed to get output finalized execution header".to_string())
+        })?
         .block_number();
+
+    // Now get contract events...
+
+    let proxy = ExecutionHttpProxy::try_from_env();
+
+    let contract_events = proxy
+        .get_source_contract_events::<NoriStateBridge::TokensLocked>(finalized_input_block_number, finalized_output_block_number)
+        .await?;
+
+    let storage_address_slots_map = addresses_to_storage_slots(contract_events)?;
+
+    for (address, storage_slot) in storage_address_slots_map.iter() {
+        println!("Storage slots obtained address '{:?}' storage_slot '{:?}'", address, storage_slot);
+    }
 
     // Create program inputs
     info!("Building sp1 proof inputs.");
@@ -185,10 +207,12 @@ pub async fn finality_update_job(
     job_id: u64,
     input_head: u64,
     store_hash: FixedBytes<32>,
+    finality_update: FinalityUpdate<MainnetConsensusSpec>,
 ) -> Result<ProverJobOutput> {
     // Encode proof inputs
     info!("Encoding sp1 proof inputs.");
-    let encoded_proof_inputs = prepare_zk_program_input(input_head, store_hash).await?;
+    let encoded_proof_inputs =
+        prepare_zk_program_input(input_head, store_hash, finality_update).await?;
 
     // Get proving key
     let pk = get_proving_key().await;

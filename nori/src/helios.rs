@@ -94,7 +94,7 @@ pub fn get_store_with_next_sync_committee(
 }
 
 /// Get the latest slot & store hash from the latest finality checkpoint.
-pub async fn get_latest_finality_slot_and_store_hash() -> Result<(u64, FixedBytes<32>)> {
+pub async fn get_latest_finality_slot_and_store_hash() -> Result<(u64, FinalityUpdate<MainnetConsensusSpec>, FixedBytes<32>)> {
     // Get latest beacon checkpoint
     info!("Fetching cold start client from latest checkpoint");
     let latest_checkpoint = get_latest_checkpoint().await?;
@@ -105,6 +105,9 @@ pub async fn get_latest_finality_slot_and_store_hash() -> Result<(u64, FixedByte
     // Get slot head from checkpoint
     let slot = helios_client.store.finalized_header.clone().beacon().slot;
     info!("Retrieved cold start slot: {} ", slot);
+
+    // Get finality update
+    let finality_update = get_client_latest_finality_update(&helios_client).await?;
 
     // Get sync update
     info!("Getting cold start first update");
@@ -125,7 +128,7 @@ pub async fn get_latest_finality_slot_and_store_hash() -> Result<(u64, FixedByte
     let store_hash = sha256_hash_helios_store(&synced_store)?;
     info!("Calculated cold start store hash: {}", store_hash);
 
-    Ok((slot, store_hash))
+    Ok((slot, finality_update, store_hash))
 }
 
 /// Fetch the latest finality slot height.

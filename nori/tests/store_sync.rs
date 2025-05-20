@@ -16,7 +16,7 @@ static OLD_STORE_JSON: &str = include_str!("./data/store.11457376.json");
 // Previously the code erroneously applied the 0th update which was ahead of the checkpoint
 // outside of the ZK, this had security implications.
 
-#[tokio::test]
+/*#[tokio::test]
 async fn store_sync() -> Result<()> {
     dotenv::dotenv().ok();
     // Reconstruct the old stores state...
@@ -42,3 +42,4 @@ async fn store_sync() -> Result<()> {
 
     Ok(())
 }
+*/

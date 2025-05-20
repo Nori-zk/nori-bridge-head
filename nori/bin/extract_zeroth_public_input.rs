@@ -1,18 +1,18 @@
 use std::{env, fs};
 
 use anyhow::Result;
-use nori::{helios::get_latest_finality_slot_and_store_hash, sp1_prover::finality_update_job};
+use nori::{helios::{get_client_latest_finality_update, get_client_latest_finality_update_and_slot, get_latest_finality_slot_and_store_hash}, sp1_prover::finality_update_job};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
     // Get latest head slot and store_hash.
-    let (current_slot, store_hash) = get_latest_finality_slot_and_store_hash().await.unwrap();
+    let (current_slot, finality_update, store_hash) = get_latest_finality_slot_and_store_hash().await.unwrap();
 
     // Run mock program.
     println!("Running SP1 prover");
-    let proof_outputs = finality_update_job(0, current_slot, store_hash)
+    let proof_outputs = finality_update_job(0, current_slot, store_hash, finality_update)
         .await
         .unwrap();
 

@@ -2,10 +2,11 @@ use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkp
 use super::finality_change_detector::start_helios_finality_change_detector;
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
-    TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension, TransitionNoticeExtensionBridgeHeadAdvanced,
-    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected, TransitionNoticeExtensionBridgeHeadJobCreated,
+    TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension,
+    TransitionNoticeExtensionBridgeHeadAdvanced, TransitionNoticeExtensionBridgeHeadJobCreated,
     TransitionNoticeExtensionBridgeHeadJobFailed, TransitionNoticeExtensionBridgeHeadJobSucceeded,
     TransitionNoticeExtensionBridgeHeadStarted,
+    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected,
 };
 use super::validate::validate_env;
 use crate::helios::{get_latest_finality_slot_and_store_hash, FinalityUpdateAndSlot};
@@ -14,6 +15,8 @@ use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
+use helios_consensus_core::types::FinalityUpdate;
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
@@ -131,7 +134,8 @@ impl BridgeHead {
             // Cold start procedure
             // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
-            (current_slot, store_hash) = get_latest_finality_slot_and_store_hash().await.unwrap();
+            (current_slot, _, store_hash) =
+                get_latest_finality_slot_and_store_hash().await.unwrap();
         }
 
         // Setup command mpsc
@@ -218,11 +222,7 @@ impl BridgeHead {
 
             self.prover_jobs.remove(&job_id);
 
-            (
-                input_slot,
-                input_store_hash,
-                elapsed_sec,
-            )
+            (input_slot, input_store_hash, elapsed_sec)
         };
 
         info!("Job '{}' finished in {} seconds.", job_id, elapsed_sec);
@@ -320,7 +320,12 @@ impl BridgeHead {
     }
 
     // Create prover job
-    async fn prepare_transition_proof(&mut self, slot: u64, store_hash: FixedBytes<32>) {
+    async fn prepare_transition_proof(
+        &mut self,
+        slot: u64,
+        store_hash: FixedBytes<32>,
+        finality_update: FinalityUpdate<MainnetConsensusSpec>,
+    ) {
         // Get job id
         self.job_id += 1;
         let job_id: u64 = self.job_id;
@@ -352,12 +357,8 @@ impl BridgeHead {
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
             // Execute job
-            let proof_result = finality_update_job(
-                job_id,
-                current_slot_clone,
-                store_hash,
-            )
-            .await;
+            let proof_result =
+                finality_update_job(job_id, current_slot_clone, store_hash, finality_update).await;
 
             // Send appropriate tx Ok or Err
             match proof_result {
@@ -387,11 +388,7 @@ impl BridgeHead {
     /// Commands
 
     // Advance the bridge head
-    async fn advance(
-        &mut self,
-        slot: u64,
-        store_hash: FixedBytes<32>,
-    ) {
+    async fn advance(&mut self, slot: u64, store_hash: FixedBytes<32>) {
         // Update current head
         self.current_slot = slot;
 
@@ -404,10 +401,7 @@ impl BridgeHead {
         // Notify of head advanced
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::HeadAdvanced(
-                TransitionNoticeExtensionBridgeHeadAdvanced {
-                    slot,
-                    store_hash,
-                },
+                TransitionNoticeExtensionBridgeHeadAdvanced { slot, store_hash },
             ))
             .await;
     }
@@ -418,7 +412,10 @@ impl BridgeHead {
         let _ = self
             .trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
-                    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected { slot: event.slot, finality_update: event.finality_update },
+                    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected {
+                        slot: event.slot,
+                        finality_update: event.finality_update,
+                    },
                 ),
             )
             .await;
@@ -459,7 +456,7 @@ impl BridgeHead {
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         Command::StageTransitionProof(message) => {
-                            let _ = self.prepare_transition_proof(message.slot, message.store_hash).await;
+                            let _ = self.prepare_transition_proof(message.slot, message.store_hash, message.finality_update).await;
                         }
                         Command::Advance(message) => {
                             // deal with advance invocation

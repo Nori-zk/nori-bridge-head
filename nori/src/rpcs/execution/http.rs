@@ -16,6 +16,8 @@ use reqwest::{Client, Url};
 use std::env;
 use tokio::time::{sleep, timeout, Duration};
 
+use crate::contract::bindings::get_source_contract_address;
+
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
@@ -102,11 +104,11 @@ impl ExecutionHttpProxy {
 
         let principal_provider = providers.remove(0);
 
-        let source_state_bridge_contract_address =
-            env::var("NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS")
+        let source_state_bridge_contract_address = get_source_contract_address()?;
+            /*env::var("NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS")
                 .context("Missing NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS in environment")?
                 .parse::<Address>()
-                .context("Invalid Ethereum address format")?;
+                .context("Invalid Ethereum address format")?;*/
 
         Ok(ExecutionHttpProxy {
             source_state_bridge_contract_address,
@@ -248,4 +250,6 @@ impl ExecutionHttpProxy {
 
         Ok(proof)
     }
+
+    
 }

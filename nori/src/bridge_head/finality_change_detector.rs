@@ -46,7 +46,7 @@ pub async fn start_helios_finality_change_detector(
         loop {
             match get_client_latest_finality_update_and_slot(&helios_polling_client).await {
                 Ok(finality_and_slot_update) => {
-                    println!("What is going on with latest finality slot then...{}!!!!!!!!", finality_and_slot_update.slot);
+                    //println!("What is going on with latest finality slot then...{}!!!!!!!!", finality_and_slot_update.slot);
                     if finality_and_slot_update.slot > current_slot {
                         current_slot = finality_and_slot_update.slot;
                         let _ = finality_tx
