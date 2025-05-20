@@ -1,4 +1,11 @@
-use crate::{contract::bindings::{addresses_to_storage_slots, NoriStateBridge}, helios::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates}, rpcs::execution::http::ExecutionHttpProxy};
+use crate::{
+    contract::bindings::{
+        addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,
+    },
+    helios::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates},
+    rpcs::execution::http::ExecutionHttpProxy,
+};
+use alloy::eips::BlockId;
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
 use helios_consensus_core::{
@@ -168,14 +175,29 @@ pub async fn prepare_zk_program_input(
     let proxy = ExecutionHttpProxy::try_from_env();
 
     let contract_events = proxy
-        .get_source_contract_events::<NoriStateBridge::TokensLocked>(finalized_input_block_number, finalized_output_block_number)
+        .get_source_contract_events::<NoriStateBridge::TokensLocked>(
+            finalized_input_block_number,
+            finalized_output_block_number,
+        )
         .await?;
 
     let storage_address_slots_map = addresses_to_storage_slots(contract_events)?;
 
     for (address, storage_slot) in storage_address_slots_map.iter() {
-        println!("Storage slots obtained address '{:?}' storage_slot '{:?}'", address, storage_slot);
+        println!(
+            "Storage slots obtained address '{:?}' storage_slot '{:?}'",
+            address, storage_slot
+        );
     }
+
+    // Get mpt proof
+    let mpt_account_proof = proxy.get_proof(
+        get_source_contract_address()?,
+        storage_address_slots_map.values().cloned().collect(),
+        BlockId::number(finalized_output_block_number),
+    ).await?;
+
+    info!("mpt_account_proof {:?}", serde_json::to_string(&mpt_account_proof));
 
     // Create program inputs
     info!("Building sp1 proof inputs.");
