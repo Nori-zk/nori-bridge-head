@@ -458,7 +458,7 @@ impl BridgeHead {
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         Command::StageTransitionProof(message) => {
-                            let _ = self.prepare_transition_proof(message.slot, message.store_hash, message.finality_update).await;
+                            let _ = self.prepare_transition_proof(message.input_slot, message.store_hash, message.finality_update).await;
                         }
                         Command::Advance(message) => {
                             // deal with advance invocation

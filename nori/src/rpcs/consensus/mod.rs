@@ -27,7 +27,7 @@ use super::multiplex;
 
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 const CONENSUS_RPCS_ENV_VAR: &str = "CONSENSUS_RPCS_LIST";
-const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
+pub const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct Client<S: ConsensusSpec, R: ConsensusRpc<S>> {
     inner: Inner<S, R>,
@@ -499,30 +499,31 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                         Client::<S, R>::prepare_proof_inputs(&url, input_slot, store_hash).await?;
 
                     // Run the CPU-heavy program and slot validation inside spawn_blocking
-                    let (output_slot, validated_proof_inputs) = tokio::task::spawn_blocking(move || {
-                        // Run program logic
-                        let proof_outputs = program(proof_inputs.clone())?;
+                    let (output_slot, validated_proof_inputs) =
+                        tokio::task::spawn_blocking(move || {
+                            // Run program logic
+                            let proof_outputs = program(proof_inputs.clone())?;
 
-                        // Convert newHead to u64
-                        let new_slot = proof_outputs.newHead;
-                        let new_slot_bytes: [u8; 32] = new_slot.to_be_bytes();
-                        let new_slot_u64_bytes: [u8; 8] = new_slot_bytes[24..32]
-                            .try_into()
-                            .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
-                        let output_slot = u64::from_be_bytes(new_slot_u64_bytes);
+                            // Convert newHead to u64
+                            let new_slot = proof_outputs.newHead;
+                            let new_slot_bytes: [u8; 32] = new_slot.to_be_bytes();
+                            let new_slot_u64_bytes: [u8; 8] = new_slot_bytes[24..32]
+                                .try_into()
+                                .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
+                            let output_slot = u64::from_be_bytes(new_slot_u64_bytes);
 
-                        // Validate progression
-                        if output_slot <= input_slot {
-                            return Err(anyhow::anyhow!(
-                                "Output slot {} was not greater than input slot {}",
-                                output_slot,
-                                input_slot
-                            ));
-                        }
+                            // Validate progression
+                            if output_slot <= input_slot {
+                                return Err(anyhow::anyhow!(
+                                    "Output slot {} was not greater than input slot {}",
+                                    output_slot,
+                                    input_slot
+                                ));
+                            }
 
-                        Ok((output_slot, proof_inputs))
-                    })
-                    .await??;
+                            Ok((output_slot, proof_inputs))
+                        })
+                        .await??;
 
                     Ok((input_slot, output_slot, validated_proof_inputs))
                 }
@@ -541,8 +542,27 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         // but leaving this for now.
         Client::<S, R>::get_latest_finality_slot_and_store_hash(&self.principal_provider_url).await
     }
-}
 
+    // Get latest_finality_slot
+    pub async fn get_latest_finality_slot(&self) -> Result<u64> {
+        multiplex(
+            |url| {
+                let url = url.clone();
+                async move {
+                    let checkpoint = Client::<S, R>::get_latest_checkpoint().await?;
+                    let client =
+                        Client::<S, R>::bootstrap_from_checkpoint(&url, checkpoint).await?;
+                    client.get_latest_finality_slot().await
+                }
+                .boxed()
+            },
+            &self.all_providers_urls,
+            PROVIDER_TIMEOUT,
+        )
+        .await
+    }
+}
+/*
 /// Updates a cloned `LightClientStore` with next sync committee data from the provided update.
 ///
 /// This function:
@@ -984,3 +1004,4 @@ pub async fn prepare_proof_inputs(
 
     Ok((input_slot, proof_inputs))
 }
+*/
