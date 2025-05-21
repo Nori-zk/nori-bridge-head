@@ -490,34 +490,41 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     ) -> Result<(u64, u64, ProofInputs<S>)> {
         multiplex(
             |url| {
-                let url = url.clone(); // move into async block
+                //let url = url.clone();
+                let input_slot = input_slot;
+                let store_hash = store_hash; // Clone?
                 async move {
-                    // Prepare inputs
+                    // Fetch proof_inputs
                     let proof_inputs =
                         Client::<S, R>::prepare_proof_inputs(&url, input_slot, store_hash).await?;
 
-                    // Compute ZK program outside of ZK (ensures this proof will actually work and the endpoint did not give us fraudulent data)
-                    let proof_outputs = program(proof_inputs.clone())?;
+                    // Run the CPU-heavy program and slot validation inside spawn_blocking
+                    let (output_slot, validated_proof_inputs) = tokio::task::spawn_blocking(move || {
+                        // Run program logic
+                        let proof_outputs = program(proof_inputs.clone())?;
 
-                    // Enforce proof progressed the state of the client
-                    let new_slot = proof_outputs.newHead;
-                    let new_slot_bytes: [u8; 32] = new_slot.to_be_bytes();
-                    // Extract the last 8 bytes (least significant bytes in big-endian)
-                    let new_slot_u64_bytes: [u8; 8] = new_slot_bytes[24..32]
-                        .try_into()
-                        .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
-                    // Convert the bytes to u64 using big-endian interpretation
-                    let output_slot = u64::from_be_bytes(new_slot_u64_bytes);
+                        // Convert newHead to u64
+                        let new_slot = proof_outputs.newHead;
+                        let new_slot_bytes: [u8; 32] = new_slot.to_be_bytes();
+                        let new_slot_u64_bytes: [u8; 8] = new_slot_bytes[24..32]
+                            .try_into()
+                            .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
+                        let output_slot = u64::from_be_bytes(new_slot_u64_bytes);
 
-                    if output_slot <= input_slot {
-                        return Err(anyhow::anyhow!(
-                            "Output slot {} was not greater than input slot {}",
-                            output_slot,
-                            input_slot
-                        ));
-                    }
+                        // Validate progression
+                        if output_slot <= input_slot {
+                            return Err(anyhow::anyhow!(
+                                "Output slot {} was not greater than input slot {}",
+                                output_slot,
+                                input_slot
+                            ));
+                        }
 
-                    Ok((input_slot, output_slot, proof_inputs))
+                        Ok((output_slot, proof_inputs))
+                    })
+                    .await??;
+
+                    Ok((input_slot, output_slot, validated_proof_inputs))
                 }
                 .boxed()
             },
