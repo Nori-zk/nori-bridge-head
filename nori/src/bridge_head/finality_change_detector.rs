@@ -53,10 +53,15 @@ where
 
     (job_tx, result_rx)
 }
+struct DetectorState {
+    current_slot: u64,
+    current_store_hash: FixedBytes<32>,
+    in_flight: bool,
+}
 
 pub async fn start_validated_consensus_finality_change_detector<S, R>(
-    mut current_slot: u64,
-    mut current_store_hash: FixedBytes<32>,
+    slot: u64,
+    store_hash: FixedBytes<32>,
 ) -> (
     u64,
     mpsc::Receiver<FinalityChangeDetectorOutput<S>>,
@@ -80,52 +85,44 @@ where
             .await
             .unwrap();
 
-    // Channels for finality detector output and input updates
     let (finality_output_tx, finality_output_rx) = mpsc::channel(1);
-    let (finality_input_tx, mut finality_input_rx) =
-        mpsc::channel::<FinalityChangeDetectorInput>(1);
-
-    // Channels for validation actor (job requests and results)
-    let (validation_job_tx, mut validation_result_rx) =
-        validate_and_prepare_proof_inputs_actor::<S, R>();
+    let (finality_input_tx, mut finality_input_rx) = mpsc::channel::<FinalityChangeDetectorInput>(1);
+    let (validation_job_tx, mut validation_result_rx) = validate_and_prepare_proof_inputs_actor::<S, R>();
 
     tokio::spawn(async move {
-        // State tracking
-        //let mut current_slot = slot;
-        //let mut current_store_hash = store_hash;
-        let mut in_flight = false; // indicates if validation request is outstanding
+        let mut state = DetectorState {
+            current_slot: slot,
+            current_store_hash: store_hash,
+            in_flight: false,
+        };
 
         let mut tick_interval = interval(Duration::from_secs_f64(polling_interval_sec));
 
         loop {
             tokio::select! {
-                // Receive input updates
                 Some(update) = finality_input_rx.recv() => {
-                    current_slot = update.slot;
-                    current_store_hash = update.store_hash;
+                    state.current_slot = update.slot;
+                    state.current_store_hash = update.store_hash;
                 },
 
-                // Receive validation results
                 Some(result) = validation_result_rx.recv() => {
-                    in_flight = false;
+                    state.in_flight = false;
 
                     match result {
                         Ok((input_slot, output_slot, validated_proof_inputs)) => {
-                            // Only emit output if the input_slot matches current
-                            if input_slot == current_slot {
+                            if input_slot == state.current_slot {
                                 if finality_output_tx.send(FinalityChangeDetectorOutput {
                                     input_slot,
                                     output_slot,
                                     validated_proof_inputs,
                                 }).await.is_err() {
-                                    // Receiver dropped, exit task
                                     break;
                                 }
                             } else {
                                 log::warn!(
                                     "Stale validation result received. result input_slot: '{}', current slot: '{}'. Ignoring.",
                                     input_slot,
-                                    current_slot
+                                    state.current_slot
                                 );
                             }
                         }
@@ -135,32 +132,25 @@ where
                     }
                 },
 
-                // Tick event - try to start validation if none in-flight
                 _ = tick_interval.tick() => {
-                    if !in_flight {
-
+                    if !state.in_flight {
                         let job = FinalityChangeDetectorInput {
-                            slot: current_slot,
-                            store_hash: current_store_hash,
+                            slot: state.current_slot,
+                            store_hash: state.current_store_hash,
                         };
                         if validation_job_tx.send(job).await.is_ok() {
-                            in_flight = true;
+                            state.in_flight = true;
                         } else {
                             log::error!("Validation actor job channel closed unexpectedly.");
-                            break; // stop the loop if sending jobs is impossible
+                            break;
                         }
                     }
                 }
             }
-            // Change detector broke
             error!("Change detector broke");
             process::exit(1);
         }
     });
 
-    (
-        init_latest_beacon_slot,
-        finality_output_rx,
-        finality_input_tx,
-    )
+    (init_latest_beacon_slot, finality_output_rx, finality_input_tx)
 }
