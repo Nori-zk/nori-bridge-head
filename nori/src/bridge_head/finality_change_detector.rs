@@ -86,8 +86,10 @@ where
             .unwrap();
 
     let (finality_output_tx, finality_output_rx) = mpsc::channel(1);
-    let (finality_input_tx, mut finality_input_rx) = mpsc::channel::<FinalityChangeDetectorInput>(1);
-    let (validation_job_tx, mut validation_result_rx) = validate_and_prepare_proof_inputs_actor::<S, R>();
+    let (finality_input_tx, mut finality_input_rx) =
+        mpsc::channel::<FinalityChangeDetectorInput>(1);
+    let (validation_job_tx, mut validation_result_rx) =
+        validate_and_prepare_proof_inputs_actor::<S, R>();
 
     tokio::spawn(async move {
         let mut state = DetectorState {
@@ -147,10 +149,14 @@ where
                     }
                 }
             }
-            error!("Change detector broke");
-            process::exit(1);
         }
+        error!("Change detector broke");
+        process::exit(1);
     });
 
-    (init_latest_beacon_slot, finality_output_rx, finality_input_tx)
+    (
+        init_latest_beacon_slot,
+        finality_output_rx,
+        finality_input_tx,
+    )
 }
