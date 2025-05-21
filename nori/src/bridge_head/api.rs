@@ -244,6 +244,8 @@ impl BridgeHead {
         // Get the store hash
         let output_store_hash = proof_outputs.store_hash;
 
+        info!("...proof_outputs.next_sync_committee_hash {}", proof_outputs.next_sync_committee_hash);
+
         // Notify of a succesful job
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobSucceeded(
