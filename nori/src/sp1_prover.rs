@@ -2,14 +2,17 @@ use crate::{
     contract::bindings::{
         addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,
     },
-    rpcs::{consensus::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates}, execution::http::ExecutionHttpProxy},
+    rpcs::{
+        //consensus::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates},
+        execution::http::ExecutionHttpProxy,
+    },
 };
 use alloy::eips::BlockId;
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
 use helios_consensus_core::{
     apply_update,
-    consensus_spec::MainnetConsensusSpec,
+    consensus_spec::{ConsensusSpec, MainnetConsensusSpec},
     types::{FinalityUpdate, LightClientStore},
     verify_update,
 };
@@ -60,7 +63,7 @@ impl ProverJobOutput {
 /// * `input_head` - Target slot number to prove from up until current finality head
 /// * `last_next_sync_committee` -  The previous hash of next_sync_committee
 /// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
-pub async fn prepare_zk_program_input(
+/*pub async fn prepare_zk_program_input(
     input_slot: u64,
     store_hash: FixedBytes<32>,
     finality_update: FinalityUpdate<MainnetConsensusSpec>,
@@ -217,6 +220,7 @@ pub async fn prepare_zk_program_input(
     info!("Encoded sp1 proof inputs.");
     Ok(encoded_proof_inputs)
 }
+*/
 
 /// Generates a ZK proof for a finality update at the given slot
 ///
@@ -227,13 +231,70 @@ pub async fn prepare_zk_program_input(
 pub async fn finality_update_job(
     job_id: u64,
     input_head: u64,
-    store_hash: FixedBytes<32>,
-    finality_update: FinalityUpdate<MainnetConsensusSpec>,
+    inputs: ProofInputs<MainnetConsensusSpec>,
+    //store_hash: FixedBytes<32>,
+    //finality_update: FinalityUpdate<MainnetConsensusSpec>,
 ) -> Result<ProverJobOutput> {
+    // Prepare mpt proof inputs
+    let finalized_input_block_number = *inputs.store
+        .finalized_header
+        .execution()
+        .map_err(|_| {
+            anyhow::Error::msg("Failed to get input finalized execution header".to_string())
+        })?
+        .block_number();
+
+    // Need to validate that we will advance!
+
+    let finalized_output_block_number = *inputs.finality_update
+        .finalized_header()
+        .execution()
+        .map_err(|_| {
+            anyhow::Error::msg("Failed to get output finalized execution header".to_string())
+        })?
+        .block_number();
+
+    // Now get contract events...
+
+    let proxy = ExecutionHttpProxy::try_from_env();
+
+    let contract_events = proxy
+        .get_source_contract_events::<NoriStateBridge::TokensLocked>(
+            finalized_input_block_number,
+            finalized_output_block_number,
+        )
+        .await?;
+
+    let storage_address_slots_map = addresses_to_storage_slots(contract_events)?;
+
+    for (address, storage_slot) in storage_address_slots_map.iter() {
+        println!(
+            "Storage slots obtained address '{:?}' storage_slot '{:?}'",
+            address, storage_slot
+        );
+    }
+
+    // Get mpt proof
+    let mpt_account_proof = proxy
+        .get_proof(
+            get_source_contract_address()?,
+            storage_address_slots_map.values().cloned().collect(),
+            BlockId::number(finalized_output_block_number),
+        )
+        .await?;
+
+    info!(
+        "mpt_account_proof {:?}",
+        serde_json::to_string(&mpt_account_proof)
+    );
+
     // Encode proof inputs
     info!("Encoding sp1 proof inputs.");
-    let encoded_proof_inputs =
-        prepare_zk_program_input(input_head, store_hash, finality_update).await?;
+    let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
+    info!("Encoded sp1 proof inputs.");
+
+    /*let encoded_proof_inputs =
+    prepare_zk_program_input(input_head, store_hash, finality_update).await?;*/
 
     // Get proving key
     let pk = get_proving_key().await;
