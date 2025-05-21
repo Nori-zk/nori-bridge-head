@@ -466,11 +466,24 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         ConsensusHttpProxy::<S, R>::from_env().unwrap()
     }
 
-    /// Encodes a prepared helio store ready for a sp1 helio slot transition proof
+    /// Queries RPC providers for raw state updates, locally constructs proof inputs,
+    /// and runs the zkVM consensus logic in native code (not in a VM or zk prover),
+    /// simulating the state transition and verifying its validity.
+    ///
+    /// This validation ensures the transition from `input_slot` to `output_slot`
+    /// is consistent with consensus rules before any zk proof is generated.
+    ///
     /// # Arguments
-    /// * `input_head` - Target slot number to prove from up until current finality head
-    /// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
-    pub async fn prepare_proof_inputs(
+    /// * `input_slot` - The starting slot number for the state transition.
+    /// * `store_hash` - The hash of the client store state at the `input_slot`.
+    ///
+    /// # Returns
+    /// Tuple of (input slot, output slot, validated proof inputs).
+    ///
+    /// # Errors
+    /// Returns an error if the transition is invalid or if all providers fail to supply
+    /// valid raw updates that produce a consistent state transition.
+    pub async fn validate_and_prepare_proof_inputs(
         &self,
         input_slot: u64,
         store_hash: FixedBytes<32>,
