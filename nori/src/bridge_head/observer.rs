@@ -10,7 +10,8 @@ use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::FinalityUpdate};
-use log::{info, warn, error};
+use log::{error, info, warn};
+use nori_sp1_helios_primitives::types::ProofInputs;
 
 /// Event observer trait for handling bridge head events
 #[async_trait]
@@ -77,8 +78,8 @@ pub struct ExampleBridgeHeadEventObserver {
     store_hash: FixedBytes<32>,
     /// Boolean for indicating a job should be issued on the next beacon slot change event
     stage_transition_proof: bool,
-    /// Finality update
-    latest_finality_update: Option<FinalityUpdate<MainnetConsensusSpec>>,
+    /// Latest validated proof input
+    latest_validated_proof_input: Option<ProofInputs<MainnetConsensusSpec>>,
 }
 
 impl ExampleBridgeHeadEventObserver {
@@ -90,7 +91,7 @@ impl ExampleBridgeHeadEventObserver {
             current_slot: 0,
             store_hash: FixedBytes::default(),
             stage_transition_proof: false,
-            latest_finality_update: None,
+            latest_validated_proof_input: None,
         }
     }
 
@@ -109,8 +110,39 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
     async fn on_transition_proof_succeeded(&mut self, proof_data: ProofMessage) -> Result<()> {
         println!("PROOF| {}", proof_data.input_slot);
 
-        // Double check our proof actually advanced the head
+        info!("Saving Nori sp1 proof.");
+        let _ = handle_nori_proof(&proof_data.proof, proof_data.input_slot).await;
+        let _ = handle_nori_proof_message(&proof_data).await;
+
         if proof_data.output_slot > self.current_slot {
+            info!("Proof advanced the bridge head.");
+        }
+        else {
+            warn!("PROOF DID NOT ADVANCE BRIDGE HEAD");
+            warn!("PROOF DID NOT ADVANCE BRIDGE HEAD");
+            warn!("PROOF DID NOT ADVANCE BRIDGE HEAD");
+        }
+        // Advance the head
+        info!("Advancing the bridge head.");
+        self.advance(proof_data.output_slot, proof_data.output_store_hash)
+            .await;
+
+        // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
+        if self.latest_beacon_finality_slot > self.current_slot {
+            info!("Latest beacon finality slot is advanced of our proofs output slot, starting a new job.");
+            self.bridge_head_handle
+                .stage_transition_proof(
+                    self.current_slot,
+                    self.latest_validated_proof_input.as_ref().unwrap().clone(),
+                )
+                .await;
+        } else {
+            info!("Latest beacon finality slot not is advanced of our proofs output slot, queuing a job for the next finality transition.");
+            self.stage_transition_proof = true;
+        }
+
+        // Double check our proof actually advanced the head
+        /*if proof_data.output_slot > self.current_slot {
             info!("Proof advanced the bridge head.");
 
             info!("Saving Nori sp1 proof.");
@@ -126,7 +158,10 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             if self.latest_beacon_finality_slot > self.current_slot {
                 info!("Latest beacon finality slot is advanced of our proofs output slot, starting a new job.");
                 self.bridge_head_handle
-                    .stage_transition_proof(self.current_slot, self.store_hash, self.latest_finality_update.as_ref().unwrap().clone())
+                    .stage_transition_proof(
+                        self.current_slot,
+                        self.latest_validated_proof_input.as_ref().unwrap().clone(),
+                    )
                     .await;
             } else {
                 info!("Latest beacon finality slot not is advanced of our proofs output slot, queuing a job for the next finality transition.");
@@ -135,7 +170,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         } else {
             info!("Proof failed to advance the bridge head. Proof slot {}, bridge head slot {}. Queuing another job for the next finality transition.", proof_data.output_slot, self.current_slot);
             self.stage_transition_proof = true;
-        }
+        }*/
 
         Ok(())
     }
@@ -193,13 +228,12 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
 
                 // If there are no other jobs in the queue retry the failure
                 if data.extension.n_job_in_buffer == 0 {
-                    if let Some(finality_update) = self.latest_finality_update.clone() {
+                    if let Some(proof_input) = self.latest_validated_proof_input.clone() {
                         let _ = self
                             .bridge_head_handle
-                            .stage_transition_proof(self.current_slot, self.store_hash, finality_update)
+                            .stage_transition_proof(self.current_slot, proof_input)
                             .await;
-                    }
-                    else {
+                    } else {
                         error!("Tried to redo a job but finality update was not defined");
                         process::exit(1);
                     }
@@ -210,13 +244,17 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     "NOTICE_TYPE| Finality Transition Detected: {:?}",
                     data.extension.slot
                 );
+
                 self.latest_beacon_finality_slot = data.extension.slot;
-                self.latest_finality_update = Some(data.extension.finality_update.clone());
+                self.latest_validated_proof_input = Some(*data.extension.proof_inputs.clone());
 
                 if self.stage_transition_proof {
                     let _ = self
                         .bridge_head_handle
-                        .stage_transition_proof(self.current_slot, self.store_hash, data.extension.finality_update.clone())
+                        .stage_transition_proof(
+                            self.current_slot,
+                            *data.extension.proof_inputs.clone(),
+                        )
                         .await;
                     self.stage_transition_proof = false;
                 }

@@ -17,9 +17,9 @@ path = "./bin/extract_zeroth_public_input.rs"
 name = "contract_watcher"
 path = "./bin/contract_watcher.rs"
 
-[[bin]]
-name = "finality_change_detector"
-path = "./bin/finality_change_detector.rs"
+#[[bin]]
+#name = "finality_change_detector"
+#path = "./bin/finality_change_detector.rs"
 
 [lib]
 path = "src/lib.rs"

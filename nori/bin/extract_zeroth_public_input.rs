@@ -1,18 +1,27 @@
-use std::{env, fs};
-
 use anyhow::Result;
-use nori::{rpcs::consensus::{get_client_latest_finality_update, get_client_latest_finality_update_and_slot, get_latest_finality_slot_and_store_hash}, sp1_prover::finality_update_job};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
+use helios_ethereum::rpc::http_rpc::HttpRpc;
+use nori::{rpcs::consensus::ConsensusHttpProxy, sp1_prover::finality_update_job};
+use std::{env, fs};
+//use nori::{rpcs::consensus::{get_client_latest_finality_update, get_client_latest_finality_update_and_slot, get_latest_finality_slot_and_store_hash}, sp1_prover::finality_update_job};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
-    // Get latest head slot and store_hash.
-    let (current_slot, finality_update, store_hash) = get_latest_finality_slot_and_store_hash().await.unwrap();
+    let consensus_client = ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env();
+    let (current_slot, store_hash) = consensus_client
+        .get_latest_finality_slot_and_store_hash()
+        .await
+        .unwrap();
+    let proof_inputs = consensus_client
+        .prepare_proof_inputs(current_slot, store_hash)
+        .await
+        .unwrap();
 
     // Run mock program.
     println!("Running SP1 prover");
-    let proof_outputs = finality_update_job(0, current_slot, store_hash, finality_update)
+    let proof_outputs = finality_update_job(0, current_slot, proof_inputs) // store_hash, finality_update
         .await
         .unwrap();
 

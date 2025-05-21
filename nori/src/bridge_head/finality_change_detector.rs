@@ -16,17 +16,43 @@ use crate::rpcs::consensus::ConsensusHttpProxy;
 // We continuously query until we have some change... which we will have validated if we dont get any response from validate_and_prepare_proof_inputs
 // When we do have change we emit the input output slots along with the proof_inputs to the bridge head to be forwarded to any observer.
 
+/// Represents an input job for the finality change detector.
+///
+/// Contains the beacon slot number and the associated consensus store hash from which we want prove a transition proof from.
 pub struct FinalityChangeDetectorInput {
+    /// The beacon slot number which indicates where we are proving from during the transition proof
     pub slot: u64,
+    /// The consensus store hash corresponding to the slot.
     pub store_hash: FixedBytes<32>,
 }
 
+/// Spawns an asynchronous actor responsible for querying RPC providers and locally validating
+/// consensus state transitions via `validate_and_prepare_proof_inputs`.
+///
+/// This actor receives validation jobs specifying an `input_slot` and `store_hash`.
+/// For each job, it calls the consensus RPC proxy to:
+/// - fetch raw updates,
+/// - simulate the zkVM consensus logic that will be applied but does so natively to avoid the expense,
+/// - and validate the state transition from `input_slot` to `output_slot`.
+///
+/// On success, the actor sends back a tuple `(input_slot, output_slot, validated_proof_inputs)`
+/// representing the fully validated transition inputs suitable for zk proof generation.
+///
+/// On failure, it sends an error via the results channel indicating invalid transitions
+/// or issues with provider data, instead of returning directly.
+///
+/// # Returns
+/// A tuple containing:
+/// - `mpsc::Sender<FinalityChangeDetectorInput>`: channel to submit validation jobs.
+/// - `mpsc::Receiver<Result<(u64, u64, ProofInputs<S>), anyhow::Error>>`: channel to receive validation results.
 pub struct FinalityChangeDetectorOutput<S: ConsensusSpec> {
+    /// The beacon slot number from which the transition proof was generated.
     pub input_slot: u64,
+    /// The beacon slot number that the transition proof targets.
     pub output_slot: u64,
+    /// The validated proof inputs for the slot transition.
     pub validated_proof_inputs: ProofInputs<S>,
 }
-
 pub fn validate_and_prepare_proof_inputs_actor<S, R>() -> (
     mpsc::Sender<FinalityChangeDetectorInput>,
     mpsc::Receiver<Result<(u64, u64, ProofInputs<S>), anyhow::Error>>,
@@ -54,6 +80,43 @@ where
     (job_tx, result_rx)
 }
 
+/// Spawns a continuous finality change detector that orchestrates multi-RPC validated state transitions from the current bridge head slot.
+///
+/// This actor system maintains consensus proof readiness by:
+/// 1. Starting with an initial slot/store_hash (cold start or injected state)
+/// 2. Continuously polling for new finality slots at regular intervals
+/// 3. Validating generated proof inputs derived from RPC data in parallel
+/// 4. Only emitting transitions where ≥1 trusted RPC provides valid proof inputs within the timeout period
+///
+/// Employs a multi-layered validation strategy:
+/// - Queries multiple consensus RPC endpoints simultaneously
+/// - Performs native execution of zkVM logic for transition validation
+/// - Automatically filters out providers that return fraudulent/invalid data/or that take to long
+///
+/// # Arguments
+/// * `current_slot` - Initial trusted slot to monitor from
+/// * `current_store_hash` - Corresponding consensus store state hash for integrity checking
+///
+/// # Returns
+/// Tuple containing:
+/// - `u64`: Initial latest finalized slot from consensus layer for we which have validated proof input
+/// - `mpsc::Receiver<FinalityChangeDetectorOutput>`: Channel for receiving validated transition proof inputs
+/// - `mpsc::Sender<FinalityChangeDetectorInput>`: Channel for updating monitoring the current trusted slot / consensus store hash
+///
+/// # Behavior Details
+/// - Maintains internal state of current head (slot + store hash)
+/// - Accepts updates via input channel (from bridge head advancement)
+/// - Periodically triggers validation checks based on NORI_HELIOS_POLLING_INTERVAL
+/// - Only considers results from the current accepted head
+/// - Automatically retries failed validations on next polling interval
+/// - Terminates process on unrecoverable channel failures
+///
+/// # Validation Guarantees
+/// Each emitted transition has been:
+/// 1. Validated against ≥1 trusted RPC provider
+/// 2. Had its state transition logic verified through native execution
+/// 3. Passed cryptographic consistency checks (store_hash chain)
+/// 4. Been confirmed to be a transition from the current head to prevent stale emissions
 pub async fn start_validated_consensus_finality_change_detector<S, R>(
     mut current_slot: u64,
     mut current_store_hash: FixedBytes<32>,
@@ -93,6 +156,7 @@ where
         // State tracking
         //let mut current_slot = slot;
         //let mut current_store_hash = store_hash;
+        let mut latest_slot = current_slot;
         let mut in_flight = false; // indicates if validation request is outstanding
 
         let mut tick_interval = interval(Duration::from_secs_f64(polling_interval_sec));
@@ -103,6 +167,9 @@ where
                 Some(update) = finality_input_rx.recv() => {
                     current_slot = update.slot;
                     current_store_hash = update.store_hash;
+                    if latest_slot < current_slot {
+                        latest_slot = current_slot;
+                    }
                 },
 
                 // Receive validation results
@@ -111,19 +178,30 @@ where
 
                     match result {
                         Ok((input_slot, output_slot, validated_proof_inputs)) => {
-                            // Only emit output if the input_slot matches current
+                            // Only emit output if the input_slot matches current and our output is ahead of the current slot
                             if input_slot == current_slot {
-                                if finality_output_tx.send(FinalityChangeDetectorOutput {
-                                    input_slot,
-                                    output_slot,
-                                    validated_proof_inputs,
-                                }).await.is_err() {
-                                    // Receiver dropped, exit task
-                                    break;
+                                if output_slot > latest_slot {
+                                    if finality_output_tx.send(FinalityChangeDetectorOutput {
+                                        input_slot,
+                                        output_slot,
+                                        validated_proof_inputs,
+                                    }).await.is_err() {
+                                        // Receiver dropped, exit task
+                                        break;
+                                    }
+                                    latest_slot = output_slot;
                                 }
+                                else {
+                                    log::warn!(
+                                        "No change detected result was output_slot: '{}' when the latest_slot was: '{}'. Ignoring.",
+                                        output_slot,
+                                        latest_slot
+                                    );
+                                }
+
                             } else {
                                 log::warn!(
-                                    "Stale validation result received. result input_slot: '{}', current slot: '{}'. Ignoring.",
+                                    "Stale validation result received. result input slot: '{}', current slot: '{}'. Ignoring.",
                                     input_slot,
                                     current_slot
                                 );
@@ -153,8 +231,8 @@ where
                 }
             }
         }
-        // Change detector broke
-        error!("Change detector broke");
+        // Finality change detector broke
+        error!("Finality change detector broke.");
         process::exit(1);
     });
 

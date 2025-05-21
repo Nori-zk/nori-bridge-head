@@ -1,6 +1,5 @@
 use anyhow::Result;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
-use nori::sp1_prover::prepare_zk_program_input;
 use nori_hash::sha256_hash::sha256_hash_helios_store;
 use nori_sp1_helios_program::sp1_helios::zk_program;
 

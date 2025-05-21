@@ -1,5 +1,5 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::finality_change_detector::start_validated_consensus_finality_change_detector;
+use super::finality_change_detector::{start_validated_consensus_finality_change_detector, FinalityChangeDetectorInput, FinalityChangeDetectorOutput};
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension,
@@ -9,15 +9,17 @@ use super::notice_messages::{
     TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected,
 };
 use super::validate::validate_env;
-use crate::rpcs::consensus::{get_latest_finality_slot_and_store_hash, FinalityUpdateAndSlot};
 use crate::proof_outputs_decoder::DecodedProofOutputs;
+use crate::rpcs::consensus::ConsensusHttpProxy;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::FinalityUpdate;
+use helios_ethereum::rpc::http_rpc::HttpRpc;
 use log::{error, info};
+use nori_sp1_helios_primitives::types::ProofInputs;
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
@@ -42,7 +44,8 @@ pub struct ProofMessage {
 
 struct ProverJob {
     input_slot: u64,
-    input_store_hash: FixedBytes<32>,
+    inputs: ProofInputs<MainnetConsensusSpec>,
+    //input_store_hash: FixedBytes<32>,
     start_instant: Instant,
     expected_output_slot: u64,
 }
@@ -103,8 +106,10 @@ pub struct BridgeHead {
     prover_jobs: HashMap<u64, ProverJob>,
     /// Channel for receiving bridge head commands
     command_rx: Option<mpsc::Receiver<Command>>,
-    /// Chanel for receiving helios finality transition events
-    finality_rx: Option<mpsc::Receiver<FinalityUpdateAndSlot>>,
+    /// Chanel for receiving consensus finality transition events
+    finality_output_rx: Option<mpsc::Receiver<FinalityChangeDetectorOutput<MainnetConsensusSpec>>>,
+    /// Chanel for informing consensus finality change detector above bridge head advances
+    finality_input_tx: Option<mpsc::Sender<FinalityChangeDetectorInput>>,
     /// Channel for receiving job results
     job_rx: Option<mpsc::UnboundedReceiver<Result<ProverJobOutput, ProverJobError>>>,
     /// Channel for sending job results
@@ -134,8 +139,7 @@ impl BridgeHead {
             // Cold start procedure
             // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
-            (current_slot, _, store_hash) =
-                get_latest_finality_slot_and_store_hash().await.unwrap();
+            (current_slot, store_hash) = ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env().get_latest_finality_slot_and_store_hash().await.unwrap();
         }
 
         // Setup command mpsc
@@ -152,8 +156,8 @@ impl BridgeHead {
 
         // Setup polling client for finality change detection
         info!("Starting helios polling client.");
-        let (init_latest_beacon_slot, finality_rx) =
-            start_validated_consensus_finality_change_detector(current_slot).await;
+        let (init_latest_beacon_slot, finality_output_rx,finality_input_tx) =
+            start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(current_slot, store_hash).await;
 
         (
             input_command_handle,
@@ -164,7 +168,8 @@ impl BridgeHead {
                 job_id: 0,
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
-                finality_rx: Some(finality_rx),
+                finality_output_rx: Some(finality_output_rx),
+                finality_input_tx: Some(finality_input_tx),
                 job_rx: Some(job_rx),
                 job_tx,
                 event_tx,
@@ -214,7 +219,7 @@ impl BridgeHead {
         let (input_slot, input_store_hash, elapsed_sec) = {
             let job = self.prover_jobs.get(&job_id).unwrap();
             let input_slot = job.input_slot;
-            let input_store_hash = job.input_store_hash;
+            let input_store_hash = job.inputs.store_hash;
 
             let elapsed_sec = Instant::now()
                 .duration_since(job.start_instant)
@@ -283,7 +288,7 @@ impl BridgeHead {
         let (input_slot, input_store_hash, expected_output_slot, n_jobs, elapsed_sec) = {
             let job = self.prover_jobs.get(&err.job_id).unwrap();
             let input_slot = job.input_slot;
-            let input_store_hash = job.input_store_hash;
+            let input_store_hash = job.inputs.store_hash;
             let expected_output_slot = job.expected_output_slot;
 
             let elapsed_sec = Instant::now()
@@ -322,11 +327,11 @@ impl BridgeHead {
     }
 
     // Create prover job
-    async fn prepare_transition_proof(
+    async fn stage_transition_proof(
         &mut self,
         slot: u64,
-        store_hash: FixedBytes<32>,
-        finality_update: FinalityUpdate<MainnetConsensusSpec>,
+//        store_hash: FixedBytes<32>,
+        proof_inputs: ProofInputs<MainnetConsensusSpec>
     ) {
         // Get job id
         self.job_id += 1;
@@ -343,7 +348,8 @@ impl BridgeHead {
             job_id,
             ProverJob {
                 input_slot: slot,
-                input_store_hash: store_hash,
+                inputs: proof_inputs.clone(),
+                //input_store_hash: store_hash,
                 start_instant: Instant::now(),
                 expected_output_slot: self.next_slot,
             },
@@ -353,14 +359,15 @@ impl BridgeHead {
         let tx = self.job_tx.clone();
 
         // Clone job arguments
-        let current_slot_clone = self.current_slot;
+        let current_slot = self.current_slot;
         let store_hash = self.store_hash;
+        let inputs = proof_inputs;
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
             // Execute job
             let proof_result =
-                finality_update_job(job_id, current_slot_clone, store_hash, finality_update).await;
+                finality_update_job(job_id, current_slot, inputs).await;
 
             // Send appropriate tx Ok or Err
             match proof_result {
@@ -409,21 +416,22 @@ impl BridgeHead {
     }
 
     // Update next slot logic
-    async fn on_beacon_finality_change(&mut self, event: FinalityUpdateAndSlot) {
+    async fn on_beacon_finality_change(&mut self, event: FinalityChangeDetectorOutput<MainnetConsensusSpec>) {
         // Notify of transition
         let _ = self
             .trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
                     TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected {
-                        slot: event.slot,
-                        finality_update: event.finality_update,
+                        slot: event.output_slot,
+                        input_slot: event.input_slot,
+                        proof_inputs: Box::new(event.validated_proof_inputs),
                     },
                 ),
             )
             .await;
 
         // Update next head
-        self.next_slot = event.slot;
+        self.next_slot = event.output_slot;
 
         // Print the head change detection
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
@@ -444,24 +452,27 @@ impl BridgeHead {
 
         info!("Event loop started.");
 
-        let mut finality_rx = self.finality_rx.take().unwrap();
+        let mut finality_output_rx = self.finality_output_rx.take().unwrap();
+        let finality_input_tx = self.finality_input_tx.take().unwrap();
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
 
         loop {
             tokio::select! {
                 // Read the finality reciever for finality change events
-                Some(event) = finality_rx.recv() => {
+                Some(event) = finality_output_rx.recv() => {
                     let _ = self.on_beacon_finality_change(event).await;
                 }
                 // Read the command receiver for input commands
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         Command::StageTransitionProof(message) => {
-                            let _ = self.prepare_transition_proof(message.input_slot, message.store_hash, message.finality_update).await;
+                            let _ = self.stage_transition_proof(message.slot, message.proof_inputs).await;
                         }
                         Command::Advance(message) => {
-                            // deal with advance invocation
+                            // Notify finality change detector of a change to the head position
+                            let _ = finality_input_tx.send(FinalityChangeDetectorInput {slot: message.slot, store_hash: message.store_hash}).await; 
+                            // Deal with advance invocation
                             let _ = self.advance(message.slot, message.store_hash).await;
                         }
                     }

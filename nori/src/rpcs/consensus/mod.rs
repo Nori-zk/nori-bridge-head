@@ -490,9 +490,6 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     ) -> Result<(u64, u64, ProofInputs<S>)> {
         multiplex(
             |url| {
-                //let url = url.clone();
-                let input_slot = input_slot;
-                let store_hash = store_hash; // Clone?
                 async move {
                     // Fetch proof_inputs
                     let proof_inputs =
@@ -535,6 +532,26 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         .await
     }
 
+    pub async fn prepare_proof_inputs(
+        &self,
+        input_slot: u64,
+        store_hash: FixedBytes<32>,
+    ) -> Result<ProofInputs<S>> {
+        multiplex(
+            |url| {
+                {
+                    async move {
+                        Client::<S, R>::prepare_proof_inputs(&url, input_slot, store_hash).await
+                    }
+                }
+                .boxed()
+            },
+            &self.all_providers_urls,
+            PROVIDER_TIMEOUT,
+        )
+        .await
+    }
+
     /// Get the latest slot & store hash from the latest finality checkpoint.
     pub async fn get_latest_finality_slot_and_store_hash(&self) -> Result<(u64, FixedBytes<32>)> {
         // This is used in cold start procedure which is a trusted operation (hence the principle trusted endpoint).
@@ -547,7 +564,6 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     pub async fn get_latest_finality_slot(&self) -> Result<u64> {
         multiplex(
             |url| {
-                let url = url.clone();
                 async move {
                     let checkpoint = Client::<S, R>::get_latest_checkpoint().await?;
                     let client =
