@@ -27,20 +27,48 @@ pub struct FinalityChangeDetectorOutput<S: ConsensusSpec> {
     pub validated_proof_inputs: ProofInputs<S>,
 }
 
-/// Finality change detector
-pub async fn start_helios_finality_change_detector<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug>(
+pub fn validate_and_prepare_proof_inputs_actor<S, R>() -> (
+    mpsc::Sender<FinalityChangeDetectorInput>,
+    mpsc::Receiver<Result<(u64, u64, ProofInputs<S>), anyhow::Error>>,
+)
+where
+    S: ConsensusSpec + Send + 'static,
+    R: ConsensusRpc<S> + std::fmt::Debug + Send + 'static,
+{
+    let (job_tx, mut job_rx) = mpsc::channel::<FinalityChangeDetectorInput>(1);
+    let (result_tx, result_rx) =
+        mpsc::channel::<Result<(u64, u64, ProofInputs<S>), anyhow::Error>>(1);
+
+    tokio::spawn(async move {
+        while let Some(job) = job_rx.recv().await {
+            let res = ConsensusHttpProxy::<S, R>::try_from_env()
+                .validate_and_prepare_proof_inputs(job.slot, job.store_hash)
+                .await;
+
+            if result_tx.send(res).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    (job_tx, result_rx)
+}
+pub async fn start_helios_finality_change_detector<S, R>(
     slot: u64,
     store_hash: FixedBytes<32>,
 ) -> (
     u64,
-    tokio::sync::mpsc::Receiver<FinalityChangeDetectorOutput<S>>,
-    tokio::sync::mpsc::Sender<FinalityChangeDetectorInput>,
-) {
+    mpsc::Receiver<FinalityChangeDetectorOutput<S>>,
+    mpsc::Sender<FinalityChangeDetectorInput>,
+)
+where
+    S: ConsensusSpec + Send + 'static,
+    R: ConsensusRpc<S> + std::fmt::Debug + Send + 'static,
+{
     dotenv::dotenv().ok();
 
-    // Define helios polling sleep interval
-    let polling_interval_sec: f64 = env::var("NORI_HELIOS_POLLING_INTERVAL")
-        .unwrap_or_else(|_| "1.0".to_string()) // Default to 1.0 if not set
+    let polling_interval_sec: f64 = std::env::var("NORI_HELIOS_POLLING_INTERVAL")
+        .unwrap_or_else(|_| "1.0".to_string())
         .parse()
         .expect("Failed to parse NORI_HELIOS_POLLING_INTERVAL as f64.");
 
@@ -51,43 +79,74 @@ pub async fn start_helios_finality_change_detector<S: ConsensusSpec, R: Consensu
             .await
             .unwrap();
 
-    // Setup consensus finality change mspc
+    // Channels for finality detector output and input updates
     let (finality_output_tx, finality_output_rx) = mpsc::channel(1);
-    let (finality_input_tx, mut finality_input_rx): (
-        tokio::sync::mpsc::Sender<FinalityChangeDetectorInput>,
-        tokio::sync::mpsc::Receiver<FinalityChangeDetectorInput>,
-    ) = mpsc::channel(1);
+    let (finality_input_tx, mut finality_input_rx) =
+        mpsc::channel::<FinalityChangeDetectorInput>(1);
 
-    // Spawn detector task
+    // Channels for validation actor (job requests and results)
+    let (validation_job_tx, mut validation_result_rx) =
+        validate_and_prepare_proof_inputs_actor::<S, R>();
+
+    // State tracking
+    let mut current_slot = slot;
+    let mut current_store_hash = store_hash;
+    let mut in_flight = false; // indicates if validation request is outstanding
+
     tokio::spawn(async move {
-        let mut tick_interval = interval(Duration::from_secs_f64(polling_interval_sec));
-        // input_slot and store_hash are captured mutable, no clone needed for primitives or fixed bytes
-        let mut input_slot = slot;
-        let mut current_store_hash = store_hash;
+        let mut tick_interval =
+            tokio::time::interval(Duration::from_secs_f64(polling_interval_sec));
 
         loop {
             tokio::select! {
+                // Receive input updates
                 Some(update) = finality_input_rx.recv() => {
-                    input_slot = update.slot;
+                    current_slot = update.slot;
                     current_store_hash = update.store_hash;
                 },
-                _ = tick_interval.tick() => {
-                    match ConsensusHttpProxy::<S, R>::try_from_env()
-                        .validate_and_prepare_proof_inputs(input_slot, current_store_hash)
-                        .await
-                    {
-                        Ok((given_input_slot, output_slot, validated_proof_inputs)) => {
-                            if finality_output_tx.send(FinalityChangeDetectorOutput {
-                                input_slot: given_input_slot,
-                                output_slot,
-                                validated_proof_inputs,
-                            }).await.is_err() {
-                                // Receiver dropped, exit loop
-                                break;
+
+                // Receive validation results
+                Some(result) = validation_result_rx.recv() => {
+                    in_flight = false;
+
+                    match result {
+                        Ok((input_slot, output_slot, validated_proof_inputs)) => {
+                            // Only emit output if the input_slot matches current
+                            if input_slot == current_slot {
+                                if finality_output_tx.send(FinalityChangeDetectorOutput {
+                                    input_slot,
+                                    output_slot,
+                                    validated_proof_inputs,
+                                }).await.is_err() {
+                                    // Receiver dropped, exit task
+                                    break;
+                                }
+                            } else {
+                                log::warn!(
+                                    "Stale validation result received. result input_slot: {}, current slot: {}. Ignoring.",
+                                    input_slot,
+                                    current_slot
+                                );
                             }
                         }
-                        Err(_) => {
-                            // Silently ignore errors
+                        Err(e) => {
+                            log::warn!("Validation error in change detector ignoring: {:?}", e);
+                        }
+                    }
+                },
+
+                // Tick event - try to start validation if none in-flight
+                _ = tick_interval.tick() => {
+                    if !in_flight {
+                        let job = FinalityChangeDetectorInput {
+                            slot: current_slot,
+                            store_hash: current_store_hash,
+                        };
+                        if validation_job_tx.send(job).await.is_ok() {
+                            in_flight = true;
+                        } else {
+                            log::error!("Validation actor job channel closed unexpectedly.");
+                            break; // stop the loop if sending jobs is impossible
                         }
                     }
                 }
@@ -101,26 +160,3 @@ pub async fn start_helios_finality_change_detector<S: ConsensusSpec, R: Consensu
         finality_input_tx,
     )
 }
-
-/*// Get latest beacon checkpoint
-let helios_checkpoint = get_latest_checkpoint().await.unwrap();
-
-// Get the client from the beacon checkpoint
-let helios_polling_client = get_client(helios_checkpoint).await.unwrap();
-
-info!("Fetching helios latest finality head.");
-
-// Get latest slot
-
-
-let mut init_latest_beacon_slot  = get_client_latest_finality_slot(&helios_polling_client)
-    .await
-    .unwrap();*/
-
-// If we get an erronous slot from get_client_latest_finality_head then override it with the current_head
-/*if current_slot > init_latest_beacon_slot {
-    init_latest_beacon_slot = current_slot;
-}*/
-
-// Create rx tx pair for receiving slot and store hash from parent caller.
-//let ()
