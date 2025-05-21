@@ -1,12 +1,12 @@
 use helios_consensus_core::verify_finality_update;
 use nori::{
-    bridge_head::finality_change_detector::start_helios_finality_change_detector,
+    bridge_head::finality_change_detector::start_validated_consensus_finality_change_detector,
     rpcs::consensus::{get_checkpoint, get_client, get_client_latest_finality_update},
 };
 
 #[tokio::main]
 async fn main() {
-    let (slot, mut rx) = start_helios_finality_change_detector(0).await;
+    let (slot, mut rx) = start_validated_consensus_finality_change_detector(0).await;
 
     loop {
         if let Some(event) = rx.recv().await {

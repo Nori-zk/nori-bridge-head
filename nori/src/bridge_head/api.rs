@@ -1,5 +1,5 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::finality_change_detector::start_helios_finality_change_detector;
+use super::finality_change_detector::start_validated_consensus_finality_change_detector;
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension,
@@ -153,7 +153,7 @@ impl BridgeHead {
         // Setup polling client for finality change detection
         info!("Starting helios polling client.");
         let (init_latest_beacon_slot, finality_rx) =
-            start_helios_finality_change_detector(current_slot).await;
+            start_validated_consensus_finality_change_detector(current_slot).await;
 
         (
             input_command_handle,

@@ -4,10 +4,10 @@ use helios_ethereum::rpc::{http_rpc::HttpRpc, ConsensusRpc};
 //use crate::rpcs::consensus::{get_client, get_client_latest_finality_slot, get_client_latest_finality_update_and_slot, get_latest_checkpoint, FinalityUpdateAndSlot};
 use log::{error, info};
 use nori_sp1_helios_primitives::types::ProofInputs;
-use std::{env, time::Duration};
+use std::{env, process, time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
-use crate::rpcs::consensus::{Client, ConsensusHttpProxy};
+use crate::rpcs::consensus::ConsensusHttpProxy;
 
 // So this needs to be aware of the input slot and store hash...
 // We run this validate_and_prepare_proof_inputs(input_slot: u64, store_hash: FixedBytes<32>)
@@ -53,9 +53,10 @@ where
 
     (job_tx, result_rx)
 }
-pub async fn start_helios_finality_change_detector<S, R>(
-    slot: u64,
-    store_hash: FixedBytes<32>,
+
+pub async fn start_validated_consensus_finality_change_detector<S, R>(
+    mut current_slot: u64,
+    mut current_store_hash: FixedBytes<32>,
 ) -> (
     u64,
     mpsc::Receiver<FinalityChangeDetectorOutput<S>>,
@@ -88,14 +89,13 @@ where
     let (validation_job_tx, mut validation_result_rx) =
         validate_and_prepare_proof_inputs_actor::<S, R>();
 
-    // State tracking
-    let mut current_slot = slot;
-    let mut current_store_hash = store_hash;
-    let mut in_flight = false; // indicates if validation request is outstanding
-
     tokio::spawn(async move {
-        let mut tick_interval =
-            tokio::time::interval(Duration::from_secs_f64(polling_interval_sec));
+        // State tracking
+        //let mut current_slot = slot;
+        //let mut current_store_hash = store_hash;
+        let mut in_flight = false; // indicates if validation request is outstanding
+
+        let mut tick_interval = interval(Duration::from_secs_f64(polling_interval_sec));
 
         loop {
             tokio::select! {
@@ -123,7 +123,7 @@ where
                                 }
                             } else {
                                 log::warn!(
-                                    "Stale validation result received. result input_slot: {}, current slot: {}. Ignoring.",
+                                    "Stale validation result received. result input_slot: '{}', current slot: '{}'. Ignoring.",
                                     input_slot,
                                     current_slot
                                 );
@@ -138,6 +138,7 @@ where
                 // Tick event - try to start validation if none in-flight
                 _ = tick_interval.tick() => {
                     if !in_flight {
+
                         let job = FinalityChangeDetectorInput {
                             slot: current_slot,
                             store_hash: current_store_hash,
@@ -151,6 +152,9 @@ where
                     }
                 }
             }
+            // Change detector broke
+            error!("Change detector broke");
+            process::exit(1);
         }
     });
 
