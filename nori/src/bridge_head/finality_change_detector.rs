@@ -1,4 +1,4 @@
-use crate::helios::{get_client, get_client_latest_finality_slot, get_client_latest_finality_update_and_slot, get_latest_checkpoint, FinalityUpdateAndSlot};
+use crate::rpcs::consensus::{get_client, get_client_latest_finality_slot, get_client_latest_finality_update_and_slot, get_latest_checkpoint, FinalityUpdateAndSlot};
 use log::{error, info};
 use std::{env, time::Duration};
 use tokio::sync::mpsc;

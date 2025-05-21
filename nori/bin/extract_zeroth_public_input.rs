@@ -1,7 +1,7 @@
 use std::{env, fs};
 
 use anyhow::Result;
-use nori::{helios::{get_client_latest_finality_update, get_client_latest_finality_update_and_slot, get_latest_finality_slot_and_store_hash}, sp1_prover::finality_update_job};
+use nori::{rpcs::consensus::{get_client_latest_finality_update, get_client_latest_finality_update_and_slot, get_latest_finality_slot_and_store_hash}, sp1_prover::finality_update_job};
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -2,8 +2,7 @@ use crate::{
     contract::bindings::{
         addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,
     },
-    helios::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates},
-    rpcs::execution::http::ExecutionHttpProxy,
+    rpcs::{consensus::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates}, execution::http::ExecutionHttpProxy},
 };
 use alloy::eips::BlockId;
 use alloy_primitives::FixedBytes;

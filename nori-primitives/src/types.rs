@@ -1,16 +1,16 @@
 use alloy_primitives::{FixedBytes, B256};
 use alloy_sol_types::sol;
-use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
+use helios_consensus_core::consensus_spec::ConsensusSpec;
 use helios_consensus_core::types::Forks;
 use helios_consensus_core::types::{FinalityUpdate, LightClientStore, Update};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ProofInputs {
-    pub updates: Vec<Update<MainnetConsensusSpec>>,
-    pub finality_update: FinalityUpdate<MainnetConsensusSpec>,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProofInputs<S: ConsensusSpec> {
+    pub updates: Vec<Update<S>>,
+    pub finality_update: FinalityUpdate<S>,
     pub expected_current_slot: u64,
-    pub store: LightClientStore<MainnetConsensusSpec>,
+    pub store: LightClientStore<S>,
     pub genesis_root: B256,
     pub forks: Forks,
     pub store_hash: FixedBytes<32>

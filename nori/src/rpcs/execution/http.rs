@@ -1,3 +1,4 @@
+use crate::{contract::bindings::get_source_contract_address, rpcs::query_with_fallback};
 use alloy::{
     eips::BlockId,
     providers::{Provider, ProviderBuilder, RootProvider},
@@ -7,16 +8,11 @@ use alloy::{
 };
 use alloy_primitives::{Address, Log, B256};
 use anyhow::{anyhow, Context, Result};
-use futures::{
-    future::{select_ok, BoxFuture},
-    FutureExt,
-};
+use futures::FutureExt;
 use log::{error, info, warn};
 use reqwest::{Client, Url};
 use std::env;
-use tokio::time::{sleep, timeout, Duration};
-
-use crate::contract::bindings::get_source_contract_address;
+use tokio::time::{sleep, Duration};
 
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
@@ -27,52 +23,6 @@ pub struct ExecutionHttpProxy {
     principal_provider: RootProvider<Http<Client>>,
     backup_providers: Vec<RootProvider<Http<Client>>>,
     source_state_bridge_contract_address: Address,
-}
-
-pub async fn query_with_fallback<F, C, R>(
-    principal_provider: &C,
-    backup_providers: &[C],
-    f: F,
-) -> Result<R>
-where
-    F: Fn(C) -> BoxFuture<'static, Result<R>>,
-    C: Clone,
-    R: 'static,
-{
-    match timeout(PROVIDER_TIMEOUT, f(principal_provider.clone())).await {
-        Ok(Ok(result)) => return Ok(result),
-        Ok(Err(err)) => {
-            warn!("Principal provider failed: {}.", err);
-        }
-        Err(_) => {
-            warn!("Principal provider timed out after {:?}", PROVIDER_TIMEOUT);
-        }
-    }
-
-    if backup_providers.is_empty() {
-        return Err(anyhow!(
-            "Principal provider failed and no backups available."
-        ));
-    }
-
-    warn!("Trying backup providers...");
-
-    let backup_futures: Vec<BoxFuture<'static, Result<R>>> = backup_providers
-        .iter()
-        .map(|provider| {
-            let fut = f(provider.clone());
-            Box::pin(async move {
-                timeout(PROVIDER_TIMEOUT, fut)
-                    .await
-                    .map_err(|_| anyhow!("Provider timed out after {:?}", PROVIDER_TIMEOUT))?
-            }) as BoxFuture<'static, Result<R>>
-        })
-        .collect();
-
-    match select_ok(backup_futures).await {
-        Ok((result, _)) => Ok(result),
-        Err(e) => Err(anyhow!("All backups failed: {}", e)),
-    }
 }
 
 impl ExecutionHttpProxy {
@@ -187,6 +137,7 @@ impl ExecutionHttpProxy {
                         }
                         .boxed()
                     },
+                    PROVIDER_TIMEOUT
                 )
                 .await
                 {
@@ -245,6 +196,7 @@ impl ExecutionHttpProxy {
                 async move { Self::_get_proof(provider, address, keys, block_id).await }
                     .boxed()
             },
+            PROVIDER_TIMEOUT
         )
         .await?;
 

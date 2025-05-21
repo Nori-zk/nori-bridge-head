@@ -2,7 +2,7 @@ use alloy_primitives::FixedBytes;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::FinalityUpdate};
 use tokio::sync::mpsc::Sender;
 
-use crate::helios::FinalityUpdateAndSlot;
+use crate::rpcs::consensus::FinalityUpdateAndSlot;
 
 /// Event loop commands
 

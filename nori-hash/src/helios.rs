@@ -1,8 +1,8 @@
 use anyhow::Result;
-use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
+use helios_consensus_core::{consensus_spec::ConsensusSpec, types::LightClientStore};
 
-pub fn serialize_helios_store_serde(
-    helios_store: &LightClientStore<MainnetConsensusSpec>,
+pub fn serialize_helios_store_serde<S: ConsensusSpec>(
+    helios_store: &LightClientStore<S>,
 ) -> Result<Vec<u8>> {
     let mut result = Vec::new();
 

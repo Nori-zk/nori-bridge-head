@@ -9,7 +9,7 @@ use super::notice_messages::{
     TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected,
 };
 use super::validate::validate_env;
-use crate::helios::{get_latest_finality_slot_and_store_hash, FinalityUpdateAndSlot};
+use crate::rpcs::consensus::{get_latest_finality_slot_and_store_hash, FinalityUpdateAndSlot};
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::FixedBytes;

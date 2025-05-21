@@ -1,6 +1,8 @@
 #![no_main]
 sp1_zkvm::entrypoint!(main);
 use alloy_sol_types::SolValue;
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
+use nori_sp1_helios_primitives::types::ProofInputs;
 use nori_sp1_helios_program::sp1_helios::zk_program;
 
 pub fn main() {
@@ -9,7 +11,7 @@ pub fn main() {
 
     // Decode inputs
     println!("Decoding inputs");
-    let proof_inputs = serde_cbor::from_slice(&encoded_inputs).unwrap();
+    let proof_inputs: ProofInputs<MainnetConsensusSpec> = serde_cbor::from_slice(&encoded_inputs).unwrap();
     println!("Decoded inputs");
 
     // Run nori sp1 helios zk program

@@ -1,7 +1,7 @@
 use helios_consensus_core::verify_finality_update;
 use nori::{
     bridge_head::finality_change_detector::start_helios_finality_change_detector,
-    helios::{get_checkpoint, get_client, get_client_latest_finality_update},
+    rpcs::consensus::{get_checkpoint, get_client, get_client_latest_finality_update},
 };
 
 #[tokio::main]

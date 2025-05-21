@@ -1,7 +1,7 @@
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::FinalityUpdate};
-use nori::{helios::get_latest_finality_slot_and_store_hash, proof_outputs_decoder::DecodedProofOutputs, sp1_prover::{prepare_zk_program_input, ELF}};
+use nori::{rpcs::consensus::get_latest_finality_slot_and_store_hash, proof_outputs_decoder::DecodedProofOutputs, sp1_prover::{prepare_zk_program_input, ELF}};
 use sp1_sdk::{ProverClient, SP1PublicValues, SP1Stdin};
 
 /// A stripped down version of finality_update_job used to generate cycle information without the opt

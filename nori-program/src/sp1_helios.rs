@@ -1,10 +1,11 @@
 use alloy_primitives::{B256, U256};
 use helios_consensus_core::{
-    apply_finality_update, apply_update, verify_finality_update, verify_update,
+    apply_finality_update, apply_update, consensus_spec::ConsensusSpec, verify_finality_update, verify_update
 };
 use nori_hash::sha256_hash::sha256_hash_helios_store;
 use nori_sp1_helios_primitives::types::{ProofInputs, ProofOutputs};
 use tree_hash::TreeHash;
+use std::fmt;
 
 /// Custom error type for program execution failures
 #[derive(Debug)]
@@ -20,6 +21,36 @@ pub enum ProgramError {
     /// Error when store hashing fails
     StoreHashingError(String),
 }
+
+impl fmt::Display for ProgramError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProgramError::HashChainMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "Hash chain mismatch: expected {:?}, got {:?}",
+                    expected,
+                    actual
+                )
+            }
+            ProgramError::InvalidUpdate { index, reason } => {
+                write!(f, "Invalid update at index {}: {}", index, reason)
+            }
+            ProgramError::InvalidFinalityUpdate { reason } => {
+                write!(f, "Invalid finality update: {}", reason)
+            }
+            ProgramError::MissingExecutionRoot => {
+                write!(f, "Missing execution root in proof inputs")
+            }
+            ProgramError::StoreHashingError(reason) => {
+                write!(f, "Failed to hash store: {}", reason)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProgramError {}
+
 
 /// Zero-Knowledge State Transition Proof for Ethereum Light Client Updates with Result type
 ///
@@ -113,7 +144,7 @@ pub enum ProgramError {
 ///    `store.finalized_header.execution()` is None  
 ///    → Incomplete header data
 ///
-pub fn program(proof_inputs: ProofInputs) -> Result<ProofOutputs, ProgramError> {
+pub fn program<S: ConsensusSpec>(proof_inputs: ProofInputs<S>) -> Result<ProofOutputs, ProgramError> {
     // Unpack inputs
     let ProofInputs {
         updates,
@@ -325,7 +356,7 @@ pub fn program(proof_inputs: ProofInputs) -> Result<ProofOutputs, ProgramError> 
 ///    `store.finalized_header.execution()` is None  
 ///    → Incomplete header data
 ///
-pub fn zk_program(proof_inputs: ProofInputs) -> ProofOutputs {
+pub fn zk_program<S: ConsensusSpec>(proof_inputs: ProofInputs<S>) -> ProofOutputs {
     // Unpack inputs
     let ProofInputs {
         updates,
