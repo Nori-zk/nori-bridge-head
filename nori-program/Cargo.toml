@@ -19,3 +19,4 @@ tree_hash = { workspace = true }
 anyhow = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }
 nori-hash = { workspace = true }
+log = { workspace = true }

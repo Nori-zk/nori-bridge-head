@@ -6,6 +6,7 @@ use nori_hash::sha256_hash::sha256_hash_helios_store;
 use nori_sp1_helios_primitives::types::{ProofInputs, ProofOutputs};
 use tree_hash::TreeHash;
 use std::fmt;
+use log::debug;
 
 /// Custom error type for program execution failures
 #[derive(Debug)]
@@ -157,7 +158,7 @@ pub fn program<S: ConsensusSpec>(proof_inputs: ProofInputs<S>) -> Result<ProofOu
     } = proof_inputs;
 
     // 1. Calculate old store hash and assert equality
-    println!("Hashing old store state and comparing with proof inputs store hash.");
+    debug!("Hashing old store state and comparing with proof inputs store hash.");
     let calculated_prev_store_hash = sha256_hash_helios_store(&store)
         .map_err(|e| ProgramError::StoreHashingError(format!("Failed to hash store: {}", e)))?;
     if calculated_prev_store_hash != prev_store_hash {
@@ -166,24 +167,24 @@ pub fn program<S: ConsensusSpec>(proof_inputs: ProofInputs<S>) -> Result<ProofOu
             actual: calculated_prev_store_hash,
         });
     }
-    println!(
+    debug!(
         "Old store state hash is valid: {}",
         calculated_prev_store_hash
     );
 
     // 2. State capture
-    println!("Committing prev_header, prev_head and start_sync_committee_hash.");
+    debug!("Committing prev_header, prev_head and start_sync_committee_hash.");
     let prev_head = store.finalized_header.beacon().slot;
     let prev_header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
     let start_sync_committee_hash: alloy_primitives::FixedBytes<32> =
         store.current_sync_committee.tree_hash_root(); // Could deprecate
-    println!("prev_head, prev_header and start_sync_committee_hash committed.");
+    debug!("prev_head, prev_header and start_sync_committee_hash committed.");
 
     // 3. Apply sync committee updates, if any
     for (index, update) in updates.iter().enumerate() {
         // update.finalized_header.beacon().slot; introduce printing this so we can see if we are applying updates beyond our head
         let finalized_beacon_slot = { update.finalized_header().beacon().slot };
-        println!(
+        debug!(
             "Processing update {} of {}. Update beacon finalized slot: {}",
             index + 1,
             updates.len(),
@@ -196,13 +197,13 @@ pub fn program<S: ConsensusSpec>(proof_inputs: ProofInputs<S>) -> Result<ProofOu
                 reason: format!("{:?}", err),
             });
         }
-        println!("Update {} is valid.", index + 1);
+        debug!("Update {} is valid.", index + 1);
         apply_update(&mut store, update);
-        println!("Applied update {}.", index + 1);
+        debug!("Applied update {}.", index + 1);
     }
 
     // 4. Apply finality update
-    println!("Processing finality update.");
+    debug!("Processing finality update.");
     if let Err(err) = verify_finality_update(
         &finality_update,
         expected_current_slot,
@@ -214,14 +215,14 @@ pub fn program<S: ConsensusSpec>(proof_inputs: ProofInputs<S>) -> Result<ProofOu
             reason: format!("{:?}", err),
         });
     }
-    println!("Finality update is valid.");
+    debug!("Finality update is valid.");
     apply_finality_update(&mut store, &finality_update);
-    println!("Applied finality update.");
+    debug!("Applied finality update.");
 
     // Should do an assertion here to ensure we have increased our head (we do check this downstream later)
 
     // 5. Commit new state root, header, and sync committee
-    println!("Committing head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root.");
+    debug!("Committing head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root.");
     let head = store.finalized_header.beacon().slot;
     let header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
     let sync_committee_hash: B256 = store.current_sync_committee.tree_hash_root(); // Could deprecate
@@ -235,16 +236,16 @@ pub fn program<S: ConsensusSpec>(proof_inputs: ProofInputs<S>) -> Result<ProofOu
     }
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
-    println!("head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root committed.");
+    debug!("head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root committed.");
 
     // 6. Calculated updated store hash to be validated in the next round
-    println!("Hashing updated store.");
+    debug!("Hashing updated store.");
     let store_hash = sha256_hash_helios_store(&store).map_err(|e| {
         ProgramError::StoreHashingError(format!("Failed to hash updated store: {}", e))
     })?;
-    println!("Hashing updated store complete: {}", store_hash);
+    debug!("Hashing updated store complete: {}", store_hash);
 
-    println!("Packing outputs.");
+    debug!("Packing outputs.");
     let proof_outputs = ProofOutputs {
         executionStateRoot: execution_state_root,
         newHeader: header,
@@ -257,7 +258,7 @@ pub fn program<S: ConsensusSpec>(proof_inputs: ProofInputs<S>) -> Result<ProofOu
         prevStoreHash: prev_store_hash,
         storeHash: store_hash,
     };
-    println!("Packed outputs.");
+    debug!("Packed outputs.");
 
     Ok(proof_outputs)
 }

@@ -12,7 +12,7 @@ pub struct AdvanceMessage {
 
 pub struct StageTransitionProofMessage {
     pub slot: u64,
-    pub proof_inputs: ProofInputs<MainnetConsensusSpec>,
+    pub proof_inputs: Box<ProofInputs<MainnetConsensusSpec>>,
 }
 
 pub enum Command {
@@ -31,7 +31,7 @@ impl CommandHandle {
     }
 
     pub async fn stage_transition_proof(&self, slot: u64, proof_inputs: ProofInputs<MainnetConsensusSpec>) {
-        let _ = self.command_tx.send(Command::StageTransitionProof(StageTransitionProofMessage { slot, proof_inputs })).await;
+        let _ = self.command_tx.send(Command::StageTransitionProof(StageTransitionProofMessage { slot, proof_inputs: Box::new(proof_inputs) })).await;
     }
 
     pub async fn advance(&self, slot: u64, store_hash: FixedBytes<32>) {

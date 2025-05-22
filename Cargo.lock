@@ -4025,6 +4025,7 @@ dependencies = [
  "alloy-sol-types",
  "anyhow",
  "helios-consensus-core",
+ "log",
  "nori-hash",
  "nori-sp1-helios-primitives",
  "serde_cbor",

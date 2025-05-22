@@ -16,7 +16,6 @@ use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use helios_consensus_core::types::FinalityUpdate;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
 use log::{error, info};
 use nori_sp1_helios_primitives::types::ProofInputs;
@@ -330,7 +329,6 @@ impl BridgeHead {
     async fn stage_transition_proof(
         &mut self,
         slot: u64,
-//        store_hash: FixedBytes<32>,
         proof_inputs: ProofInputs<MainnetConsensusSpec>
     ) {
         // Get job id
@@ -467,7 +465,7 @@ impl BridgeHead {
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         Command::StageTransitionProof(message) => {
-                            let _ = self.stage_transition_proof(message.slot, message.proof_inputs).await;
+                            let _ = self.stage_transition_proof(message.slot, *message.proof_inputs).await;
                         }
                         Command::Advance(message) => {
                             // Notify finality change detector of a change to the head position

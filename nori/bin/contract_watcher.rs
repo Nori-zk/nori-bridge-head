@@ -6,7 +6,6 @@ use std::env;
 
 async fn main_ws() -> Result<()> {
     dotenv::dotenv().ok();
-
     // Validate everything upfront
 
     let eth_ws_rpc =

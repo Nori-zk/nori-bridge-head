@@ -2,9 +2,9 @@ use alloy_primitives::FixedBytes;
 use helios_consensus_core::consensus_spec::{ConsensusSpec, MainnetConsensusSpec};
 use helios_ethereum::rpc::{http_rpc::HttpRpc, ConsensusRpc};
 //use crate::rpcs::consensus::{get_client, get_client_latest_finality_slot, get_client_latest_finality_update_and_slot, get_latest_checkpoint, FinalityUpdateAndSlot};
-use log::{error, info};
+use log::{error, info, debug};
 use nori_sp1_helios_primitives::types::ProofInputs;
-use std::{env, process, time::Duration};
+use std::{process, time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
 use crate::rpcs::consensus::ConsensusHttpProxy;
@@ -94,8 +94,8 @@ where
 /// - Automatically filters out providers that return fraudulent/invalid data/or that take to long
 ///
 /// # Arguments
-/// * `current_slot` - Initial trusted slot to monitor from
-/// * `current_store_hash` - Corresponding consensus store state hash for integrity checking
+/// * `slot` - Initial trusted slot to monitor from
+/// * `store_hash` - Corresponding consensus store state hash for integrity checking
 ///
 /// # Returns
 /// Tuple containing:
@@ -118,8 +118,8 @@ where
 /// 3. Passed cryptographic consistency checks (store_hash chain)
 /// 4. Been confirmed to be a transition from the current head to prevent stale emissions
 pub async fn start_validated_consensus_finality_change_detector<S, R>(
-    mut current_slot: u64,
-    mut current_store_hash: FixedBytes<32>,
+    mut slot: u64,
+    mut store_hash: FixedBytes<32>,
 ) -> (
     u64,
     mpsc::Receiver<FinalityChangeDetectorOutput<S>>,
@@ -154,9 +154,8 @@ where
 
     tokio::spawn(async move {
         // State tracking
-        //let mut current_slot = slot;
-        //let mut current_store_hash = store_hash;
-        let mut latest_slot = current_slot;
+        info!("Consensus change detector has started.");
+        let mut latest_slot = slot;
         let mut in_flight = false; // indicates if validation request is outstanding
 
         let mut tick_interval = interval(Duration::from_secs_f64(polling_interval_sec));
@@ -165,10 +164,10 @@ where
             tokio::select! {
                 // Receive input updates
                 Some(update) = finality_input_rx.recv() => {
-                    current_slot = update.slot;
-                    current_store_hash = update.store_hash;
-                    if latest_slot < current_slot {
-                        latest_slot = current_slot;
+                    slot = update.slot;
+                    store_hash = update.store_hash;
+                    if latest_slot < slot {
+                        latest_slot = slot;
                     }
                 },
 
@@ -179,7 +178,7 @@ where
                     match result {
                         Ok((input_slot, output_slot, validated_proof_inputs)) => {
                             // Only emit output if the input_slot matches current and our output is ahead of the current slot
-                            if input_slot == current_slot {
+                            if input_slot == slot {
                                 if output_slot > latest_slot {
                                     if finality_output_tx.send(FinalityChangeDetectorOutput {
                                         input_slot,
@@ -192,7 +191,7 @@ where
                                     latest_slot = output_slot;
                                 }
                                 else {
-                                    log::warn!(
+                                    debug!(
                                         "No change detected result was output_slot: '{}' when the latest_slot was: '{}'. Ignoring.",
                                         output_slot,
                                         latest_slot
@@ -200,15 +199,15 @@ where
                                 }
 
                             } else {
-                                log::warn!(
+                                debug!(
                                     "Stale validation result received. result input slot: '{}', current slot: '{}'. Ignoring.",
                                     input_slot,
-                                    current_slot
+                                    slot
                                 );
                             }
                         }
                         Err(e) => {
-                            log::warn!("Validation error in change detector ignoring: {:?}", e);
+                            debug!("Validation error in change detector ignoring: {:?}", e);
                         }
                     }
                 },
@@ -218,13 +217,13 @@ where
                     if !in_flight {
 
                         let job = FinalityChangeDetectorInput {
-                            slot: current_slot,
-                            store_hash: current_store_hash,
+                            slot,
+                            store_hash,
                         };
                         if validation_job_tx.send(job).await.is_ok() {
                             in_flight = true;
                         } else {
-                            log::error!("Validation actor job channel closed unexpectedly.");
+                            error!("Validation actor job channel closed unexpectedly.");
                             break; // stop the loop if sending jobs is impossible
                         }
                     }

@@ -3,7 +3,6 @@ use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
 use nori::{rpcs::consensus::ConsensusHttpProxy, sp1_prover::finality_update_job};
 use std::{env, fs};
-//use nori::{rpcs::consensus::{get_client_latest_finality_update, get_client_latest_finality_update_and_slot, get_latest_finality_slot_and_store_hash}, sp1_prover::finality_update_job};
 
 #[tokio::main]
 async fn main() -> Result<()> {
