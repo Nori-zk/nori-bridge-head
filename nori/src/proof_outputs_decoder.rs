@@ -101,6 +101,12 @@ impl DecodedProofOutputs {
             .map_err(|_| anyhow!("Invalid array length"))?;
         info!("len_bytes {:?}", len_bytes);
 
+        let last_bytes: [u8; 32] = bytes[384..416]
+            .try_into()
+            .map_err(|_| anyhow!("Invalid array length"))?;
+        info!("last_bytes {:?}", last_bytes);
+
+
         // Check if offset fits in usize and is reasonable
         if offset_u256 > U256::from(usize::MAX) {
             return Err(anyhow!("Storage slots offset too large: {}", offset_u256));

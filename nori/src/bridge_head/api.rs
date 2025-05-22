@@ -1,5 +1,8 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::finality_change_detector::{start_validated_consensus_finality_change_detector, FinalityChangeDetectorInput, FinalityChangeDetectorOutput};
+use super::finality_change_detector::{
+    start_validated_consensus_finality_change_detector, FinalityChangeDetectorInput,
+    FinalityChangeDetectorOutput,
+};
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension,
@@ -12,13 +15,14 @@ use super::validate::validate_env;
 use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::rpcs::consensus::ConsensusHttpProxy;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
+use alloy::dyn_abi::SolType;
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
 use log::{error, info, warn};
-use nori_sp1_helios_primitives::types::ProofInputs;
+use nori_sp1_helios_primitives::types::{ProofInputs, ProofOutputs};
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
@@ -121,7 +125,12 @@ pub struct BridgeHead {
 
 impl BridgeHead {
     pub async fn new() -> (CommandHandle, Self) {
-        validate_env(&["SOURCE_CONSENSUS_RPC_URL", "SP1_PROVER", "NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS", "SOURCE_EXECUTION_HTTP_RPCS"]);
+        validate_env(&[
+            "SOURCE_CONSENSUS_RPC_URL",
+            "SP1_PROVER",
+            "NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS",
+            "SOURCE_EXECUTION_HTTP_RPCS",
+        ]);
 
         // Initialise slot head / commitee vars
         let current_slot;
@@ -138,7 +147,11 @@ impl BridgeHead {
             // Cold start procedure
             // FIXME we should be going from a trusted checkpoint TODO
             info!("Resorting to cold start procedure.");
-            (current_slot, store_hash) = ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env().get_latest_finality_slot_and_store_hash().await.unwrap();
+            (current_slot, store_hash) =
+                ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env()
+                    .get_latest_finality_slot_and_store_hash()
+                    .await
+                    .unwrap();
         }
 
         // Setup command mpsc
@@ -155,8 +168,12 @@ impl BridgeHead {
 
         // Setup polling client for finality change detection
         info!("Starting helios polling client.");
-        let (init_latest_beacon_slot, finality_output_rx,finality_input_tx) =
-            start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(current_slot, store_hash).await;
+        let (init_latest_beacon_slot, finality_output_rx, finality_input_tx) =
+            start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(
+                current_slot,
+                store_hash,
+            )
+            .await;
 
         (
             input_command_handle,
@@ -234,6 +251,16 @@ impl BridgeHead {
         // Extract the next sync committee out of the proof output
         let public_values: sp1_sdk::SP1PublicValues = proof.clone().public_values;
         let public_values_bytes = public_values.as_slice(); // Raw bytes
+
+        let proof_output_result = ProofOutputs::abi_decode(public_values_bytes, true);
+        if let Err(err) = proof_output_result {
+            warn!("Error decoding ProofOutputs: {:?}", err);
+        }
+        else {
+            let proof_output = proof_output_result.unwrap();
+            info!("Parsed proofoutput okokokok {:?}", proof_output.verifiedContractStorageSlots.len());
+        }
+
         let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes)?;
 
         // need to cast new head to a u64 // FIXME change the decoder later.......
@@ -248,7 +275,10 @@ impl BridgeHead {
         // Get the store hash
         let output_store_hash = proof_outputs.store_hash;
 
-        info!("...proof_outputs.next_sync_committee_hash {}", proof_outputs.next_sync_committee_hash);
+        info!(
+            "...proof_outputs.next_sync_committee_hash {}",
+            proof_outputs.next_sync_committee_hash
+        );
 
         // Notify of a succesful job
         let _ = self
@@ -329,7 +359,7 @@ impl BridgeHead {
     async fn stage_transition_proof(
         &mut self,
         slot: u64,
-        proof_inputs: ProofInputs<MainnetConsensusSpec>
+        proof_inputs: ProofInputs<MainnetConsensusSpec>,
     ) {
         // Get job id
         self.job_id += 1;
@@ -364,8 +394,7 @@ impl BridgeHead {
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
             // Execute job
-            let proof_result =
-                finality_update_job(job_id, current_slot, inputs).await;
+            let proof_result = finality_update_job(job_id, current_slot, inputs).await;
 
             // Send appropriate tx Ok or Err
             match proof_result {
@@ -414,7 +443,10 @@ impl BridgeHead {
     }
 
     // Update next slot logic
-    async fn on_beacon_finality_change(&mut self, event: FinalityChangeDetectorOutput<MainnetConsensusSpec>) {
+    async fn on_beacon_finality_change(
+        &mut self,
+        event: FinalityChangeDetectorOutput<MainnetConsensusSpec>,
+    ) {
         // Notify of transition
         let _ = self
             .trigger_listener_with_notice(
@@ -469,7 +501,7 @@ impl BridgeHead {
                         }
                         Command::Advance(message) => {
                             // Notify finality change detector of a change to the head position
-                            let _ = finality_input_tx.send(FinalityChangeDetectorInput {slot: message.slot, store_hash: message.store_hash}).await; 
+                            let _ = finality_input_tx.send(FinalityChangeDetectorInput {slot: message.slot, store_hash: message.store_hash}).await;
                             // Deal with advance invocation
                             let _ = self.advance(message.slot, message.store_hash).await;
                         }
