@@ -1,4 +1,9 @@
-use crate::{contract::bindings::get_source_contract_address, rpcs::query_with_fallback};
+use crate::{
+    contract::bindings::{
+        addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,
+    },
+    rpcs::query_with_fallback,
+};
 use alloy::{
     eips::BlockId,
     providers::{Provider, ProviderBuilder, RootProvider},
@@ -10,6 +15,7 @@ use alloy_primitives::{Address, Log, B256};
 use anyhow::{anyhow, Context, Result};
 use futures::FutureExt;
 use log::{error, info, warn};
+use nori_sp1_helios_primitives::types::{ContractStorage, StorageSlot};
 use reqwest::{Client, Url};
 use std::env;
 use tokio::time::{sleep, Duration};
@@ -55,10 +61,10 @@ impl ExecutionHttpProxy {
         let principal_provider = providers.remove(0);
 
         let source_state_bridge_contract_address = get_source_contract_address()?;
-            /*env::var("NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS")
-                .context("Missing NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS in environment")?
-                .parse::<Address>()
-                .context("Invalid Ethereum address format")?;*/
+        /*env::var("NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS")
+        .context("Missing NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS in environment")?
+        .parse::<Address>()
+        .context("Invalid Ethereum address format")?;*/
 
         Ok(ExecutionHttpProxy {
             source_state_bridge_contract_address,
@@ -137,7 +143,7 @@ impl ExecutionHttpProxy {
                         }
                         .boxed()
                     },
-                    PROVIDER_TIMEOUT
+                    PROVIDER_TIMEOUT,
                 )
                 .await
                 {
@@ -193,15 +199,69 @@ impl ExecutionHttpProxy {
             |provider| {
                 let keys = keys.clone();
                 // use provider as the client here
-                async move { Self::_get_proof(provider, address, keys, block_id).await }
-                    .boxed()
+                async move { Self::_get_proof(provider, address, keys, block_id).await }.boxed()
             },
-            PROVIDER_TIMEOUT
+            PROVIDER_TIMEOUT,
         )
         .await?;
 
         Ok(proof)
     }
 
-    
+    pub async fn get_consensus_mpt_contract_storage(
+        &self,
+        input_block_number: u64,
+        output_block_number: u64,
+    ) -> Result<ContractStorage> {
+        let contract_events = self
+            .get_source_contract_events::<NoriStateBridge::TokensLocked>(
+                input_block_number,
+                output_block_number,
+            )
+            .await?;
+
+        let storage_address_slots_map = addresses_to_storage_slots(contract_events)?;
+
+        for (address, storage_slot) in storage_address_slots_map.iter() {
+            println!(
+                "Storage slots obtained address '{:?}' storage_slot '{:?}'",
+                address, storage_slot
+            );
+        }
+
+        // Get mpt proof
+        let mpt_account_proof = self
+            .get_proof(
+                get_source_contract_address()?,
+                storage_address_slots_map.values().cloned().collect(),
+                BlockId::number(output_block_number),
+            )
+            .await?;
+
+        info!(
+            "mpt_account_proof {:?}",
+            serde_json::to_string(&mpt_account_proof)
+        );
+
+        let storage_slots: Vec<StorageSlot> = mpt_account_proof.storage_proof.iter().map(|slot| {
+            StorageSlot {
+                key: slot.key.as_b256(),
+                expected_value: slot.value,
+                mpt_proof: slot.proof.clone()
+            }
+        }).collect();
+
+        let contract_storage = ContractStorage {
+            address: mpt_account_proof.address,
+            expected_value: alloy_trie::TrieAccount {
+                nonce: mpt_account_proof.nonce,
+                balance: mpt_account_proof.balance,
+                storage_root: mpt_account_proof.storage_hash,
+                code_hash: mpt_account_proof.code_hash,
+            },
+            mpt_proof: mpt_account_proof.account_proof,
+            storage_slots,
+        };
+        Ok(contract_storage)
+    }
 }

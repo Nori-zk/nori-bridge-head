@@ -10,11 +10,13 @@ authors.workspace = true
 #name = "nori-program"
 
 [dependencies]
-sp1-zkvm = "4.1.0"
+sp1-zkvm = "4.1.7"
 helios-consensus-core = { workspace = true }
 serde_cbor = { workspace = true }
 alloy-sol-types = { workspace = true }
 alloy-primitives = { workspace = true, features = ["sha3-keccak"] }
+alloy-trie = { workspace = true }
+alloy-rlp = { workspace = true }
 tree_hash = { workspace = true }
 anyhow = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }

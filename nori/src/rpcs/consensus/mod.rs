@@ -1,4 +1,4 @@
-use super::{multiplex, query_with_fallback};
+use super::{execution::http::ExecutionHttpProxy, multiplex, query_with_fallback};
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{anyhow, Error, Result};
 use futures::FutureExt;
@@ -15,8 +15,8 @@ use helios_ethereum::{
 };
 use log::{debug, info, warn};
 use nori_hash::sha256_hash::sha256_hash_helios_store;
-use nori_sp1_helios_primitives::types::ProofInputs;
-use nori_sp1_helios_program::sp1_helios::program;
+use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputs};
+use nori_sp1_helios_program::consensus::{consensus_mpt_program, consensus_program};
 use reqwest::Url;
 use std::{env, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc::channel, watch};
@@ -324,16 +324,16 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
         Ok((slot, store_hash))
     }
 
-    /// Encodes a prepared helio store ready for a sp1 helio slot transition proof
+    /// Prepares a consensus proof input for a sp1 helios slot transition proof
     /// # Arguments
     /// * `consensus_rpc` - Url of the consensus RPC to use to prepare a store
     /// * `input_head` - Target slot number to prove from up until current finality head
-    /// * `store_hash` - The previous hash of the helio client store state at the `input_head` slot
-    pub async fn prepare_proof_inputs(
+    /// * `store_hash` - The previous hash of the helios client store state at the `input_head` slot
+    pub async fn prepare_consensus_proof_inputs(
         consensus_rpc: &Url,
         input_slot: u64,
         store_hash: FixedBytes<32>,
-    ) -> Result<ProofInputs<S>> {
+    ) -> Result<ConsensusProofInputs<S>> {
         let mut client: Client<S, R> =
             Client::bootstrap_from_slot(consensus_rpc, input_slot).await?;
 
@@ -404,7 +404,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
 
         // Create program inputs
         debug!("Building sp1 proof inputs.");
-        let proof_inputs = ProofInputs {
+        let proof_inputs = ConsensusProofInputs {
             updates,
             finality_update,
             expected_current_slot,
@@ -488,18 +488,20 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         input_slot: u64,
         store_hash: FixedBytes<32>,
     ) -> Result<(u64, u64, ProofInputs<S>)> {
-        multiplex(
+        let (input_slot, output_slot, validated_consensus_proof_inputs) = multiplex(
             |url| {
                 async move {
                     // Fetch proof_inputs
-                    let proof_inputs =
-                        Client::<S, R>::prepare_proof_inputs(&url, input_slot, store_hash).await?;
+                    let consensus_proof_inputs = Client::<S, R>::prepare_consensus_proof_inputs(
+                        &url, input_slot, store_hash,
+                    )
+                    .await?;
 
                     // Run the CPU-heavy program and slot validation inside spawn_blocking
                     let (output_slot, validated_proof_inputs) =
                         tokio::task::spawn_blocking(move || {
                             // Run program logic
-                            let proof_outputs = program(proof_inputs.clone())?;
+                            let proof_outputs = consensus_program(consensus_proof_inputs.clone())?;
 
                             // Convert newHead to u64
                             let new_slot = proof_outputs.newHead;
@@ -518,7 +520,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                                 ));
                             }
 
-                            Ok((output_slot, proof_inputs))
+                            Ok((output_slot, consensus_proof_inputs))
                         })
                         .await??;
 
@@ -529,19 +531,71 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             &self.all_providers_urls,
             PROOF_INPUT_VALIDATION_TIMEOUT,
         )
-        .await
+        .await?;
+
+        // Get input and output block numbers
+        let finalized_input_block_number = *validated_consensus_proof_inputs
+            .store
+            .finalized_header
+            .execution()
+            .map_err(|_| {
+                anyhow::Error::msg("Failed to get input finalized execution header".to_string())
+            })?
+            .block_number();
+
+        // Need to validate that we will advance!
+
+        let finalized_output_block_number = *validated_consensus_proof_inputs
+            .finality_update
+            .finalized_header()
+            .execution()
+            .map_err(|_| {
+                anyhow::Error::msg("Failed to get output finalized execution header".to_string())
+            })?
+            .block_number();
+
+        // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
+        let contract_storage = ExecutionHttpProxy::try_from_env()
+            .get_consensus_mpt_contract_storage(
+                finalized_input_block_number,
+                finalized_output_block_number,
+            )
+            .await?;
+
+        // Build complete consensus mpt proof input
+        let consensus_mpt_proof_input: ProofInputs<S> = ProofInputs::<S> {
+            updates: validated_consensus_proof_inputs.updates,
+            finality_update: validated_consensus_proof_inputs.finality_update,
+            expected_current_slot: validated_consensus_proof_inputs.expected_current_slot,
+            store: validated_consensus_proof_inputs.store,
+            genesis_root: validated_consensus_proof_inputs.genesis_root,
+            forks: validated_consensus_proof_inputs.forks,
+            store_hash: validated_consensus_proof_inputs.store_hash,
+            contract_storage,
+        };
+        let consensus_mpt_proof_input_clone = consensus_mpt_proof_input.clone();
+
+        // Dry run this proof
+        let _ = tokio::task::spawn_blocking(move || {
+            // Run program logic
+            consensus_mpt_program(consensus_mpt_proof_input_clone)
+        })
+        .await??;
+
+        Ok((input_slot, output_slot, consensus_mpt_proof_input))
     }
 
     pub async fn prepare_proof_inputs(
         &self,
         input_slot: u64,
         store_hash: FixedBytes<32>,
-    ) -> Result<ProofInputs<S>> {
-        multiplex(
+    ) -> Result<ProofInputs::<S>> {
+        let consensus_proof_inputs = multiplex(
             |url| {
                 {
                     async move {
-                        Client::<S, R>::prepare_proof_inputs(&url, input_slot, store_hash).await
+                        Client::<S, R>::prepare_consensus_proof_inputs(&url, input_slot, store_hash)
+                            .await
                     }
                 }
                 .boxed()
@@ -549,7 +603,48 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             &self.all_providers_urls,
             PROOF_INPUT_VALIDATION_TIMEOUT,
         )
-        .await
+        .await?;
+
+        // Get input and output block numbers
+        let finalized_input_block_number = *consensus_proof_inputs
+            .store
+            .finalized_header
+            .execution()
+            .map_err(|_| {
+                anyhow::Error::msg("Failed to get input finalized execution header".to_string())
+            })?
+            .block_number();
+
+        // Need to validate that we will advance!
+
+        let finalized_output_block_number = *consensus_proof_inputs
+            .finality_update
+            .finalized_header()
+            .execution()
+            .map_err(|_| {
+                anyhow::Error::msg("Failed to get output finalized execution header".to_string())
+            })?
+            .block_number();
+
+        // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
+        let contract_storage = ExecutionHttpProxy::try_from_env()
+            .get_consensus_mpt_contract_storage(
+                finalized_input_block_number,
+                finalized_output_block_number,
+            )
+            .await?;
+
+        // Build complete consensus mpt proof input
+        Ok(ProofInputs::<S> {
+            updates: consensus_proof_inputs.updates,
+            finality_update: consensus_proof_inputs.finality_update,
+            expected_current_slot: consensus_proof_inputs.expected_current_slot,
+            store: consensus_proof_inputs.store,
+            genesis_root: consensus_proof_inputs.genesis_root,
+            forks: consensus_proof_inputs.forks,
+            store_hash: consensus_proof_inputs.store_hash,
+            contract_storage,
+        })
     }
 
     /// Get the latest slot & store hash from the latest finality checkpoint.
@@ -561,13 +656,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             &self.principal_provider_url,
             &Vec::new(),
             |url| {
-                async move {
-                    Client::<S, R>::get_latest_finality_slot_and_store_hash(
-                        &url,
-                    )
-                    .await
-                }
-                .boxed()
+                async move { Client::<S, R>::get_latest_finality_slot_and_store_hash(&url).await }
+                    .boxed()
             },
             PROVIDER_TIMEOUT,
         )

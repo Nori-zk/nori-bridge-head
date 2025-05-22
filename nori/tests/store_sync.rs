@@ -1,7 +1,7 @@
 use anyhow::Result;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::LightClientStore};
 use nori_hash::sha256_hash::sha256_hash_helios_store;
-use nori_sp1_helios_program::sp1_helios::zk_program;
+use nori_sp1_helios_program::consensus::zk_consensus_mpt_program;
 
 static OLD_STORE_JSON: &str = include_str!("./data/store.11457376.json");
 

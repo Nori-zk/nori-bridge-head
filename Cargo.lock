@@ -3967,6 +3967,7 @@ version = "5.0.0"
 dependencies = [
  "alloy",
  "alloy-primitives",
+ "alloy-trie",
  "anyhow",
  "async-trait",
  "cargo_metadata",
@@ -4013,6 +4014,7 @@ version = "0.1.0"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
+ "alloy-trie",
  "helios-consensus-core",
  "serde",
 ]
@@ -4022,7 +4024,9 @@ name = "nori-sp1-helios-program"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-sol-types",
+ "alloy-trie",
  "anyhow",
  "helios-consensus-core",
  "log",
