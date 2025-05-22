@@ -1,3 +1,4 @@
+use super::{multiplex, query_with_fallback};
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{anyhow, Error, Result};
 use futures::FutureExt;
@@ -22,11 +23,10 @@ use tokio::sync::{mpsc::channel, watch};
 use tokio::time::Duration;
 use tree_hash::TreeHash;
 
-use super::multiplex;
-
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 const CONENSUS_RPCS_ENV_VAR: &str = "CONSENSUS_RPCS_LIST";
 pub const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
+pub const PROOF_INPUT_VALIDATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Client<S: ConsensusSpec, R: ConsensusRpc<S>> {
     inner: Inner<S, R>,
@@ -64,7 +64,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
         let (finalized_block_send, _) = watch::channel(None);
         let (channel_send, _) = watch::channel(None);
         let inner = Inner::<S, R>::new(
-            &consensus_rpc.to_string(),
+            consensus_rpc.as_ref(),
             block_send,
             finalized_block_send,
             channel_send,
@@ -527,7 +527,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 .boxed()
             },
             &self.all_providers_urls,
-            PROVIDER_TIMEOUT,
+            PROOF_INPUT_VALIDATION_TIMEOUT,
         )
         .await
     }
@@ -547,7 +547,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 .boxed()
             },
             &self.all_providers_urls,
-            PROVIDER_TIMEOUT,
+            PROOF_INPUT_VALIDATION_TIMEOUT,
         )
         .await
     }
@@ -557,7 +557,21 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         // This is used in cold start procedure which is a trusted operation (hence the principle trusted endpoint).
         // FIXME this bootstrap needs to be more strictly defined
         // but leaving this for now.
-        Client::<S, R>::get_latest_finality_slot_and_store_hash(&self.principal_provider_url).await
+        query_with_fallback(
+            &self.principal_provider_url,
+            &Vec::new(),
+            |url| {
+                async move {
+                    Client::<S, R>::get_latest_finality_slot_and_store_hash(
+                        &url,
+                    )
+                    .await
+                }
+                .boxed()
+            },
+            PROVIDER_TIMEOUT,
+        )
+        .await
     }
 
     // Get latest_finality_slot

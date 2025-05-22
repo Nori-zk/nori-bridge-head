@@ -121,7 +121,7 @@ pub struct BridgeHead {
 
 impl BridgeHead {
     pub async fn new() -> (CommandHandle, Self) {
-        validate_env(&["SOURCE_CONSENSUS_RPC_URL", "SP1_PROVER"]);
+        validate_env(&["SOURCE_CONSENSUS_RPC_URL", "SP1_PROVER", "NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS", "SOURCE_EXECUTION_HTTP_RPCS"]);
 
         // Initialise slot head / commitee vars
         let current_slot;
