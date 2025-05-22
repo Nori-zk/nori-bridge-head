@@ -60,17 +60,17 @@ sol! {
     }
 
     struct ProofOutputs {
-        bytes32 executionStateRoot;
-        bytes32 newHeader;
-        bytes32 nextSyncCommitteeHash;
-        uint256 newHead;
-        bytes32 prevHeader;
-        uint256 prevHead;
-        bytes32 syncCommitteeHash;
-        bytes32 startSyncCommitteeHash;
-        bytes32 prevStoreHash;
-        bytes32 storeHash;
-        VerifiedContractStorageSlot[] verifiedContractStorageSlots;
+        bytes32 executionStateRoot; //0-31 [0..32]
+        bytes32 newHeader; //32->63 [32..64]
+        bytes32 nextSyncCommitteeHash; //64->95 [64..96]
+        uint256 newHead; //96->127 [96..128]
+        bytes32 prevHeader; //128->159 [128..160]
+        uint256 prevHead; //160->191 [160..192]
+        bytes32 syncCommitteeHash; //192->223 [192..224]
+        bytes32 startSyncCommitteeHash; //224->255 [224..256]
+        bytes32 prevStoreHash; //256-> 287 [256..288]
+        bytes32 storeHash; //288->319 [288..320]
+        VerifiedContractStorageSlot[] verifiedContractStorageSlots; // 32 bytes offset [320..352] and length. [352..384]... then [32 byte key, value and an address??]
     }
 
     struct ConsensusProofOutputs {

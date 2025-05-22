@@ -576,6 +576,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         let consensus_mpt_proof_input_clone = consensus_mpt_proof_input.clone();
 
         // Dry run this proof
+        // TODO probably move this into the get_consensus_mpt_contract_storage and give this function an additional argument of the consensus proof therefore we can 
+        // Validate each MPT proof individually
         let _ = tokio::task::spawn_blocking(move || {
             // Run program logic
             consensus_mpt_program(consensus_mpt_proof_input_clone)

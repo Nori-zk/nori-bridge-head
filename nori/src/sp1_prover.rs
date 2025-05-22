@@ -71,57 +71,9 @@ pub async fn finality_update_job(
     //store_hash: FixedBytes<32>,
     //finality_update: FinalityUpdate<MainnetConsensusSpec>,
 ) -> Result<ProverJobOutput> {
-    // Prepare mpt proof inputs
-    let finalized_input_block_number = *inputs.store
-        .finalized_header
-        .execution()
-        .map_err(|_| {
-            anyhow::Error::msg("Failed to get input finalized execution header".to_string())
-        })?
-        .block_number();
-
-    // Need to validate that we will advance!
-
-    let finalized_output_block_number = *inputs.finality_update
-        .finalized_header()
-        .execution()
-        .map_err(|_| {
-            anyhow::Error::msg("Failed to get output finalized execution header".to_string())
-        })?
-        .block_number();
-
-    // Now get contract events...
-
-    let proxy = ExecutionHttpProxy::try_from_env();
-
-    let contract_events = proxy
-        .get_source_contract_events::<NoriStateBridge::TokensLocked>(
-            finalized_input_block_number,
-            finalized_output_block_number,
-        )
-        .await?;
-
-    let storage_address_slots_map = addresses_to_storage_slots(contract_events)?;
-
-    for (address, storage_slot) in storage_address_slots_map.iter() {
-        println!(
-            "Storage slots obtained address '{:?}' storage_slot '{:?}'",
-            address, storage_slot
-        );
-    }
-
-    // Get mpt proof
-    let mpt_account_proof = proxy
-        .get_proof(
-            get_source_contract_address()?,
-            storage_address_slots_map.values().cloned().collect(),
-            BlockId::number(finalized_output_block_number),
-        )
-        .await?;
-
     info!(
-        "mpt_account_proof {:?}",
-        serde_json::to_string(&mpt_account_proof)
+        "Contract storage {:?}",
+        serde_json::to_string(&inputs.contract_storage)
     );
 
     // Encode proof inputs

@@ -17,13 +17,13 @@ use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
-use log::{error, info};
+use log::{error, info, warn};
 use nori_sp1_helios_primitives::types::ProofInputs;
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-use std::fmt;
+use std::{fmt, process};
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -479,13 +479,17 @@ impl BridgeHead {
                 Some(job_result) = job_rx.recv() => {
                     match job_result {
                         Ok(result_data) => {
-                            let _ = self.handle_prover_success(
+                            let handle_prover_success_result = self.handle_prover_success(
                                 result_data.job_id(),
                                 result_data.proof(),
                             ).await;
+                            if let Err(err) = handle_prover_success_result {
+                                error!("Error handlng prover success: {:?}", err);
+                                process::exit(1);
+                            }
                         }
                         Err(err) => {
-                            let _ = self.handle_prover_failure(&err).await;
+                            let _ = self.handle_prover_failure(&err).await; // Perhaps kill the program
                         }
                     }
                 }

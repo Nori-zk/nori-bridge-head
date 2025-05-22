@@ -1,5 +1,5 @@
 use alloy_primitives::FixedBytes;
-use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::FinalityUpdate};
+use helios_consensus_core::{consensus_spec::MainnetConsensusSpec};
 use nori_sp1_helios_primitives::types::ProofInputs;
 use tokio::sync::mpsc::Sender;
 

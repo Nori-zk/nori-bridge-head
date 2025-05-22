@@ -9,7 +9,7 @@ use crate::utils::{handle_nori_proof, handle_nori_proof_message};
 use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use helios_consensus_core::{consensus_spec::MainnetConsensusSpec, types::FinalityUpdate};
+use helios_consensus_core::{consensus_spec::MainnetConsensusSpec};
 use log::{error, info, warn};
 use nori_sp1_helios_primitives::types::ProofInputs;
 

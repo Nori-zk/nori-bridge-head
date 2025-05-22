@@ -14,7 +14,7 @@ use alloy::{
 use alloy_primitives::{Address, Log, B256};
 use anyhow::{anyhow, Context, Result};
 use futures::FutureExt;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use nori_sp1_helios_primitives::types::{ContractStorage, StorageSlot};
 use reqwest::{Client, Url};
 use std::env;
@@ -118,7 +118,7 @@ impl ExecutionHttpProxy {
         while current_block <= end_block {
             let chunk_end = (current_block + CHUNK_SIZE).min(end_block);
 
-            info!(
+            debug!(
                 "Loading source contract event '{}' from blocks '{}'->'{}'.",
                 T::SIGNATURE,
                 current_block,
@@ -223,7 +223,7 @@ impl ExecutionHttpProxy {
         let storage_address_slots_map = addresses_to_storage_slots(contract_events)?;
 
         for (address, storage_slot) in storage_address_slots_map.iter() {
-            println!(
+            debug!(
                 "Storage slots obtained address '{:?}' storage_slot '{:?}'",
                 address, storage_slot
             );
@@ -238,7 +238,7 @@ impl ExecutionHttpProxy {
             )
             .await?;
 
-        info!(
+        debug!(
             "mpt_account_proof {:?}",
             serde_json::to_string(&mpt_account_proof)
         );
