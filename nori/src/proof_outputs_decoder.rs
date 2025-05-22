@@ -1,6 +1,8 @@
+use alloy::sol_types::SolValue;
 use alloy_primitives::{Address, B256, U256};
 use anyhow::{anyhow, Result};
 use log::info;
+use nori_sp1_helios_primitives::types::ProofOutputs;
 use serde::{Deserialize, Serialize};
 
 /*
@@ -33,21 +35,50 @@ pub struct DecodedProofOutputs {
     pub verified_storage_slots: Vec<VerifiedStorageSlot>,
 }
 
-/*
-    bytes32 executionStateRoot; //0-31 [0..32]
-    bytes32 newHeader; //32->63 [32..64]
-    bytes32 nextSyncCommitteeHash; //64->95 [64..96]
-    uint256 newHead; //96->127 [96..128]
-    bytes32 prevHeader; //128->159 [128..160]
-    uint256 prevHead; //160->191 [160..192]
-    bytes32 syncCommitteeHash; //192->223 [192..224]
-    bytes32 startSyncCommitteeHash; //224->255 [224..256]
-    bytes32 prevStoreHash; //256-> 287 [256..288]
-    bytes32 storeHash; //288->319 [288..320]
-    VerifiedContractStorageSlot[] verifiedContractStorageSlots; // 32 bytes offset [320..352] and length. [352..384]... then [32 byte key, value and an address??]
-*/
 impl DecodedProofOutputs {
     pub fn from_abi(bytes: &[u8]) -> Result<Self> {
+        let proof_output = ProofOutputs::abi_decode(bytes, true)?;
+
+        let verified_storage_slots = proof_output
+            .verifiedContractStorageSlots
+            .into_iter()
+            .map(|slot| VerifiedStorageSlot {
+                key: slot.key,
+                value: slot.value,
+                contract_address: slot.contractAddress,
+            })
+            .collect();
+
+        // Return the decoded struct
+        Ok(DecodedProofOutputs {
+            execution_state_root: proof_output.executionStateRoot,
+            new_header: proof_output.newHeader,
+            next_sync_committee_hash: proof_output.nextSyncCommitteeHash,
+            new_head: proof_output.newHead,
+            prev_header: proof_output.prevHeader,
+            prev_head: proof_output.prevHead,
+            sync_committee_hash: proof_output.startSyncCommitteeHash,
+            start_sync_committee_hash: proof_output.startSyncCommitteeHash,
+            prev_store_hash: proof_output.prevStoreHash,
+            store_hash: proof_output.storeHash,
+            verified_storage_slots,
+        })
+    }
+
+    /*
+        bytes32 executionStateRoot; //0-31 [0..32]
+        bytes32 newHeader; //32->63 [32..64]
+        bytes32 nextSyncCommitteeHash; //64->95 [64..96]
+        uint256 newHead; //96->127 [96..128]
+        bytes32 prevHeader; //128->159 [128..160]
+        uint256 prevHead; //160->191 [160..192]
+        bytes32 syncCommitteeHash; //192->223 [192..224]
+        bytes32 startSyncCommitteeHash; //224->255 [224..256]
+        bytes32 prevStoreHash; //256-> 287 [256..288]
+        bytes32 storeHash; //288->319 [288..320]
+        VerifiedContractStorageSlot[] verifiedContractStorageSlots; // 32 bytes offset [320..352] and length. [352..384]... then [32 byte key, value and an address??]
+    */
+    pub fn from_abi_manual(bytes: &[u8]) -> Result<Self> {
         // Minimum length is 352 bytes (static fields + array offset).
         if bytes.len() < 352 {
             return Err(anyhow!(
@@ -105,7 +136,6 @@ impl DecodedProofOutputs {
             .try_into()
             .map_err(|_| anyhow!("Invalid array length"))?;
         info!("last_bytes {:?}", last_bytes);
-
 
         // Check if offset fits in usize and is reasonable
         if offset_u256 > U256::from(usize::MAX) {
