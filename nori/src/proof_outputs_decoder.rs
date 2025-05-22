@@ -78,6 +78,7 @@ impl DecodedProofOutputs {
         bytes32 storeHash; //288->319 [288..320]
         VerifiedContractStorageSlot[] verifiedContractStorageSlots; // 32 bytes offset [320..352] and length. [352..384]... then [32 byte key, value and an address??]
     */
+    // THIS DOES NOT WORK
     pub fn from_abi_manual(bytes: &[u8]) -> Result<Self> {
         // Minimum length is 352 bytes (static fields + array offset).
         if bytes.len() < 352 {
