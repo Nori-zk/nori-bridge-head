@@ -488,6 +488,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         input_slot: u64,
         store_hash: FixedBytes<32>,
     ) -> Result<(u64, u64, ProofInputs<S>)> {
+        // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
+        // Deserves it own location
         let (input_slot, output_slot, validated_consensus_proof_inputs) = multiplex(
             |url| {
                 async move {
