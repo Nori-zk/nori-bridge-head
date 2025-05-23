@@ -52,37 +52,46 @@ pub struct ExecutionStateProof {
     pub gindex: String,
 }
 
+// https://docs.soliditylang.org/en/develop/abi-spec.html
 sol! {
     struct VerifiedContractStorageSlot {
-        bytes32 key;
-        bytes32 value;
-        address contractAddress;
-    }
-
-    struct ProofOutputs {
-        bytes32 executionStateRoot; //0-31 [0..32]
-        bytes32 newHeader; //32->63 [32..64]
-        bytes32 nextSyncCommitteeHash; //64->95 [64..96]
-        uint256 newHead; //96->127 [96..128]
-        bytes32 prevHeader; //128->159 [128..160]
-        uint256 prevHead; //160->191 [160..192]
-        bytes32 syncCommitteeHash; //192->223 [192..224]
-        bytes32 startSyncCommitteeHash; //224->255 [224..256]
-        bytes32 prevStoreHash; //256-> 287 [256..288]
-        bytes32 storeHash; //288->319 [288..320]
-        VerifiedContractStorageSlot[] verifiedContractStorageSlots; // 32 bytes offset [320..352] and length. [352..384]... then [32 byte key, value and an address??]
+        bytes32 key;                                                                         //0-31    [0  ..32 ]
+        bytes32 value;                                                                       //32-63   [32 ..64 ]
+        address contractAddress;                                                             //64-95   [64 ..96 ] address: equivalent to uint160, zero padding on LHS
+    } 
+ 
+    struct ProofOutputs { 
+        //bytes32 OFFSET (VALUE 32 points to start of ProofOutputs struct)                   //0-31    [0  ..32 ]
+        bytes32 executionStateRoot;                                                          //32-63   [32 ..64 ] (Start of ProofOutputs struct)
+        bytes32 newHeader;                                                                   //64-95   [64 ..96 ]
+        bytes32 nextSyncCommitteeHash;                                                       //96-127  [96 ..128]
+        uint256 newHead;                                                                     //128-159 [128..160]
+        bytes32 prevHeader;                                                                  //160-191 [160..192]
+        uint256 prevHead;                                                                    //192-223 [192..224]
+        bytes32 syncCommitteeHash;                                                           //224-255 [224..256]
+        bytes32 startSyncCommitteeHash;                                                      //256-287 [256..288]
+        bytes32 prevStoreHash;                                                               //288-319 [288..320]
+        bytes32 storeHash;                                                                   //320-351 [320..352]
+        VerifiedContractStorageSlot[] verifiedContractStorageSlots; 
+        //bytes32 OFFSET (VALUE 352 points to start of VerifiedContractStorageSlot[] struct) //352-383 [352..384] (Start of VerifiedContractStorageSlot[] struct)
+        //bytes32 LENGTH (VALUE of how many VerifiedContractStorageSlot elements there are)  //384-415 [384..416]
+        //TUPLES OF VerifiedContractStorageSlot if there are any 
+        //bytes32 VerifiedContractStorageSlot[0]_key;                                        //416-447 [416..448]
+        //bytes32 VerifiedContractStorageSlot[0]_value;                                      //448-479 [448..480]
+        //address VerifiedContractStorageSlot[0]_contractAddress;                            //480-511 [480..512]
+        // ...and so on for additional array elements if any
     }
 
     struct ConsensusProofOutputs {
-        bytes32 executionStateRoot;
-        bytes32 newHeader;
-        bytes32 nextSyncCommitteeHash;
-        uint256 newHead;
-        bytes32 prevHeader;
-        uint256 prevHead;
-        bytes32 syncCommitteeHash;
-        bytes32 startSyncCommitteeHash;
-        bytes32 prevStoreHash;
-        bytes32 storeHash;
+        bytes32 executionStateRoot;                                                          //0-31    [0  ..32 ]
+        bytes32 newHeader;                                                                   //32-63   [32 ..64 ]
+        bytes32 nextSyncCommitteeHash;                                                       //64-95   [64 ..96 ]
+        uint256 newHead;                                                                     //96-127  [96 ..128]
+        bytes32 prevHeader;                                                                  //128-159 [128..160]
+        uint256 prevHead;                                                                    //160-191 [160..192]
+        bytes32 syncCommitteeHash;                                                           //192-223 [192..224]
+        bytes32 startSyncCommitteeHash;                                                      //224-255 [224..256]
+        bytes32 prevStoreHash;                                                               //256-287 [256..288]
+        bytes32 storeHash;                                                                   //288-319 [288..320]
     }
 }
