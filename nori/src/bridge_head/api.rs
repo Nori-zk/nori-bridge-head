@@ -280,6 +280,11 @@ impl BridgeHead {
             proof_outputs.next_sync_committee_hash
         );
 
+        info!("PROOF OUTPUT SERIALIZED:\n{}", serde_json::to_string(&proof_outputs)?);
+        info!("-----------------------------------------------------------------------------------------");
+        info!("-----------------------------------------------------------------------------------------");
+        info!("-----------------------------------------------------------------------------------------");
+
         // Notify of a succesful job
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobSucceeded(
