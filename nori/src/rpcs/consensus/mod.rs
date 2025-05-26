@@ -566,7 +566,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         Ok((input_slot, output_slot, consensus_mpt_proof_input))
     }
 
-    pub async fn prepare_proof_inputs(
+    /*pub async fn prepare_proof_inputs(
         &self,
         input_slot: u64,
         store_hash: FixedBytes<32>,
@@ -617,7 +617,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             .await?;
 
         Ok(consensus_mpt_proof_input)
-    }
+    }*/
 
     /// Get the latest slot & store hash from the latest finality checkpoint.
     pub async fn get_latest_finality_slot_and_store_hash(&self) -> Result<(u64, FixedBytes<32>)> {

@@ -13,14 +13,14 @@ async fn main() -> Result<()> {
         .get_latest_finality_slot_and_store_hash()
         .await
         .unwrap();
-    let proof_inputs = consensus_client
-        .prepare_proof_inputs(current_slot, store_hash)
+    let (_,_,proof_inputs) = consensus_client
+        .validate_and_prepare_proof_inputs(current_slot, store_hash)
         .await
         .unwrap();
 
     // Run mock program.
     println!("Running SP1 prover");
-    let proof_outputs = finality_update_job(0, current_slot, proof_inputs) // store_hash, finality_update
+    let proof_outputs = finality_update_job(0, current_slot, proof_inputs)
         .await
         .unwrap();
 
