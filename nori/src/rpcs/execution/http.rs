@@ -1,4 +1,9 @@
-use crate::{contracts::bindings::{addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,}, rpcs::query_with_fallback};
+use crate::{
+    contracts::bindings::{
+        addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,
+    },
+    rpcs::query_with_fallback,
+};
 use alloy::{
     eips::BlockId,
     providers::{Provider, ProviderBuilder, RootProvider},
@@ -9,24 +14,29 @@ use alloy::{
 use alloy_primitives::{Address, FixedBytes, Log, B256};
 use anyhow::{anyhow, Context, Result};
 use futures::FutureExt;
+use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, info, warn};
-use nori_sp1_helios_primitives::types::{ContractStorage, StorageSlot};
+use nori_sp1_helios_primitives::types::{
+    ConsensusProofInputs, ContractStorage, ProofInputs, StorageSlot,
+};
+use nori_sp1_helios_program::consensus::consensus_mpt_program;
 use reqwest::{Client, Url};
-use std::env;
+use std::{env, marker::PhantomData};
 use tokio::time::{sleep, Duration};
 
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
-const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
+const TIMEOUT: Duration = Duration::from_secs(10);
 
-pub struct ExecutionHttpProxy {
+pub struct ExecutionHttpProxy<S: ConsensusSpec> {
     principal_provider: RootProvider<Http<Client>>,
     backup_providers: Vec<RootProvider<Http<Client>>>,
     source_state_bridge_contract_address: Address,
+    _marker: PhantomData<S>,
 }
 
-impl ExecutionHttpProxy {
+impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
 
@@ -56,15 +66,12 @@ impl ExecutionHttpProxy {
         let principal_provider = providers.remove(0);
 
         let source_state_bridge_contract_address = get_source_contract_address()?;
-        /*env::var("NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS")
-        .context("Missing NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS in environment")?
-        .parse::<Address>()
-        .context("Invalid Ethereum address format")?;*/
 
         Ok(ExecutionHttpProxy {
             source_state_bridge_contract_address,
             principal_provider,
             backup_providers: providers,
+            _marker: PhantomData,
         })
     }
 
@@ -73,8 +80,8 @@ impl ExecutionHttpProxy {
     }
 
     async fn _get_source_contract_event_chunk<T>(
-        provider: RootProvider<Http<Client>>,
-        source_state_bridge_contract_address: Address,
+        provider: &RootProvider<Http<Client>>,
+        source_state_bridge_contract_address: &Address,
         start: u64,
         end: u64,
     ) -> Result<Vec<Log<T>>>
@@ -84,7 +91,7 @@ impl ExecutionHttpProxy {
         let event_signature = T::SIGNATURE;
 
         let filter = Filter::new()
-            .address(source_state_bridge_contract_address)
+            .address(*source_state_bridge_contract_address)
             .event(event_signature)
             .from_block(start)
             .to_block(end);
@@ -100,7 +107,8 @@ impl ExecutionHttpProxy {
     }
 
     pub async fn get_source_contract_events<T>(
-        &self,
+        provider: &RootProvider<Http<Client>>,
+        source_state_bridge_contract_address: &Address,
         start_block: u64,
         end_block: u64,
     ) -> Result<Vec<Log<T>>>
@@ -122,23 +130,11 @@ impl ExecutionHttpProxy {
 
             let mut retries = 0;
             let events = loop {
-                match query_with_fallback(
-                    &self.principal_provider,
-                    &self.backup_providers,
-                    |provider| {
-                        let contract_address = self.source_state_bridge_contract_address;
-                        async move {
-                            Self::_get_source_contract_event_chunk(
-                                provider,
-                                contract_address,
-                                current_block,
-                                chunk_end,
-                            )
-                            .await
-                        }
-                        .boxed()
-                    },
-                    PROVIDER_TIMEOUT,
+                match Self::_get_source_contract_event_chunk(
+                    provider,
+                    source_state_bridge_contract_address,
+                    start_block,
+                    end_block,
                 )
                 .await
                 {
@@ -166,13 +162,13 @@ impl ExecutionHttpProxy {
     }
 
     async fn _get_proof(
-        client: RootProvider<Http<Client>>,
-        source_state_bridge_contract_address: Address,
+        provider: &RootProvider<Http<Client>>,
+        source_state_bridge_contract_address: &Address,
         storage_keys: Vec<B256>,
         block_id: BlockId,
     ) -> Result<EIP1186AccountProofResponse> {
-        let proof = client
-            .get_proof(source_state_bridge_contract_address, storage_keys)
+        let proof = provider
+            .get_proof(*source_state_bridge_contract_address, storage_keys)
             .block_id(block_id)
             .await;
 
@@ -182,38 +178,21 @@ impl ExecutionHttpProxy {
         }
     }
 
-    async fn get_proof(
-        &self,
-        address: Address,
-        keys: Vec<B256>,
-        block_id: BlockId,
-    ) -> Result<EIP1186AccountProofResponse> {
-        let proof = query_with_fallback(
-            &self.principal_provider,
-            &self.backup_providers,
-            |provider| {
-                let keys = keys.clone();
-                // use provider as the client here
-                async move { Self::_get_proof(provider, address, keys, block_id).await }.boxed()
-            },
-            PROVIDER_TIMEOUT,
-        )
-        .await?;
-
-        Ok(proof)
-    }
-
-    pub async fn get_contract_storage(
-        &self,
+    pub async fn _prepare_consensus_mpt_proof_inputs(
+        //&self,
+        provider: &RootProvider<Http<Client>>,
+        source_state_bridge_contract_address: &Address,
         input_block_number: u64,
         output_block_number: u64,
-    ) -> Result<ContractStorage> {
-        let contract_events = self
-            .get_source_contract_events::<NoriStateBridge::TokensLocked>(
-                input_block_number,
-                output_block_number,
-            )
-            .await?;
+        validated_consensus_proof_inputs: ConsensusProofInputs<S>,
+    ) -> Result<ProofInputs<S>> {
+        let contract_events = Self::get_source_contract_events::<NoriStateBridge::TokensLocked>(
+            provider,
+            source_state_bridge_contract_address,
+            input_block_number,
+            output_block_number,
+        )
+        .await?;
 
         let storage_slot_address_map = addresses_to_storage_slots(contract_events)?;
 
@@ -225,13 +204,13 @@ impl ExecutionHttpProxy {
         }
 
         // Get mpt proof
-        let mpt_account_proof = self
-            .get_proof(
-                get_source_contract_address()?,
-                storage_slot_address_map.keys().cloned().collect(),
-                BlockId::number(output_block_number),
-            )
-            .await?;
+        let mpt_account_proof = Self::_get_proof(
+            provider,
+            source_state_bridge_contract_address, //get_source_contract_address()?,
+            storage_slot_address_map.keys().cloned().collect(),
+            BlockId::number(output_block_number),
+        )
+        .await?;
 
         debug!(
             "mpt_account_proof {:?}",
@@ -269,8 +248,56 @@ impl ExecutionHttpProxy {
 
         // Construct proofinputs
 
-        
+        let consensus_mpt_proof_input: ProofInputs<S> = ProofInputs::<S> {
+            updates: validated_consensus_proof_inputs.updates,
+            finality_update: validated_consensus_proof_inputs.finality_update,
+            expected_current_slot: validated_consensus_proof_inputs.expected_current_slot,
+            store: validated_consensus_proof_inputs.store,
+            genesis_root: validated_consensus_proof_inputs.genesis_root,
+            forks: validated_consensus_proof_inputs.forks,
+            store_hash: validated_consensus_proof_inputs.store_hash,
+            contract_storage,
+        };
 
-        Ok(contract_storage)
+        let consensus_mpt_proof_input_clone = consensus_mpt_proof_input.clone();
+
+        // Dry run this proof
+        let _ = tokio::task::spawn_blocking(move || {
+            // Run program logic
+            consensus_mpt_program(consensus_mpt_proof_input_clone)
+        })
+        .await??;
+
+        Ok(consensus_mpt_proof_input)
+    }
+
+    pub async fn prepare_consensus_mpt_proof_inputs(
+        &self,
+        input_block_number: u64,
+        output_block_number: u64,
+        validated_consensus_proof_inputs: ConsensusProofInputs<S>,
+    ) -> Result<ProofInputs<S>> {
+        let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
+        query_with_fallback(
+            &self.principal_provider,
+            &self.backup_providers,
+            |provider| {
+                let validated_consensus_proof_inputs = validated_consensus_proof_inputs.clone();
+                // use provider as the client here
+                async move {
+                    Self::_prepare_consensus_mpt_proof_inputs(
+                        &provider,
+                        &source_state_bridge_contract_address,
+                        input_block_number,
+                        output_block_number,
+                        validated_consensus_proof_inputs,
+                    )
+                    .await
+                }
+                .boxed()
+            },
+            TIMEOUT,
+        )
+        .await
     }
 }
