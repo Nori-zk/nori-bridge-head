@@ -1,6 +1,7 @@
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy_primitives::Address;
 use anyhow::{Context, Result};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use nori::{contracts::bindings::NoriStateBridge, rpcs::execution::{http::ExecutionHttpProxy, ws::get_source_contract_listener}, utils::enable_logging_from_cargo_run};
 use std::env;
 
@@ -56,7 +57,7 @@ async fn main_http() -> Result<()> {
     let end_block = provider.get_block_number().await?;
     let start_block = end_block - 50;
 
-    let proxy = ExecutionHttpProxy::try_from_env();
+    let proxy = ExecutionHttpProxy::<MainnetConsensusSpec>::try_from_env();
 
     let events = proxy.get_source_contract_events::<NoriStateBridge::TokensLocked>(start_block, end_block).await?;
 

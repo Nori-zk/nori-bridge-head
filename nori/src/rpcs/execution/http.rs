@@ -106,7 +106,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         Ok(events)
     }
 
-    pub async fn get_source_contract_events<T>(
+    pub async fn _get_source_contract_events<T>(
         provider: &RootProvider<Http<Client>>,
         source_state_bridge_contract_address: &Address,
         start_block: u64,
@@ -186,7 +186,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
     ) -> Result<ProofInputs<S>> {
-        let contract_events = Self::get_source_contract_events::<NoriStateBridge::TokensLocked>(
+        let contract_events = Self::_get_source_contract_events::<NoriStateBridge::TokensLocked>(
             provider,
             source_state_bridge_contract_address,
             input_block_number,
@@ -299,5 +299,32 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             TIMEOUT,
         )
         .await
+    }
+
+    pub async fn get_source_contract_events<T>(
+        &self,
+        start_block: u64,
+        end_block: u64,
+    ) -> Result<Vec<Log<T>>>
+    where
+        T: SolEvent + Send+ 'static,
+    {
+        let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
+        query_with_fallback(
+            &self.principal_provider,
+            &self.backup_providers,
+            |provider| {
+                async move {
+                    Self::_get_source_contract_events(
+                        &provider,
+                        &source_state_bridge_contract_address,
+                        start_block,
+                        end_block,
+                    ).await
+                }
+                .boxed()
+            },
+            TIMEOUT,
+        ).await
     }
 }

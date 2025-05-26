@@ -13,9 +13,9 @@ path = "./bin/nori_bridge_head.rs"
 name = "extract_zeroth_public_input"
 path = "./bin/extract_zeroth_public_input.rs"
 
-#[[bin]]
-#name = "contract_watcher"
-#path = "./bin/contract_watcher.rs"
+[[bin]]
+name = "contract_watcher"
+path = "./bin/contract_watcher.rs"
 
 #[[bin]]
 #name = "finality_change_detector"
