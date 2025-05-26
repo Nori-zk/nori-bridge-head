@@ -75,6 +75,7 @@ impl fmt::Display for MptError {
 /// 3. For each storage slot:
 ///    - Hashes the slot key with `keccak256` and converts it to nibbles.
 ///    - RLP-encodes the expected slot value.
+///    - Verifies the slot address mapping.
 ///    - Verifies the slot's MPT proof against the contract's `storage_root` from the verified `TrieAccount`.
 pub fn verify_storage_slot_proofs(
     execution_state_root: FixedBytes<32>,
