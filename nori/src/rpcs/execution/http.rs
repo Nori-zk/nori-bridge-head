@@ -246,8 +246,6 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             storage_slots,
         };
 
-        // Construct proofinputs
-
         let consensus_mpt_proof_input: ProofInputs<S> = ProofInputs::<S> {
             updates: validated_consensus_proof_inputs.updates,
             finality_update: validated_consensus_proof_inputs.finality_update,

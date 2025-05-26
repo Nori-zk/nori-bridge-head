@@ -68,7 +68,7 @@ where
     tokio::spawn(async move {
         while let Some(job) = job_rx.recv().await {
             let res = ConsensusHttpProxy::<S, R>::try_from_env()
-                .prepare_consensus_mpt_proof_inputs(job.slot, job.store_hash)
+                .prepare_consensus_mpt_proof_inputs(job.slot, job.store_hash, true)
                 .await;
 
             if result_tx.send(res).await.is_err() {

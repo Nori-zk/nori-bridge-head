@@ -467,11 +467,11 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     }
 
     /// Queries RPC providers for raw state updates, locally constructs proof inputs,
-    /// and runs the zkVM consensus logic in native code (not in a VM or zk prover),
+    /// and runs the zkVM consensus and mpt logic in native code (not in a VM or zk prover),
     /// simulating the state transition and verifying its validity.
     ///
     /// This validation ensures the transition from `input_slot` to `output_slot`
-    /// is consistent with consensus rules before any zk proof is generated.
+    /// is consistent with consensus and mpt rules before any zk proof is generated.
     ///
     /// # Arguments
     /// * `input_slot` - The starting slot number for the state transition.
@@ -481,12 +481,13 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     /// Tuple of (input slot, output slot, validated proof inputs).
     ///
     /// # Errors
-    /// Returns an error if the transition is invalid or if all providers fail to supply
+    /// Returns an error if the consensus / mpt proof is invalid or if all providers fail to supply
     /// valid raw updates that produce a consistent state transition.
     pub async fn prepare_consensus_mpt_proof_inputs(
         &self,
         input_slot: u64,
         store_hash: FixedBytes<32>,
+        validate_progress: bool
     ) -> Result<(u64, u64, ProofInputs<S>)> {
         // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
         // Deserves it own location
@@ -514,7 +515,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                             let output_slot = u64::from_be_bytes(new_slot_u64_bytes);
 
                             // Validate progression
-                            if output_slot <= input_slot {
+                            if validate_progress && output_slot <= input_slot {
                                 return Err(anyhow::anyhow!(
                                     "Output slot {} was not greater than input slot {}",
                                     output_slot,
@@ -555,7 +556,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             .block_number();
 
         // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
-        let consensus_mpt_proof_input = ExecutionHttpProxy::<S>::try_from_env()
+        let validated_consensus_mpt_proof_input = ExecutionHttpProxy::<S>::try_from_env()
             .prepare_consensus_mpt_proof_inputs(
                 finalized_input_block_number,
                 finalized_output_block_number,
@@ -563,7 +564,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             )
             .await?;
 
-        Ok((input_slot, output_slot, consensus_mpt_proof_input))
+        Ok((input_slot, output_slot, validated_consensus_mpt_proof_input))
     }
 
     /// Get the latest slot & store hash from the latest finality checkpoint.
