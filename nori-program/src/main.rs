@@ -15,7 +15,7 @@ pub fn main() {
     println!("Decoded inputs");
 
     // Run nori sp1 helios zk program
-    let proof_outputs = consensus_mpt_program(proof_inputs).unwrap();
+    let proof_outputs = consensus_mpt_program(proof_inputs, true).unwrap();
 
     // Write zk output
     sp1_zkvm::io::commit_slice(&proof_outputs.abi_encode());

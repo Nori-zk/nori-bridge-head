@@ -5,7 +5,9 @@ use helios_consensus_core::{
 };
 use log::debug;
 use nori_hash::sha256_hash::sha256_hash_helios_store;
-use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ConsensusProofOutputs, ProofInputs, ProofOutputs};
+use nori_sp1_helios_primitives::types::{
+    ConsensusProofInputs, ConsensusProofOutputs, ProofInputs, ProofOutputs,
+};
 use std::fmt;
 use tree_hash::TreeHash;
 
@@ -65,7 +67,6 @@ impl From<MptError> for ProgramError {
 }
 
 impl std::error::Error for ProgramError {}
-
 
 /// Zero-Knowledge Consensus State Transition Proof for Ethereum Light Client Updates with Result type
 ///
@@ -159,7 +160,9 @@ impl std::error::Error for ProgramError {}
 ///    `store.finalized_header.execution()` is None  
 ///    → Incomplete header data
 ///
-pub fn consensus_program<S: ConsensusSpec>(proof_inputs: ConsensusProofInputs<S>) -> Result<ConsensusProofOutputs, ProgramError> {
+pub fn consensus_program<S: ConsensusSpec>(
+    proof_inputs: ConsensusProofInputs<S>,
+) -> Result<ConsensusProofOutputs, ProgramError> {
     // Unpack inputs
     let ConsensusProofInputs {
         updates,
@@ -379,6 +382,7 @@ pub fn consensus_program<S: ConsensusSpec>(proof_inputs: ConsensusProofInputs<S>
 ///
 pub fn consensus_mpt_program<S: ConsensusSpec>(
     proof_inputs: ProofInputs<S>,
+    debug_print: bool,
 ) -> Result<ProofOutputs, ProgramError> {
     // Unpack inputs
     let ProofInputs {
@@ -393,7 +397,9 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     } = proof_inputs;
 
     // 1. Calculate old store hash and assert equality
-    debug!("Hashing old store state and comparing with proof inputs store hash.");
+    if debug_print {
+        println!("Hashing old store state and comparing with proof inputs store hash.");
+    }
     let calculated_prev_store_hash = sha256_hash_helios_store(&store)
         .map_err(|e| ProgramError::StoreHashingError(format!("Failed to hash store: {}", e)))?;
     if calculated_prev_store_hash != prev_store_hash {
@@ -402,29 +408,37 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
             actual: calculated_prev_store_hash,
         });
     }
-    debug!(
-        "Old store state hash is valid: {}",
-        calculated_prev_store_hash
-    );
+    if debug_print {
+        println!(
+            "Old store state hash is valid: {}",
+            calculated_prev_store_hash
+        );
+    }
 
     // 2. State capture
-    debug!("Committing prev_header, prev_head and start_sync_committee_hash.");
+    if debug_print {
+        println!("Committing prev_header, prev_head and start_sync_committee_hash.");
+    }
     let prev_head = store.finalized_header.beacon().slot;
     let prev_header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
     let start_sync_committee_hash: alloy_primitives::FixedBytes<32> =
         store.current_sync_committee.tree_hash_root(); // Could deprecate
-    debug!("prev_head, prev_header and start_sync_committee_hash committed.");
+    if debug_print {
+        println!("prev_head, prev_header and start_sync_committee_hash committed.");
+    }
 
     // 3. Apply sync committee updates, if any
     for (index, update) in updates.iter().enumerate() {
         // update.finalized_header.beacon().slot; introduce printing this so we can see if we are applying updates beyond our head
         let finalized_beacon_slot = { update.finalized_header().beacon().slot };
-        debug!(
-            "Processing update {} of {}. Update beacon finalized slot: {}",
-            index + 1,
-            updates.len(),
-            finalized_beacon_slot
-        );
+        if debug_print {
+            println!(
+                "Processing update {} of {}. Update beacon finalized slot: {}",
+                index + 1,
+                updates.len(),
+                finalized_beacon_slot
+            );
+        }
         if let Err(err) = verify_update(update, expected_current_slot, &store, genesis_root, &forks)
         {
             return Err(ProgramError::InvalidUpdate {
@@ -432,13 +446,19 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
                 reason: format!("{:?}", err),
             });
         }
-        debug!("Update {} is valid.", index + 1);
+        if debug_print {
+            println!("Update {} is valid.", index + 1);
+        }
         apply_update(&mut store, update);
-        debug!("Applied update {}.", index + 1);
+        if debug_print {
+            println!("Applied update {}.", index + 1);
+        }
     }
 
     // 4. Apply finality update
-    debug!("Processing finality update.");
+    if debug_print {
+        println!("Processing finality update.");
+    }
     if let Err(err) = verify_finality_update(
         &finality_update,
         expected_current_slot,
@@ -450,9 +470,13 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
             reason: format!("{:?}", err),
         });
     }
-    debug!("Finality update is valid.");
+    if debug_print {
+        println!("Finality update is valid.");
+    }
     apply_finality_update(&mut store, &finality_update);
-    debug!("Applied finality update.");
+    if debug_print {
+        println!("Applied finality update.");
+    }
 
     // Should do an assertion here to ensure we have increased our head (we do check this downstream later)
 
@@ -463,17 +487,22 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     }
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
-    debug!("Verifying contract storage slots.");
-    let verified_slots_result =
-        verify_storage_slot_proofs(execution_state_root, contract_storage);
+    if debug_print {
+        println!("Verifying contract storage slots.");
+    }
+    let verified_slots_result = verify_storage_slot_proofs(execution_state_root, contract_storage);
     if let Err(verified_slots_err) = verified_slots_result {
         return Err(ProgramError::MptError(verified_slots_err));
     }
     let verified_slots = verified_slots_result.unwrap();
-    debug!("Contract storage slots are valid.");
+    if debug_print {
+        println!("Contract storage slots are valid.");
+    }
 
     // 6. Commit new state root, header, and sync committee
-    debug!("Committing head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root.");
+    if debug_print {
+        println!("Committing head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root.");
+    }
     let head = store.finalized_header.beacon().slot;
     let header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
     let sync_committee_hash: B256 = store.current_sync_committee.tree_hash_root(); // Could deprecate
@@ -481,16 +510,24 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         Some(next_sync_committee) => next_sync_committee.tree_hash_root(),
         None => B256::ZERO,
     };
-    debug!("head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root committed.");
+    if debug_print {
+        println!("head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root committed.");
+    }
 
     // 7. Calculated updated store hash to be validated in the next round
-    debug!("Hashing updated store.");
+    if debug_print {
+        println!("Hashing updated store.");
+    }
     let store_hash = sha256_hash_helios_store(&store).map_err(|e| {
         ProgramError::StoreHashingError(format!("Failed to hash updated store: {}", e))
     })?;
-    debug!("Hashing updated store complete: {}", store_hash);
+    if debug_print {
+        println!("Hashing updated store complete: {}", store_hash);
+    }
 
-    debug!("Packing outputs.");
+    if debug_print {
+        println!("Packing outputs.");
+    }
     let proof_outputs = ProofOutputs {
         executionStateRoot: execution_state_root,
         newHeader: header,
@@ -502,9 +539,11 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         startSyncCommitteeHash: start_sync_committee_hash,
         prevStoreHash: prev_store_hash,
         storeHash: store_hash,
-        verifiedContractStorageSlots: verified_slots
+        verifiedContractStorageSlots: verified_slots,
     };
-    debug!("Packed outputs.");
+    if debug_print {
+        println!("Packed outputs.");
+    }
 
     Ok(proof_outputs)
 }

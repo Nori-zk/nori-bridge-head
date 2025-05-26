@@ -259,10 +259,15 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
         let consensus_mpt_proof_input_clone = consensus_mpt_proof_input.clone();
 
+        let enable_debug = match std::env::var("RUST_LOG") {
+            Ok(val) => val.to_lowercase().contains("debug"),
+            Err(_) => false,
+        };
+
         // Dry run this proof
         let _ = tokio::task::spawn_blocking(move || {
             // Run program logic
-            consensus_mpt_program(consensus_mpt_proof_input_clone)
+            consensus_mpt_program(consensus_mpt_proof_input_clone, enable_debug)
         })
         .await??;
 
@@ -306,7 +311,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         end_block: u64,
     ) -> Result<Vec<Log<T>>>
     where
-        T: SolEvent + Send+ 'static,
+        T: SolEvent + Send + 'static,
     {
         let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
         query_with_fallback(
@@ -319,11 +324,13 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                         &source_state_bridge_contract_address,
                         start_block,
                         end_block,
-                    ).await
+                    )
+                    .await
                 }
                 .boxed()
             },
             TIMEOUT,
-        ).await
+        )
+        .await
     }
 }
