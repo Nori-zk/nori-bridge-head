@@ -1,7 +1,7 @@
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy_primitives::Address;
 use anyhow::{Context, Result};
-use nori::{contract::bindings::NoriStateBridge, rpcs::execution::{http::ExecutionHttpProxy, ws::get_source_contract_listener}, utils::enable_logging_from_cargo_run};
+use nori::{contracts::bindings::NoriStateBridge, rpcs::execution::{http::ExecutionHttpProxy, ws::get_source_contract_listener}, utils::enable_logging_from_cargo_run};
 use std::env;
 
 async fn main_ws() -> Result<()> {

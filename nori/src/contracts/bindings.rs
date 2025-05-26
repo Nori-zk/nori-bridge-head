@@ -2,9 +2,8 @@ use std::{collections::HashMap, env};
 use alloy::sol;
 use alloy_primitives::{keccak256, Address, Log, B256};
 use anyhow::{Context, Result};
+use nori_sp1_helios_primitives::types::{get_storage_location_for_key, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX};
 use NoriStateBridge::TokensLocked;
-
-const SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX: u8 = 1u8;
 
 sol!(
     #[allow(missing_docs)]
@@ -21,37 +20,20 @@ pub fn get_source_contract_address() -> Result<Address> {
     Ok(source_state_bridge_contract_address)
 }
 
-/// Returns the storage slot for a given address in a mapping at the specified index
-///
-/// This follows Solidity's ABI encoding rules:
-/// 1. Each value is padded to 32 bytes
-/// 2. Address is left-padded with zeros (12 bytes of zeros, then 20 bytes of address)
-/// 3. Uint8 is right-padded with zeros (1 byte value, then 31 bytes of zeros)
-/// 4. The encoding is big-endian
-pub fn get_storage_location_for_key(address: Address, mapping_index: u8) -> B256 {
-    // Encode the key and index as Solidity's abi.encode would
-    let mut encoded = vec![0u8; 64]; // 2 × 32 bytes
-    
-    // Place address (padded to 32 bytes) in first slot
-    // Address is already 20 bytes, so we need to place it at offset 12 (32-20)
-    encoded[12..32].copy_from_slice(address.as_slice());
-    
-    // Place mapping_index (padded to 32 bytes) in second slot
-    encoded[63] = mapping_index;
-    
-    // Hash the encoded data to get the storage slot
-    keccak256(&encoded)
-}
-
-pub fn addresses_to_storage_slots(locked_token_event: Vec<Log<TokensLocked>>) -> Result<HashMap::<Address, B256>> {
+pub fn addresses_to_storage_slots(locked_token_event: Vec<Log<TokensLocked>>) -> Result<HashMap::<B256, Address>> {
     let mut storage_slots_to_prove = HashMap::<Address, B256>::new();
 
     for locked_token_event in locked_token_event.iter() {
         let slot = get_storage_location_for_key(locked_token_event.user, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
         storage_slots_to_prove.insert(locked_token_event.user, slot);
     }
-    
-    Ok(storage_slots_to_prove)
+
+    let mut slot_to_address = HashMap::<B256, Address>::new();
+    for (address, slot) in storage_slots_to_prove.iter() {
+        slot_to_address.insert(*slot, *address);
+    }
+
+    Ok(slot_to_address)
 }
 
 // https://ethereum.stackexchange.com/questions/133473/how-to-calculate-the-location-index-slot-in-storage-of-a-mapping-key

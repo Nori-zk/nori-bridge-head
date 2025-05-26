@@ -1,22 +1,5 @@
-use crate::{
-    contract::bindings::{
-        addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,
-    },
-    rpcs::{
-        //consensus::{get_checkpoint, get_client, get_store_with_next_sync_committee, get_updates},
-        execution::http::ExecutionHttpProxy,
-    },
-};
-use alloy::eips::BlockId;
-use alloy_primitives::FixedBytes;
 use anyhow::Result;
-use helios_consensus_core::{
-    apply_update,
-    consensus_spec::{ConsensusSpec, MainnetConsensusSpec},
-    types::{FinalityUpdate, LightClientStore},
-    verify_update,
-};
-use helios_ethereum::rpc::ConsensusRpc;
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use log::info;
 use nori_sp1_helios_primitives::types::ProofInputs;
 use sp1_sdk::{ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};

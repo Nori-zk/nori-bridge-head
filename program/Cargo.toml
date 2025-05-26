@@ -14,4 +14,3 @@ alloy-sol-types = { workspace = true }
 alloy-primitives = { workspace = true, features = ["sha3-keccak"] }
 tree_hash = { workspace = true }
 anyhow = { workspace = true }
-nori-hash = { workspace = true }

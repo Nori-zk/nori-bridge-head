@@ -1,7 +1,8 @@
 use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, B256};
-use alloy_trie::{proof, Nibbles};
 use alloy_rlp::Encodable;
-use nori_sp1_helios_primitives::types::{ContractStorage, VerifiedContractStorageSlot};
+use alloy_trie::{proof, Nibbles};
+
+use nori_sp1_helios_primitives::types::{get_storage_location_for_key, ContractStorage, VerifiedContractStorageSlot, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX};
 use std::fmt;
 
 #[derive(Debug)]
@@ -13,6 +14,11 @@ pub enum MptError {
     InvalidStorageSlotProof {
         slot_key: B256,
         reason: String,
+    },
+    InvalidStorageSlotAddressMapping {
+        slot_key: B256,
+        address: Address,
+        computed_address_slot_key: B256,
     },
 }
 
@@ -31,6 +37,13 @@ impl fmt::Display for MptError {
                 slot_key,
                 reason
             ),
+            MptError::InvalidStorageSlotAddressMapping {slot_key, address, computed_address_slot_key} => write!(
+                f,
+                "MPT invalid invalid storage slot address, expected {:?}, but for address '{:?}' this slot '{:?}' was computed",
+                slot_key,
+                address,
+                computed_address_slot_key
+            )
         }
     }
 }
@@ -53,6 +66,7 @@ impl fmt::Display for MptError {
 ///
 /// # Errors
 /// - If the MPT proof for the contract's `TrieAccount` is invalid.
+/// - If any address vs slot mapping does not match.
 /// - If any storage slot's MPT proof fails verification.
 ///
 /// # Steps
@@ -101,6 +115,18 @@ pub fn verify_storage_slot_proofs(
         let mut rlp_encoded_value = Vec::new();
         value.encode(&mut rlp_encoded_value);
 
+        // Verify slot address mapping
+        let address = slot.slot_key_address;
+        let computed_address_slot_key =
+            get_storage_location_for_key(address, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
+        if computed_address_slot_key != key {
+            return Err(MptError::InvalidStorageSlotAddressMapping {
+                slot_key: key,
+                address,
+                computed_address_slot_key,
+            });
+        }
+
         // Verify the storage proof under the *contract's* storage root
         proof::verify_proof(
             contract_storage.expected_value.storage_root,
@@ -115,6 +141,7 @@ pub fn verify_storage_slot_proofs(
 
         verified_slots.push(VerifiedContractStorageSlot {
             key,
+            slotKeyAddress: address,
             value: FixedBytes(value.to_be_bytes()),
             contractAddress: contract_storage.address,
         });
@@ -126,7 +153,6 @@ pub fn verify_storage_slot_proofs(
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
 
 /// Verifies the Merkle Patricia Trie (MPT) proofs for a contract's storage slots against the execution state root.
 ///
@@ -179,8 +205,7 @@ pub fn zk_verify_storage_slot_proofs(
     ) {
         panic!(
             "Could not verify the contract's `TrieAccount` in the global MPT for address {:?}: {}",
-            contract_storage.address,
-            e
+            contract_storage.address, e
         );
     }
 
@@ -196,6 +221,19 @@ pub fn zk_verify_storage_slot_proofs(
         let mut rlp_encoded_value = Vec::new();
         value.encode(&mut rlp_encoded_value);
 
+        // Verify slot address mapping
+        let address = slot.slot_key_address;
+        let computed_address_slot_key =
+            get_storage_location_for_key(address, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
+        if computed_address_slot_key != key {
+            panic!(
+                "MPT invalid invalid storage slot address, expected {:?}, but for address '{:?}' this slot '{:?}' was computed",
+                key,
+                address,
+                computed_address_slot_key,
+            );
+        }
+
         // Verify the storage proof under the *contract's* storage root
         if let Err(e) = proof::verify_proof(
             contract_storage.expected_value.storage_root,
@@ -208,6 +246,7 @@ pub fn zk_verify_storage_slot_proofs(
 
         verified_slots.push(VerifiedContractStorageSlot {
             key,
+            slotKeyAddress: address,
             value: FixedBytes(value.to_be_bytes()),
             contractAddress: contract_storage.address,
         });

@@ -1,9 +1,4 @@
-use crate::{
-    contract::bindings::{
-        addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,
-    },
-    rpcs::query_with_fallback,
-};
+use crate::{contracts::bindings::{addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,}, rpcs::query_with_fallback};
 use alloy::{
     eips::BlockId,
     providers::{Provider, ProviderBuilder, RootProvider},
@@ -11,7 +6,7 @@ use alloy::{
     sol_types::SolEvent,
     transports::http::Http,
 };
-use alloy_primitives::{Address, Log, B256};
+use alloy_primitives::{Address, FixedBytes, Log, B256};
 use anyhow::{anyhow, Context, Result};
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -220,9 +215,9 @@ impl ExecutionHttpProxy {
             )
             .await?;
 
-        let storage_address_slots_map = addresses_to_storage_slots(contract_events)?;
+        let storage_slot_address_map = addresses_to_storage_slots(contract_events)?;
 
-        for (address, storage_slot) in storage_address_slots_map.iter() {
+        for (storage_slot, address) in storage_slot_address_map.iter() {
             debug!(
                 "Storage slots obtained address '{:?}' storage_slot '{:?}'",
                 address, storage_slot
@@ -233,7 +228,7 @@ impl ExecutionHttpProxy {
         let mpt_account_proof = self
             .get_proof(
                 get_source_contract_address()?,
-                storage_address_slots_map.values().cloned().collect(),
+                storage_slot_address_map.keys().cloned().collect(),
                 BlockId::number(output_block_number),
             )
             .await?;
@@ -243,13 +238,22 @@ impl ExecutionHttpProxy {
             serde_json::to_string(&mpt_account_proof)
         );
 
-        let storage_slots: Vec<StorageSlot> = mpt_account_proof.storage_proof.iter().map(|slot| {
-            StorageSlot {
-                key: slot.key.as_b256(),
-                expected_value: slot.value,
-                mpt_proof: slot.proof.clone()
-            }
-        }).collect();
+        let storage_slots: Vec<StorageSlot> = mpt_account_proof
+            .storage_proof
+            .iter()
+            .map(|slot| {
+                let address = storage_slot_address_map
+                    .get(&slot.key.as_b256())
+                    .copied()
+                    .expect("Missing address for storage slot");
+                StorageSlot {
+                    slot_key_address: address,
+                    key: slot.key.as_b256(),
+                    expected_value: slot.value,
+                    mpt_proof: slot.proof.clone(),
+                }
+            })
+            .collect();
 
         let contract_storage = ContractStorage {
             address: mpt_account_proof.address,

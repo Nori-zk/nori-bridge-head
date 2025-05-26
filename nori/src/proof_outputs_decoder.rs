@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifiedStorageSlot {
     pub key: B256,
+    pub slot_key_address: Address,
     pub value: B256,
     pub contract_address: Address,
 }
@@ -44,6 +45,7 @@ impl DecodedProofOutputs {
             .into_iter()
             .map(|slot| VerifiedStorageSlot {
                 key: slot.key,
+                slot_key_address: slot.slotKeyAddress,
                 value: slot.value,
                 contract_address: slot.contractAddress,
             })
@@ -149,7 +151,7 @@ impl DecodedProofOutputs {
         let elements_start = length_offset + 32; // 416
         //let elements_start = 416; // Elements start after the length (bytes 384-415)
         let total_elements_size = array_len
-            .checked_mul(96)
+            .checked_mul(128)
             .ok_or(anyhow!("Array size overflow"))?;
         if elements_start + total_elements_size > bytes.len() {
             return Err(anyhow!(
@@ -163,16 +165,18 @@ impl DecodedProofOutputs {
         // 6. Parse each VerifiedContractStorageSlot.
         let mut verified_storage_slots = Vec::with_capacity(array_len);
         for i in 0..array_len {
-            let start = elements_start + i * 96;
-            let end = start + 96;
+            let start = elements_start + i * 128;
+            let end = start + 128;
             let element_bytes = &bytes[start..end];
 
             let key = B256::from_slice(&element_bytes[0..32]);
-            let value = B256::from_slice(&element_bytes[32..64]);
-            let contract_address = Address::from_slice(&element_bytes[76..96]); // Skip 12-byte padding
+            let slot_key_address = Address::from_slice(&element_bytes[44..64]); // Skip 12-byte padding
+            let value = B256::from_slice(&element_bytes[64..96]);
+            let contract_address = Address::from_slice(&element_bytes[108..128]); // Skip 12-byte padding
 
             verified_storage_slots.push(VerifiedStorageSlot {
                 key,
+                slot_key_address,
                 value,
                 contract_address,
             });
