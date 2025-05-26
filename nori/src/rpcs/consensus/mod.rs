@@ -558,7 +558,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
 
         // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
         let contract_storage = ExecutionHttpProxy::try_from_env()
-            .get_consensus_mpt_contract_storage(
+            .get_contract_storage(
                 finalized_input_block_number,
                 finalized_output_block_number,
             )
@@ -632,7 +632,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
 
         // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
         let contract_storage = ExecutionHttpProxy::try_from_env()
-            .get_consensus_mpt_contract_storage(
+            .get_contract_storage(
                 finalized_input_block_number,
                 finalized_output_block_number,
             )

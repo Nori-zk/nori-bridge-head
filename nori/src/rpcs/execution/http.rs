@@ -182,7 +182,7 @@ impl ExecutionHttpProxy {
         }
     }
 
-    pub async fn get_proof(
+    async fn get_proof(
         &self,
         address: Address,
         keys: Vec<B256>,
@@ -203,7 +203,7 @@ impl ExecutionHttpProxy {
         Ok(proof)
     }
 
-    pub async fn get_consensus_mpt_contract_storage(
+    pub async fn get_contract_storage(
         &self,
         input_block_number: u64,
         output_block_number: u64,
@@ -266,6 +266,11 @@ impl ExecutionHttpProxy {
             mpt_proof: mpt_account_proof.account_proof,
             storage_slots,
         };
+
+        // Construct proofinputs
+
+        
+
         Ok(contract_storage)
     }
 }
