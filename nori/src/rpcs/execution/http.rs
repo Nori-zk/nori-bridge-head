@@ -178,8 +178,8 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         }
     }
 
+    // TODO Doc string
     async fn _prepare_consensus_mpt_proof_inputs(
-        //&self,
         provider: &RootProvider<Http<Client>>,
         source_state_bridge_contract_address: &Address,
         input_block_number: u64,
@@ -271,6 +271,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         Ok(consensus_mpt_proof_input)
     }
 
+    // TODO Doc string
     pub async fn prepare_consensus_mpt_proof_inputs(
         &self,
         input_block_number: u64,
