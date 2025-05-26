@@ -106,7 +106,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         Ok(events)
     }
 
-    pub async fn _get_source_contract_events<T>(
+    async fn _get_source_contract_events<T>(
         provider: &RootProvider<Http<Client>>,
         source_state_bridge_contract_address: &Address,
         start_block: u64,
@@ -178,7 +178,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         }
     }
 
-    pub async fn _prepare_consensus_mpt_proof_inputs(
+    async fn _prepare_consensus_mpt_proof_inputs(
         //&self,
         provider: &RootProvider<Http<Client>>,
         source_state_bridge_contract_address: &Address,
