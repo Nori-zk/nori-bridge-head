@@ -16,7 +16,7 @@ use helios_ethereum::{
 use log::{debug, info, warn};
 use nori_hash::sha256_hash::sha256_hash_helios_store;
 use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputs};
-use nori_sp1_helios_program::consensus::{consensus_mpt_program, consensus_program};
+use nori_sp1_helios_program::consensus::consensus_program;
 use reqwest::Url;
 use std::{env, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc::channel, watch};
@@ -483,7 +483,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     /// # Errors
     /// Returns an error if the transition is invalid or if all providers fail to supply
     /// valid raw updates that produce a consistent state transition.
-    pub async fn validate_and_prepare_proof_inputs(
+    pub async fn prepare_consensus_mpt_proof_inputs(
         &self,
         input_slot: u64,
         store_hash: FixedBytes<32>,
@@ -565,59 +565,6 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
 
         Ok((input_slot, output_slot, consensus_mpt_proof_input))
     }
-
-    /*pub async fn prepare_proof_inputs(
-        &self,
-        input_slot: u64,
-        store_hash: FixedBytes<32>,
-    ) -> Result<ProofInputs::<S>> {
-        let consensus_proof_inputs = multiplex(
-            |url| {
-                {
-                    async move {
-                        Client::<S, R>::prepare_consensus_proof_inputs(&url, input_slot, store_hash)
-                            .await
-                    }
-                }
-                .boxed()
-            },
-            &self.all_providers_urls,
-            PROOF_INPUT_VALIDATION_TIMEOUT,
-        )
-        .await?;
-
-        // Get input and output block numbers
-        let finalized_input_block_number = *consensus_proof_inputs
-            .store
-            .finalized_header
-            .execution()
-            .map_err(|_| {
-                anyhow::Error::msg("Failed to get input finalized execution header".to_string())
-            })?
-            .block_number();
-
-        // Need to validate that we will advance!
-
-        let finalized_output_block_number = *consensus_proof_inputs
-            .finality_update
-            .finalized_header()
-            .execution()
-            .map_err(|_| {
-                anyhow::Error::msg("Failed to get output finalized execution header".to_string())
-            })?
-            .block_number();
-
-        // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
-        let consensus_mpt_proof_input = ExecutionHttpProxy::<S>::try_from_env()
-            .prepare_consensus_mpt_proof_inputs(
-                finalized_input_block_number,
-                finalized_output_block_number,
-                consensus_proof_inputs
-            )
-            .await?;
-
-        Ok(consensus_mpt_proof_input)
-    }*/
 
     /// Get the latest slot & store hash from the latest finality checkpoint.
     pub async fn get_latest_finality_slot_and_store_hash(&self) -> Result<(u64, FixedBytes<32>)> {

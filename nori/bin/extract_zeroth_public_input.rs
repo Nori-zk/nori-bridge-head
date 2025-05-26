@@ -14,7 +14,7 @@ async fn main() -> Result<()> {
         .await
         .unwrap();
     let (_,_,proof_inputs) = consensus_client
-        .validate_and_prepare_proof_inputs(current_slot, store_hash)
+        .prepare_consensus_mpt_proof_inputs(current_slot, store_hash)
         .await
         .unwrap();
 

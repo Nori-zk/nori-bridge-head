@@ -11,11 +11,11 @@ use alloy::{
     sol_types::SolEvent,
     transports::http::Http,
 };
-use alloy_primitives::{Address, FixedBytes, Log, B256};
+use alloy_primitives::{Address, Log, B256};
 use anyhow::{anyhow, Context, Result};
 use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use nori_sp1_helios_primitives::types::{
     ConsensusProofInputs, ContractStorage, ProofInputs, StorageSlot,
 };
