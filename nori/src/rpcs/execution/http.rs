@@ -133,8 +133,8 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                 match Self::_get_source_contract_event_chunk(
                     provider,
                     source_state_bridge_contract_address,
-                    start_block,
-                    end_block,
+                    current_block,
+                    chunk_end,
                 )
                 .await
                 {
