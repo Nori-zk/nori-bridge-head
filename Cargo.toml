@@ -17,6 +17,9 @@ nori-hash = { path = "nori-hash" }
 nori-sp1-helios-primitives = { path = "nori-primitives" }
 nori-sp1-helios-program = { path = "nori-program" }
 
+# o1-js
+kimchi = { git = "https://github.com/jk89/proof-systems", branch = "master" }
+
 # sp1-helios
 sp1-helios-script = { path = "script" }
 sp1-helios-program = { path = "program" }
@@ -30,11 +33,11 @@ helios-ethereum = { git = "https://github.com/a16z/helios", tag = "0.8.6" }
 # general
 dotenv = "0.15.0"
 eyre = "0.6.12"
-sp1-sdk = "4.1.7"
+sp1-sdk = "=4.1.7"
 sp1-build = "4.1.7"
 tokio = "1.38.0"
 tracing = "0.1.37"
-serde = "1.0.203"
+serde = "=1.0.219"
 thiserror = "1.0.61"
 zduny-wasm-timer = "0.2.8"
 serde_cbor = "0.11.2"
@@ -57,6 +60,7 @@ tree_hash = "0.9.0"
 serde_with = { version = "3.4.0", features = ["hex"] }
 cargo_metadata = "0.18"
 sha2-v0-10-8 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.8-sp1-4.0.0" }
+once_cell = "=1.21.3"
 
 [patch.crates-io]
 sha2-v0-9-9 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.9.9-sp1-4.0.0" }

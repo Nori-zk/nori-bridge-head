@@ -258,7 +258,7 @@ impl BridgeHead {
         }
         else {
             let proof_output = proof_output_result.unwrap();
-            info!("Parsed proofoutput okokokok {:?}", proof_output.verifiedContractStorageSlots.len());
+            //info!("Parsed proofoutput okokokok {:?}", proof_output.verifiedContractStorageSlots.len()); FIXME
         }
 
         let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes)?;

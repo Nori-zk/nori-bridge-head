@@ -25,14 +25,14 @@ pub struct DecodedProofOutputs {
     pub start_sync_committee_hash: B256,
     pub prev_store_hash: B256,
     pub store_hash: B256,
-    pub verified_storage_slots: Vec<VerifiedStorageSlot>,
+    //pub verified_storage_slots: Vec<VerifiedStorageSlot>, FIXME
 }
 
 impl DecodedProofOutputs {
     pub fn from_abi_prop(bytes: &[u8]) -> Result<Self> {
         let proof_output = ProofOutputs::abi_decode(bytes, true)?;
 
-        let verified_storage_slots = proof_output
+        /*let verified_storage_slots = proof_output
             .verifiedContractStorageSlots
             .into_iter()
             .map(|slot| VerifiedStorageSlot {
@@ -41,7 +41,7 @@ impl DecodedProofOutputs {
                 value: slot.value,
                 contract_address: slot.contractAddress,
             })
-            .collect();
+            .collect();*/
 
         // Return the decoded struct
         Ok(DecodedProofOutputs {
@@ -55,7 +55,7 @@ impl DecodedProofOutputs {
             start_sync_committee_hash: proof_output.startSyncCommitteeHash,
             prev_store_hash: proof_output.prevStoreHash,
             store_hash: proof_output.storeHash,
-            verified_storage_slots,
+            // verified_storage_slots,
         })
     }
 
@@ -175,7 +175,8 @@ impl DecodedProofOutputs {
             start_sync_committee_hash,
             prev_store_hash,
             store_hash,
-            verified_storage_slots,
+            // verified_storage_slots, // FIXME
+            
         })
     }
 

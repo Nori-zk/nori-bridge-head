@@ -539,7 +539,8 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         startSyncCommitteeHash: start_sync_committee_hash,
         prevStoreHash: prev_store_hash,
         storeHash: store_hash,
-        verifiedContractStorageSlots: verified_slots,
+        verifiedContractStorageSlotsRoot: store_hash.clone(), // FIXME
+        //verifiedContractStorageSlots: verified_slots,
     };
     if debug_print {
         println!("Packed outputs.");
