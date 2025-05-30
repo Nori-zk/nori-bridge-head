@@ -167,9 +167,9 @@ pub fn consensus_program<S: ConsensusSpec>(
     );
 
     // 2. State capture
-    debug!("Committing prev_header, prev_head and start_sync_committee_hash.");
+    debug!("Capturing input_slot.");
     let input_slot = store.finalized_header.beacon().slot;
-    debug!("prev_head, prev_header and start_sync_committee_hash committed.");
+    debug!("input_slot captured.");
 
     // 3. Apply sync committee updates, if any
     for (index, update) in updates.iter().enumerate() {
@@ -364,11 +364,11 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
 
     // 2. State capture
     if debug_print {
-        println!("Committing prev_header, prev_head and start_sync_committee_hash.");
+        println!("Capturing input_slot.");
     }
     let input_slot = store.finalized_header.beacon().slot;
     if debug_print {
-        println!("prev_head, prev_header and start_sync_committee_hash committed.");
+        println!("input_slot captured.");
     }
 
     // 3. Apply sync committee updates, if any

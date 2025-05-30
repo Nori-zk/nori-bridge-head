@@ -18,7 +18,7 @@ nori-sp1-helios-primitives = { path = "nori-primitives" }
 nori-sp1-helios-program = { path = "nori-program" }
 
 # o1-js
-kimchi = { git = "https://github.com/jk89/proof-systems", branch = "master" }
+kimchi = { git = "https://github.com/jk89/proof-systems", branch = "jk89/remove-tikv" }
 
 # sp1-helios
 sp1-helios-script = { path = "script" }

@@ -2857,7 +2857,7 @@ dependencies = [
 [[package]]
 name = "groupmap"
 version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=master#4df176be4e3cb88b5a1aca95c2405e2082db0a32"
+source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
 dependencies = [
  "ark-ec",
  "ark-ff 0.4.2",
@@ -3582,7 +3582,7 @@ dependencies = [
 [[package]]
 name = "internal-tracing"
 version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=master#4df176be4e3cb88b5a1aca95c2405e2082db0a32"
+source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
 
 [[package]]
 name = "interprocess"
@@ -3869,7 +3869,7 @@ dependencies = [
 [[package]]
 name = "kimchi"
 version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=master#4df176be4e3cb88b5a1aca95c2405e2082db0a32"
+source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
 dependencies = [
  "ark-ec",
  "ark-ff 0.4.2",
@@ -3897,8 +3897,6 @@ dependencies = [
  "strum",
  "strum_macros",
  "thiserror 2.0.11",
- "tikv-jemalloc-ctl",
- "tikv-jemallocator",
  "turshi",
 ]
 
@@ -4016,7 +4014,7 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 [[package]]
 name = "mina-curves"
 version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=master#4df176be4e3cb88b5a1aca95c2405e2082db0a32"
+source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
 dependencies = [
  "ark-bn254",
  "ark-ec",
@@ -4027,7 +4025,7 @@ dependencies = [
 [[package]]
 name = "mina-poseidon"
 version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=master#4df176be4e3cb88b5a1aca95c2405e2082db0a32"
+source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
 dependencies = [
  "ark-ec",
  "ark-ff 0.4.2",
@@ -4391,7 +4389,7 @@ dependencies = [
 [[package]]
 name = "o1-utils"
 version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=master#4df176be4e3cb88b5a1aca95c2405e2082db0a32"
+source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
 dependencies = [
  "ark-ec",
  "ark-ff 0.4.2",
@@ -4410,8 +4408,6 @@ dependencies = [
  "serde_with",
  "sha2 0.10.8",
  "thiserror 2.0.11",
- "tikv-jemalloc-ctl",
- "tikv-jemallocator",
 ]
 
 [[package]]
@@ -4982,7 +4978,7 @@ checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 [[package]]
 name = "poly-commitment"
 version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=master#4df176be4e3cb88b5a1aca95c2405e2082db0a32"
+source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
 dependencies = [
  "ark-ec",
  "ark-ff 0.4.2",
@@ -7128,37 +7124,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tikv-jemalloc-ctl"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "619bfed27d807b54f7f776b9430d4f8060e66ee138a28632ca898584d462c31c"
-dependencies = [
- "libc",
- "paste",
- "tikv-jemalloc-sys",
-]
-
-[[package]]
-name = "tikv-jemalloc-sys"
-version = "0.5.4+5.3.0-patched"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9402443cb8fd499b6f327e40565234ff34dbda27460c5b47db0db77443dd85d1"
-dependencies = [
- "cc",
- "libc",
-]
-
-[[package]]
-name = "tikv-jemallocator"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "965fe0c26be5c56c94e38ba547249074803efd52adfb66de62107d95aab3eaca"
-dependencies = [
- "libc",
- "tikv-jemalloc-sys",
-]
-
-[[package]]
 name = "time"
 version = "0.3.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7591,7 +7556,7 @@ dependencies = [
 [[package]]
 name = "turshi"
 version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=master#4df176be4e3cb88b5a1aca95c2405e2082db0a32"
+source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
 dependencies = [
  "ark-ff 0.4.2",
  "hex",
