@@ -12,10 +12,8 @@ use super::notice_messages::{
     TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected,
 };
 use super::validate::validate_env;
-use crate::proof_outputs_decoder::DecodedProofOutputs;
 use crate::rpcs::consensus::ConsensusHttpProxy;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
-use alloy::dyn_abi::SolType;
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
@@ -252,35 +250,19 @@ impl BridgeHead {
         let public_values: sp1_sdk::SP1PublicValues = proof.clone().public_values;
         let public_values_bytes = public_values.as_slice(); // Raw bytes
 
-        let proof_output_result = ProofOutputs::abi_decode(public_values_bytes, true);
-        if let Err(err) = proof_output_result {
-            warn!("Error decoding ProofOutputs: {:?}", err);
-        }
-        else {
-            let proof_output = proof_output_result.unwrap();
-            //info!("Parsed proofoutput okokokok {:?}", proof_output.verifiedContractStorageSlots.len()); FIXME
-        }
-
-        let proof_outputs = DecodedProofOutputs::from_abi(public_values_bytes)?;
-
-        // need to cast new head to a u64 // FIXME change the decoder later.......
-        let new_slot = proof_outputs.new_head;
-        let new_slot_bytes: [u8; 32] = new_slot.to_be_bytes();
-        // Extract the last 8 bytes (least significant bytes in big-endian)
-        let new_slot_u64_bytes: [u8; 8] = new_slot_bytes[24..32]
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
-        // Convert the bytes to u64 using big-endian interpretation
-        let output_slot = u64::from_be_bytes(new_slot_u64_bytes);
-        // Get the store hash
-        let output_store_hash = proof_outputs.store_hash;
+        let proof_outputs = ProofOutputs::from_bytes(public_values_bytes)?;
+        let output_slot = proof_outputs.output_slot;
+        let output_store_hash = proof_outputs.output_store_hash;
 
         info!(
             "...proof_outputs.next_sync_committee_hash {}",
             proof_outputs.next_sync_committee_hash
         );
 
-        info!("PROOF OUTPUT SERIALIZED:\n{}", serde_json::to_string(&proof_outputs)?);
+        info!(
+            "PROOF OUTPUT SERIALIZED:\n{}",
+            serde_json::to_string(&proof_outputs)?
+        );
         info!("-----------------------------------------------------------------------------------------");
         info!("-----------------------------------------------------------------------------------------");
         info!("-----------------------------------------------------------------------------------------");
@@ -295,7 +277,7 @@ impl BridgeHead {
                     job_id,
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
-                    output_store_hash: proof_outputs.store_hash,
+                    output_store_hash: proof_outputs.output_store_hash,
                 },
             ))
             .await;

@@ -4168,6 +4168,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
  "alloy-trie",
+ "anyhow",
  "helios-consensus-core",
  "serde",
 ]

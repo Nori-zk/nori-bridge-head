@@ -80,86 +80,63 @@ impl std::error::Error for ProgramError {}
 /// prev_store_hash → process updates → new_store_hash
 ///      │               │              │
 ///      │               │              │
-///      ▼               ▼              ▼
+///      └               ┤              ┘
 /// Initial State     Updates       Final State
 ///     Validation                 Commitment
 /// ```
 ///
 /// # Inputs (All Values Must Be Precomputed Hashes)
-/// | Name                  | Type              | Description                      |
-/// |-----------------------|-------------------|----------------------------------|
-/// | `updates`             | `Vec<Update>`     | Ordered sync committee updates    |
-/// | `finality_update`     | `FinalityUpdate`  | Finalized header proof           |
-/// | `expected_current_slot` | `Slot`          | Current chain slot for validation |
-/// | `store`               | `LightClientStore`| Full client state                |
-/// | `genesis_root`        | `B256`            | Genesis block root               |
-/// | `forks`               | `ForkData`        | Network fork versions            |
-/// | `store_hash`          | `B256`            | SHA-256(store) from last proof   |
+/// | Name                | Type               | Description                      |
+/// |---------------------|--------------------|----------------------------------|
+/// | `updates`           | `Vec<Update>`      | Ordered sync committee updates   |
+/// | `finality_update`   | `FinalityUpdate`   | Finalized header proof           |
+/// | `expected_current_slot` | `Slot`        | Current chain slot for validation|
+/// | `store`             | `LightClientStore` | Full client state                |
+/// | `genesis_root`      | `B256`             | Genesis block root               |
+/// | `forks`             | `ForkData`         | Network fork versions            |
+/// | `store_hash`        | `B256`             | SHA-256(store) from last proof   |
 ///
 /// # Operations (In Exact Execution Order)
 /// 1. **Initial Hash Validation** (Irreversible Check)
 ///    - Compute `SHA-256(store)`
-///    - Assert: `calculated_prev_store_hash == prev_store_hash`
+///    - Assert: `calculated_prev_store_hash == input_store_hash`
 ///
 /// 2. **State Capture** (Pre-Update Snapshot)
-///    - Record `prev_header` = `store.finalized_header.beacon.tree_hash_root()`
-///    - Record `prev_head` = `store.finalized_header.beacon.slot`
-///    - Record `start_sync_committee_hash` = `store.current_sync_committee.tree_hash_root()`
+///    - Record `input_slot` = `store.finalized_header.beacon().slot`
 ///
 /// 3. **Update Processing** (Sequential, Atomic)
-///    For each update in `sync_committee_updates`:
-///    - Verify update signatures against current sync committee
-///    - Check slot consistency with `expected_current_slot`
-///    - Validate fork versions against `forks`
-///    - Apply update to `store` state (mutates sync committees)
+///    - Verify and apply each sync committee update in `updates`
 ///
 /// 4. **Finality Proof** (Header Finalization)
-///    - Verify finality signatures against updated sync committee
-///    - Validate finality branch to `genesis_root`
-///    - Update `store.finalized_header` to new header
+///    - Verify and apply `finality_update`
 ///
-/// 5. **State commitment** (Commit new state root)
-///    - Capture new head slot
-///    - Compute hashes for header, sync_committee, next_sync_committee and execution_state_root
+/// 5. **State Commitment** (Commit new state root)
+///    - Record `output_slot` = `store.finalized_header.beacon().slot`
+///    - Extract `next_sync_committee_hash` = `store.next_sync_committee.tree_hash_root()`
+///    - Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`
 ///
 /// 6. **Post-State Hashing** (Output Generation)
-///    - Compute `header` = new `store.finalized_header.beacon.tree_hash_root()`
-///    - Compute `sync_committee_hash` = `store.current_sync_committee.tree_hash_root()`
-///    - Compute `next_sync_committee_hash` or zero
-///    - Extract `execution_state_root` from finalized header's payload
-///    - Compute `store_hash` = `SHA-256(store)`
+///    - Compute `output_store_hash` = `SHA-256(store)`
 ///
 /// # Outputs (All Values Are Hash Commitments)
-/// | Field                   | Type      | Description                          |
-/// |-------------------------|-----------|--------------------------------------|
-/// | `executionStateRoot`    | `B256`    | Execution layer state root           |
-/// | `newHeader`             | `B256`    | New finalized header SSZ hash        |
-/// | `nextSyncCommitteeHash` | `B256`    | Next committee hash or 0x0           |
-/// | `newHead`               | `U256`    | New finalized slot number            |
-/// | `prevHeader`            | `B256`    | Previous header SSZ hash             |
-/// | `prevHead`              | `U256`    | Previous finalized slot              |
-/// | `syncCommitteeHash`     | `B256`    | Current sync committee SSZ hash      |
-/// | `startSyncCommitteeHash`| `B256`    | Initial sync committee SSZ hash      |
-/// | `prevStoreHash`         | `B256`    | Input store hash                     |
-/// | `storeHash`             | `B256`    | New store SHA-256                    |
+/// | Field                     | Type   | Description                              |
+/// |---------------------------|--------|------------------------------------------|
+/// | `input_slot`              | `u64`  | Slot before updates                      |
+/// | `input_store_hash`        | `B256` | Input store hash                         |
+/// | `output_slot`             | `u64`  | Slot after updates                       |
+/// | `output_store_hash`       | `B256` | Updated store hash                       |
+/// | `execution_state_root`    | `B256` | Execution layer state root               |
+/// | `next_sync_committee_hash`| `B256` | Hash of the next sync committee state    |
 ///
 /// # Error Conditions
-/// 1. **Hash Chain Break**  
-///    `calculated_prev_store_hash != prev_store_hash`  
-///    → Invalid initial state
-///
-/// 2. **Invalid Update**  
-///    Any `verify_update` returns error  
-///    → Malformed or fraudulent update
-///
-/// 3. **Invalid Finality**  
-///    `verify_finality_update` fails  
-///    → Unverifiable final header
-///
-/// 4. **Missing Execution Root**  
-///    `store.finalized_header.execution()` is None  
-///    → Incomplete header data
-///
+/// 1. **Hash Chain Break**
+///    `calculated_prev_store_hash != input_store_hash` → Invalid initial state
+/// 2. **Invalid Update**
+///    Any `verify_update` returns error → Malformed or fraudulent update
+/// 3. **Invalid Finality**
+///    `verify_finality_update` fails → Unverifiable final header
+/// 4. **Missing Execution Root**
+///    `store.finalized_header.execution()` is `Err` → Incomplete header data
 pub fn consensus_program<S: ConsensusSpec>(
     proof_inputs: ConsensusProofInputs<S>,
 ) -> Result<ConsensusProofOutputs, ProgramError> {
@@ -171,16 +148,16 @@ pub fn consensus_program<S: ConsensusSpec>(
         mut store,
         genesis_root,
         forks,
-        store_hash: prev_store_hash,
+        store_hash: input_store_hash,
     } = proof_inputs;
 
     // 1. Calculate old store hash and assert equality
     debug!("Hashing old store state and comparing with proof inputs store hash.");
     let calculated_prev_store_hash = sha256_hash_helios_store(&store)
         .map_err(|e| ProgramError::StoreHashingError(format!("Failed to hash store: {}", e)))?;
-    if calculated_prev_store_hash != prev_store_hash {
+    if calculated_prev_store_hash != input_store_hash {
         return Err(ProgramError::HashChainMismatch {
-            expected: prev_store_hash,
+            expected: input_store_hash,
             actual: calculated_prev_store_hash,
         });
     }
@@ -191,10 +168,7 @@ pub fn consensus_program<S: ConsensusSpec>(
 
     // 2. State capture
     debug!("Committing prev_header, prev_head and start_sync_committee_hash.");
-    let prev_head = store.finalized_header.beacon().slot;
-    let prev_header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
-    let start_sync_committee_hash: alloy_primitives::FixedBytes<32> =
-        store.current_sync_committee.tree_hash_root(); // Could deprecate
+    let input_slot = store.finalized_header.beacon().slot;
     debug!("prev_head, prev_header and start_sync_committee_hash committed.");
 
     // 3. Apply sync committee updates, if any
@@ -238,11 +212,9 @@ pub fn consensus_program<S: ConsensusSpec>(
 
     // Should do an assertion here to ensure we have increased our head (we do check this downstream later)
 
-    // 5. Commit new state root, header, and sync committee
-    debug!("Committing head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root.");
-    let head = store.finalized_header.beacon().slot;
-    let header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
-    let sync_committee_hash: B256 = store.current_sync_committee.tree_hash_root(); // Could deprecate
+    // 5. Commit new state root
+    debug!("Committing output_slot, next_sync_committee_hash and execution_state_root.");
+    let output_slot = store.finalized_header.beacon().slot;
     let next_sync_committee_hash: B256 = match &mut store.next_sync_committee {
         Some(next_sync_committee) => next_sync_committee.tree_hash_root(),
         None => B256::ZERO,
@@ -253,27 +225,23 @@ pub fn consensus_program<S: ConsensusSpec>(
     }
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
-    debug!("head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root committed.");
+    debug!("output_slot, next_sync_committee_hash and execution_state_root committed.");
 
     // 6. Calculated updated store hash to be validated in the next round
     debug!("Hashing updated store.");
-    let store_hash = sha256_hash_helios_store(&store).map_err(|e| {
+    let output_store_hash = sha256_hash_helios_store(&store).map_err(|e| {
         ProgramError::StoreHashingError(format!("Failed to hash updated store: {}", e))
     })?;
-    debug!("Hashing updated store complete: {}", store_hash);
+    debug!("Hashing updated store complete: {}", output_store_hash);
 
     debug!("Packing outputs.");
     let proof_outputs = ConsensusProofOutputs {
-        executionStateRoot: execution_state_root,
-        newHeader: header,
-        nextSyncCommitteeHash: next_sync_committee_hash,
-        newHead: U256::from(head),
-        prevHeader: prev_header,
-        prevHead: U256::from(prev_head),
-        syncCommitteeHash: sync_committee_hash,
-        startSyncCommitteeHash: start_sync_committee_hash,
-        prevStoreHash: prev_store_hash,
-        storeHash: store_hash,
+        input_slot,
+        input_store_hash,
+        output_slot,
+        output_store_hash,
+        execution_state_root,
+        next_sync_committee_hash
     };
     debug!("Packed outputs.");
 
@@ -282,105 +250,83 @@ pub fn consensus_program<S: ConsensusSpec>(
 
 /// Zero-Knowledge Consensus State Transition Proof with MPT storage slot verification for Ethereum Light Client Updates with Result type
 ///
-/// Cryptographic state machine processing light client updates with hash chaining.
-/// This program takes encoded inputs containing light client updates (sync committee updates and a finality update),
-/// verifies their validity against the current state, applies the updates, and outputs the new state commitments.
-/// Enforces strict hash-chain validation between successive states.
+/// Extends the basic consensus program by verifying Merkle Patricia Trie (MPT) proofs of contract storage slots
+/// against the finalized execution state root. Ensures that contract storage is consistent with the execution state.
 ///
 /// # Critical Path
 /// ```text
-/// prev_store_hash → process updates → new_store_hash
-///      │               │              │
-///      │               │              │
-///      ▼               ▼              ▼
-/// Initial State     Updates       Final State
-///     Validation                 Commitment
+/// prev_store_hash → process updates → verify storage proofs → new_store_hash
+///      │               │                   │               │
+///      │               │                   │               │
+///      └               ┤                   ┴               ┘
+/// Initial State     Updates         Storage Proofs     Final State
+///     Validation     Applied           Verified         Commitment
 /// ```
 ///
 /// # Inputs (All Values Must Be Precomputed Hashes)
-/// | Name                  | Type              | Description                      |
-/// |-----------------------|-------------------|----------------------------------|
-/// | `updates`             | `Vec<Update>`     | Ordered sync committee updates    |
-/// | `finality_update`     | `FinalityUpdate`  | Finalized header proof           |
-/// | `expected_current_slot` | `Slot`          | Current chain slot for validation |
-/// | `store`               | `LightClientStore`| Full client state                |
-/// | `genesis_root`        | `B256`            | Genesis block root               |
-/// | `forks`               | `ForkData`        | Network fork versions            |
-/// | `store_hash`          | `B256`            | SHA-256(store) from last proof   |
+/// | Name                  | Type               | Description                           |
+/// |-----------------------|--------------------|---------------------------------------|
+/// | `updates`             | `Vec<Update>`      | Ordered sync committee updates        |
+/// | `finality_update`     | `FinalityUpdate`   | Finalized header proof                |
+/// | `expected_current_slot` | `Slot`           | Current chain slot for validation     |
+/// | `store`               | `LightClientStore` | Full client state                     |
+/// | `genesis_root`        | `B256`             | Genesis block root                    |
+/// | `forks`               | `ForkData`         | Network fork versions                 |
+/// | `store_hash`          | `B256`             | SHA-256(store) from last proof        |
+/// | `contract_storage`    | Contract storage proofs for MPT verification               |
 ///
 /// # Operations (In Exact Execution Order)
 /// 1. **Initial Hash Validation** (Irreversible Check)
 ///    - Compute `SHA-256(store)`
-///    - Assert: `calculated_prev_store_hash == prev_store_hash`
+///    - Assert: `calculated_prev_store_hash == input_store_hash`
 ///
 /// 2. **State Capture** (Pre-Update Snapshot)
-///    - Record `prev_header` = `store.finalized_header.beacon.tree_hash_root()`
-///    - Record `prev_head` = `store.finalized_header.beacon.slot`
-///    - Record `start_sync_committee_hash` = `store.current_sync_committee.tree_hash_root()`
+///    - Record `input_slot` = `store.finalized_header.beacon().slot`
 ///
 /// 3. **Update Processing** (Sequential, Atomic)
-///    For each update in `sync_committee_updates`:
-///    - Verify update signatures against current sync committee
-///    - Check slot consistency with `expected_current_slot`
-///    - Validate fork versions against `forks`
-///    - Apply update to `store` state (mutates sync committees)
+///    - Verify and apply each sync committee update in `updates`
 ///
 /// 4. **Finality Proof** (Header Finalization)
-///    - Verify finality signatures against updated sync committee
-///    - Validate finality branch to `genesis_root`
-///    - Update `store.finalized_header` to new header
+///    - Verify and apply `finality_update`
 ///
-/// 5. **Verify storage slot proofs** (Verify MPT proof of storage slots)
-///    - Extract provable executation state root
-///    - Verify the source contracts storage slots and produce merkle root
+/// 5. **Verify Storage Slot Proofs**
+///    - Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`
+///    - Verify MPT proofs in `contract_storage`, producing `verified_contract_storage_slots_root`
 ///
-/// 6. **State commitment** (Commit new state root)
-///    - Capture new head slot
-///    - Compute hashes for header, sync_committee, next_sync_committee and execution_state_root
+/// 6. **State Capture**
+///    - Record `output_slot` = `store.finalized_header.beacon().slot`
+///    - Extract `next_sync_committee_hash` = `store.next_sync_committee.tree_hash_root()`
 ///
 /// 7. **Post-State Hashing** (Output Generation)
-///    - Compute `header` = new `store.finalized_header.beacon.tree_hash_root()`
-///    - Compute `sync_committee_hash` = `store.current_sync_committee.tree_hash_root()`
-///    - Compute `next_sync_committee_hash` or zero
-///    - Extract `execution_state_root` from finalized header's payload
-///    - Compute `store_hash` = `SHA-256(store)`
+///    - Compute `output_store_hash` = `SHA-256(store)`
 ///
 /// # Outputs (All Values Are Hash Commitments)
-/// | Field                             | Type      | Description                          |
-/// |-----------------------------------|-----------|--------------------------------------|
-/// | `executionStateRoot`              | `B256`    | Execution layer state root           |
-/// | `newHeader`                       | `B256`    | New finalized header SSZ hash        |
-/// | `nextSyncCommitteeHash`           | `B256`    | Next committee hash or 0x0           |
-/// | `newHead`                         | `U256`    | New finalized slot number            |
-/// | `prevHeader`                      | `B256`    | Previous header SSZ hash             |
-/// | `prevHead`                        | `U256`    | Previous finalized slot              |
-/// | `syncCommitteeHash`               | `B256`    | Current sync committee SSZ hash      |
-/// | `startSyncCommitteeHash`          | `B256`    | Initial sync committee SSZ hash      |
-/// | `prevStoreHash`                   | `B256`    | Input store hash                     |
-/// | `storeHash`                       | `B256`    | New store SHA-256                    |
-/// | `verifiedContractStorageSlotsRoot`| `B256`    | Computed merkle root of slot details |
+/// | Field                                  | Type   | Description                              |
+/// |----------------------------------------|--------|------------------------------------------|
+/// | `input_slot`                           | `u64`  | Slot before updates                      |
+/// | `input_store_hash`                     | `B256` | Input store hash                         |
+/// | `output_slot`                          | `u64`  | Slot after updates                       |
+/// | `output_store_hash`                    | `B256` | Updated store hash                       |
+/// | `execution_state_root`                 | `B256` | Execution layer state root               |
+/// | `verified_contract_storage_slots_root` | `B256` | Merkle root of verified storage slots    |
+/// | `next_sync_committee_hash`             | `B256` | Hash of the next sync committee state    |
 ///
 /// # Error Conditions
-/// 1. **Hash Chain Break**  
-///    `calculated_prev_store_hash != prev_store_hash`  
-///    → Invalid initial state
-///
-/// 2. **Invalid Update**  
-///    Any `verify_update` returns error  
-///    → Malformed or fraudulent update
-///
-/// 3. **Invalid Finality**  
-///    `verify_finality_update` fails  
-///    → Unverifiable final header
-///
-/// 4. **Missing Execution Root**  
-///    `store.finalized_header.execution()` is None  
-///    → Incomplete header data
-///
-/// 5. **Invalid MPT proof**  
-///    `zk_verify_storage_slot_proofs` fails
-///    → Invalid storage slots / account proof
-///
+/// 1. **Hash Chain Break**
+///    `calculated_prev_store_hash != input_store_hash` → Invalid initial state
+/// 2. **Invalid Update**
+///    Any `verify_update` returns error → Malformed or fraudulent update
+/// 3. **Invalid Finality**
+///    `verify_finality_update` fails → Unverifiable final header
+/// 4. **Missing Execution Root**
+///    `store.finalized_header.execution()` is `Err` → Incomplete header data
+/// 5. **Invalid MPT Proof**
+///    `verify_storage_slot_proofs` may fail due to:
+///    - `InvalidAccountProof { address, reason }` → Account proof failed
+///    - `InvalidStorageSlotProof { slot_key, reason }` → Storage slot proof failed
+///    - `InvalidStorageSlotAddressMapping { slot_key, address, computed_address_slot_key }` → Slot-to-address mapping invalid
+///    - `MerkleHashError { address, value, reason }` → Merkle hash computation error of verified slots
+///    Any of these returns a `MptError`, wrapped as `ProgramError::MptError`
 pub fn consensus_mpt_program<S: ConsensusSpec>(
     proof_inputs: ProofInputs<S>,
     debug_print: bool,
@@ -393,7 +339,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         mut store,
         genesis_root,
         forks,
-        store_hash: prev_store_hash,
+        store_hash: input_store_hash,
         contract_storage,
     } = proof_inputs;
 
@@ -403,9 +349,9 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     }
     let calculated_prev_store_hash = sha256_hash_helios_store(&store)
         .map_err(|e| ProgramError::StoreHashingError(format!("Failed to hash store: {}", e)))?;
-    if calculated_prev_store_hash != prev_store_hash {
+    if calculated_prev_store_hash != input_store_hash {
         return Err(ProgramError::HashChainMismatch {
-            expected: prev_store_hash,
+            expected: input_store_hash,
             actual: calculated_prev_store_hash,
         });
     }
@@ -420,10 +366,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     if debug_print {
         println!("Committing prev_header, prev_head and start_sync_committee_hash.");
     }
-    let prev_head = store.finalized_header.beacon().slot;
-    let prev_header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
-    let start_sync_committee_hash: alloy_primitives::FixedBytes<32> =
-        store.current_sync_committee.tree_hash_root(); // Could deprecate
+    let input_slot = store.finalized_header.beacon().slot;
     if debug_print {
         println!("prev_head, prev_header and start_sync_committee_hash committed.");
     }
@@ -495,52 +438,46 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     if let Err(verified_slots_err) = verified_slots_result {
         return Err(ProgramError::MptError(verified_slots_err));
     }
-    let verified_slots_root = verified_slots_result.unwrap();
+    let verified_contract_storage_slots_root = verified_slots_result.unwrap();
     if debug_print {
         println!("Contract storage slots are valid.");
     }
 
     // 6. Commit new state root, header, and sync committee
     if debug_print {
-        println!("Committing head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root.");
+        println!("Committing output_slot, next_sync_committee_hash.");
     }
-    let head = store.finalized_header.beacon().slot;
-    let header: B256 = store.finalized_header.beacon().tree_hash_root(); // Could deprecate
-    let sync_committee_hash: B256 = store.current_sync_committee.tree_hash_root(); // Could deprecate
+    let output_slot = store.finalized_header.beacon().slot;
     let next_sync_committee_hash: B256 = match &mut store.next_sync_committee {
         Some(next_sync_committee) => next_sync_committee.tree_hash_root(),
         None => B256::ZERO,
     };
     if debug_print {
-        println!("head, header, sync_committee_hash, next_sync_committee_hash and execution_state_root committed.");
+        println!("output_slot, next_sync_committee_hash committed.");
     }
 
     // 7. Calculated updated store hash to be validated in the next round
     if debug_print {
         println!("Hashing updated store.");
     }
-    let store_hash = sha256_hash_helios_store(&store).map_err(|e| {
+    let output_store_hash = sha256_hash_helios_store(&store).map_err(|e| {
         ProgramError::StoreHashingError(format!("Failed to hash updated store: {}", e))
     })?;
     if debug_print {
-        println!("Hashing updated store complete: {}", store_hash);
+        println!("Hashing updated store complete: {}", output_store_hash);
     }
 
     if debug_print {
         println!("Packing outputs.");
     }
     let proof_outputs = ProofOutputs {
-        executionStateRoot: execution_state_root,
-        newHeader: header,
-        nextSyncCommitteeHash: next_sync_committee_hash,
-        newHead: U256::from(head),
-        prevHeader: prev_header,
-        prevHead: U256::from(prev_head),
-        syncCommitteeHash: sync_committee_hash,
-        startSyncCommitteeHash: start_sync_committee_hash,
-        prevStoreHash: prev_store_hash,
-        storeHash: store_hash,
-        verifiedContractStorageSlotsRoot: verified_slots_root,
+        input_slot,
+        input_store_hash,
+        output_slot,
+        output_store_hash,
+        execution_state_root,
+        verified_contract_storage_slots_root,
+        next_sync_committee_hash
     };
     if debug_print {
         println!("Packed outputs.");

@@ -1,6 +1,5 @@
 #![no_main]
 sp1_zkvm::entrypoint!(main);
-use alloy_sol_types::SolValue;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use nori_sp1_helios_primitives::types::ProofInputs;
 use nori_sp1_helios_program::consensus::consensus_mpt_program;
@@ -18,5 +17,5 @@ pub fn main() {
     let proof_outputs = consensus_mpt_program(proof_inputs, true).unwrap();
 
     // Write zk output
-    sp1_zkvm::io::commit_slice(&proof_outputs.abi_encode());
+    sp1_zkvm::io::commit_slice(&proof_outputs.to_bytes());
 }

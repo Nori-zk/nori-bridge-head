@@ -507,12 +507,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                             let proof_outputs = consensus_program(consensus_proof_inputs.clone())?;
 
                             // Convert newHead to u64
-                            let new_slot = proof_outputs.newHead;
-                            let new_slot_bytes: [u8; 32] = new_slot.to_be_bytes();
-                            let new_slot_u64_bytes: [u8; 8] = new_slot_bytes[24..32]
-                                .try_into()
-                                .map_err(|_| anyhow::anyhow!("Failed to extract u64 bytes"))?;
-                            let output_slot = u64::from_be_bytes(new_slot_u64_bytes);
+                            let output_slot = proof_outputs.output_slot;
 
                             // Validate progression
                             if validate_progress && output_slot <= input_slot {
