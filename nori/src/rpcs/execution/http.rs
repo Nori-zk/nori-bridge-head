@@ -194,7 +194,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         )
         .await?;
 
-        let storage_slot_address_map = addresses_to_storage_slots(contract_events)?;
+        let storage_slot_address_map = addresses_to_storage_slots(contract_events);
 
         for (storage_slot, address) in storage_slot_address_map.iter() {
             debug!(
@@ -217,7 +217,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             serde_json::to_string(&mpt_account_proof)
         );
 
-        let storage_slots: Vec<StorageSlot> = mpt_account_proof
+        let mut storage_slots: Vec<StorageSlot> = mpt_account_proof
             .storage_proof
             .iter()
             .map(|slot| {
@@ -233,6 +233,9 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                 }
             })
             .collect();
+
+        // Sort by address order for stability (in case rpc returns strange order)
+        storage_slots.sort_by_key(|s| s.slot_key_address);
 
         let contract_storage = ContractStorage {
             address: mpt_account_proof.address,
