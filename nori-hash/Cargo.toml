@@ -15,3 +15,4 @@ anyhow = { workspace = true }
 serde_json = { workspace = true }
 sha2-v0-10-8 = { workspace = true }
 rmp-serde = "1.2.0"
+kimchi = { workspace = true }

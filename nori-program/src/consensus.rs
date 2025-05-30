@@ -332,7 +332,7 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///
 /// 5. **Verify storage slot proofs** (Verify MPT proof of storage slots)
 ///    - Extract provable executation state root
-///    - Verify the source contracts storage slots
+///    - Verify the source contracts storage slots and produce merkle root
 ///
 /// 6. **State commitment** (Commit new state root)
 ///    - Capture new head slot
@@ -346,18 +346,19 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    - Compute `store_hash` = `SHA-256(store)`
 ///
 /// # Outputs (All Values Are Hash Commitments)
-/// | Field                   | Type      | Description                          |
-/// |-------------------------|-----------|--------------------------------------|
-/// | `executionStateRoot`    | `B256`    | Execution layer state root           |
-/// | `newHeader`             | `B256`    | New finalized header SSZ hash        |
-/// | `nextSyncCommitteeHash` | `B256`    | Next committee hash or 0x0           |
-/// | `newHead`               | `U256`    | New finalized slot number            |
-/// | `prevHeader`            | `B256`    | Previous header SSZ hash             |
-/// | `prevHead`              | `U256`    | Previous finalized slot              |
-/// | `syncCommitteeHash`     | `B256`    | Current sync committee SSZ hash      |
-/// | `startSyncCommitteeHash`| `B256`    | Initial sync committee SSZ hash      |
-/// | `prevStoreHash`         | `B256`    | Input store hash                     |
-/// | `storeHash`             | `B256`    | New store SHA-256                    |
+/// | Field                             | Type      | Description                          |
+/// |-----------------------------------|-----------|--------------------------------------|
+/// | `executionStateRoot`              | `B256`    | Execution layer state root           |
+/// | `newHeader`                       | `B256`    | New finalized header SSZ hash        |
+/// | `nextSyncCommitteeHash`           | `B256`    | Next committee hash or 0x0           |
+/// | `newHead`                         | `U256`    | New finalized slot number            |
+/// | `prevHeader`                      | `B256`    | Previous header SSZ hash             |
+/// | `prevHead`                        | `U256`    | Previous finalized slot              |
+/// | `syncCommitteeHash`               | `B256`    | Current sync committee SSZ hash      |
+/// | `startSyncCommitteeHash`          | `B256`    | Initial sync committee SSZ hash      |
+/// | `prevStoreHash`                   | `B256`    | Input store hash                     |
+/// | `storeHash`                       | `B256`    | New store SHA-256                    |
+/// | `verifiedContractStorageSlotsRoot`| `B256`    | Computed merkle root of slot details |
 ///
 /// # Error Conditions
 /// 1. **Hash Chain Break**  
@@ -494,7 +495,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     if let Err(verified_slots_err) = verified_slots_result {
         return Err(ProgramError::MptError(verified_slots_err));
     }
-    let verified_slots = verified_slots_result.unwrap();
+    let verified_slots_root = verified_slots_result.unwrap();
     if debug_print {
         println!("Contract storage slots are valid.");
     }
@@ -539,8 +540,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         startSyncCommitteeHash: start_sync_committee_hash,
         prevStoreHash: prev_store_hash,
         storeHash: store_hash,
-        verifiedContractStorageSlotsRoot: store_hash.clone(), // FIXME
-        //verifiedContractStorageSlots: verified_slots,
+        verifiedContractStorageSlotsRoot: verified_slots_root,
     };
     if debug_print {
         println!("Packed outputs.");

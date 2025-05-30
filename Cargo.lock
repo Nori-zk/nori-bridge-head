@@ -4153,6 +4153,7 @@ dependencies = [
  "alloy-sol-types",
  "anyhow",
  "helios-consensus-core",
+ "kimchi",
  "rmp-serde",
  "serde_cbor",
  "serde_json",
