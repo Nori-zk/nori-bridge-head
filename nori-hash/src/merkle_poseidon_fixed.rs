@@ -1,5 +1,3 @@
-use std::{env, path::PathBuf};
-
 use alloy_primitives::{Address, FixedBytes};
 use anyhow::Result;
 use kimchi::{
@@ -627,6 +625,7 @@ mod merkle_fixed_tests {
 mod merkle_zeros {
     use super::*;
     use std::io::Write;
+    use std::{env, path::PathBuf};
 
     fn calculate_zeros() -> Vec<Fp> {
         // [Fp; MAX_TREE_DEPTH + 1]
