@@ -25,8 +25,8 @@ use tree_hash::TreeHash;
 
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 const CONENSUS_RPCS_ENV_VAR: &str = "CONSENSUS_RPCS_LIST";
-pub const PROVIDER_TIMEOUT: Duration = Duration::from_secs(5);
-pub const PROOF_INPUT_VALIDATION_TIMEOUT: Duration = Duration::from_secs(10);
+pub const PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
+pub const PROOF_INPUT_VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct Client<S: ConsensusSpec, R: ConsensusRpc<S>> {
     inner: Inner<S, R>,

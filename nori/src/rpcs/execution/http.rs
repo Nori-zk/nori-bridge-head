@@ -27,7 +27,7 @@ use tokio::time::{sleep, Duration};
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
-const TIMEOUT: Duration = Duration::from_secs(10);
+const TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct ExecutionHttpProxy<S: ConsensusSpec> {
     principal_provider: RootProvider<Http<Client>>,
