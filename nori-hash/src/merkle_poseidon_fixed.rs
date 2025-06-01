@@ -341,6 +341,20 @@ pub fn get_merkle_path(
     path
 }
 
+pub fn get_merkle_path_from_tree(merkle_tree: &[Vec<Fp>], mut index: u32) -> Vec<Fp> {
+    let depth = merkle_tree.len() - 1;
+    let mut path: Vec<Fp> = Vec::with_capacity(depth);
+    // We can pick our nodes along the path by looking at the bit
+    // starting with the leaves.
+    for level in (1..=depth).rev() {
+        let sibling = index ^ 1;
+        let node = merkle_tree[level][sibling as usize];
+        path.push(node);
+        index /= 2;
+    }
+    path
+}
+
 /// Recomputes the Merkle root from a leaf hash, its index, and its authentication path.
 ///
 /// This function traverses the Merkle authentication path bottom-up, using the provided
@@ -512,128 +526,6 @@ mod merkle_fixed_tests {
         Ok(())
     }
 
-    /*#[test]
-    fn test_all_leaf_counts_and_indices() -> Result<()> {
-        let zeros = get_merkle_zeros();
-        println!("Testing all leaf counts and indices...");
-
-        // Test leaf counts from 0 to 50
-        for n_leaves in 0..=50 {
-            println!("Testing with {} leaves", n_leaves);
-
-            // Generate dummy data
-            let mut pairs = Vec::with_capacity(n_leaves);
-            for i in 0..n_leaves {
-                pairs.push((dummy_address(i as u8), dummy_value(i as u8)));
-            }
-
-            let leaves = build_leaves(&pairs)?;
-            let (depth, padded_size) = compute_merkle_tree_depth_and_size(n_leaves);
-
-            // Compute root
-            let mut leaves_for_root = leaves.clone();
-            let root = fold_merkle_left(&mut leaves_for_root, padded_size, depth, &zeros);
-
-            // Test every index in this tree
-            for index in 0..n_leaves {
-                let mut leaves_for_path = leaves.clone();
-                let path = get_merkle_path(
-                    &mut leaves_for_path,
-                    padded_size,
-                    depth,
-                    index as u32,
-                    &zeros,
-                );
-
-                let leaf_hash = leaves[index];
-                let recomputed_root = compute_merkle_root_from_path(leaf_hash, index as u64, &path);
-
-                if recomputed_root == root {
-                    println!("  ✅ n_leaves={}, index={} - PASS", n_leaves, index);
-                } else {
-                    println!(
-                        "  ❌ n_leaves={}, index={}, root={} - FAIL",
-                        n_leaves, index, recomputed_root
-                    );
-                    println!("      Expected root: {:?}", root.to_bytes());
-                    println!("      Computed root: {:?}", recomputed_root.to_bytes());
-                    println!("      Path length: {}", path.len());
-                    return Err(anyhow::anyhow!(
-                        "Verification failed for n_leaves={}, index={}",
-                        n_leaves,
-                        index
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }*/
-
-    /// Full Merkle-tree build and verification test using `build_merkle_tree`
-    #[test]
-    /*fn full_merkle_tree_test() -> Result<(), Box<dyn std::error::Error>> {
-        // Prepare some dummy leaf pairs
-        let pairs: Vec<(Address, FixedBytes<32>)> = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-        ];
-
-        // Precompute zero hashes and leaf values
-        let zeros = get_merkle_zeros();
-        let leaves = build_leaves(&pairs)?;
-        println!("→ leaves = {}", leaves.len());
-
-        let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
-        println!("→ depth, padded_size = {}, {}", depth, padded_size);
-
-        // Compute root via the old in-place fold
-        let mut leaves_clone = leaves.clone();
-        let root_via_fold = fold_merkle_left(&mut leaves_clone, padded_size, depth, &zeros);
-        println!("→ root_via_fold = {:?}", root_via_fold);
-
-        // Build the full tree bottom-up
-        let leaves_clone = leaves.clone();
-        let merkle_tree = build_merkle_tree(leaves_clone, padded_size, depth, &zeros);
-        println!("→ full merkle_tree:\n{:#?}", merkle_tree);
-        println!(
-            "→ leaf layer (tree[{}]): {:?}",
-            depth - 1,
-            merkle_tree[depth - 1]
-        );
-
-        // Verify root is at tree[0][0]
-        assert_eq!(
-            merkle_tree[0][0], root_via_fold,
-            "Root from build_merkle_tree disagrees with fold_merkle_left"
-        );
-
-        // Verify leaf layer equals padded leaves
-        let mut expected_padded = leaves.clone();
-        expected_padded
-            .extend(std::iter::repeat(Fp::from(0)).take(padded_size - expected_padded.len()));
-        assert_eq!(
-            merkle_tree[depth - 1],
-            expected_padded,
-            "Leaf layer not preserved correctly"
-        );
-
-        // For each leaf index, recompute root from its path and compare
-        for idx in 0..leaves.len() {
-            let mut leaves_for_path = leaves.clone();
-            let path =
-                get_merkle_path(&mut leaves_for_path, padded_size, depth, idx as u32, &zeros);
-            let leaf_hash = leaves.get(idx).copied().unwrap_or_else(|| Fp::from(0));
-            let recomputed_root = compute_merkle_root_from_path(leaf_hash, idx as u64, &path);
-            assert_eq!(
-                recomputed_root, root_via_fold,
-                "Recomputed root via path disagrees at index {}",
-                idx
-            );
-        }
-
-        Ok(())
-    }*/
     #[test]
     fn test_all_leaf_counts_and_indices_with_build_and_fold() {
         let zeros = get_merkle_zeros();
@@ -649,6 +541,12 @@ mod merkle_fixed_tests {
             }
 
             let leaves = build_leaves(&pairs).expect("build_leaves failed");
+            print!("   leaves=");
+            for leaf in leaves.clone() {
+                print!("{}, ", leaf);
+            }
+            println!();
+
             let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
             println!("   depth={}, padded_size={}", depth, padded_size);
 
@@ -673,31 +571,44 @@ mod merkle_fixed_tests {
             expected_padded
                 .extend(std::iter::repeat(Fp::from(0)).take(padded_size - expected_padded.len()));
             assert_eq!(
-                merkle_tree[depth],
-                expected_padded,
+                merkle_tree[depth], expected_padded,
                 "Leaf layer not preserved correctly"
             );
 
             // For each leaf index, verify path → root
             for index in 0..n_leaves {
                 let mut leaves_for_path = leaves.clone();
-                let path = get_merkle_path(
+
+                // Path from fold method
+                let path_fold = get_merkle_path(
                     &mut leaves_for_path,
                     padded_size,
                     depth,
                     index as u32,
                     &zeros,
                 );
-                //println!("     path for index {}: {:#?}", index, path);
 
+                // Path from full tree method
+                let path_build = get_merkle_path_from_tree(&merkle_tree, index as u32);
+
+                // Check paths are identical
+                assert_eq!(
+                    path_fold, path_build,
+                    "[n_leaves={}, index={}] paths differ between fold and build methods",
+                    n_leaves, index
+                );
+
+                // Recompute root from path (fold method)
                 let leaf_hash = leaves[index];
-                let recomputed_root = compute_merkle_root_from_path(leaf_hash, index as u64, &path);
+                let recomputed_root =
+                    compute_merkle_root_from_path(leaf_hash, index as u64, &path_fold);
 
                 assert_eq!(
                     recomputed_root, root_via_fold,
                     "[n_leaves={}, index={}] path root {:?} ≠ fold root {:?}",
                     n_leaves, index, recomputed_root, root_via_fold
                 );
+
                 println!("     ✅ [n_leaves={}, index={}] OK", n_leaves, index);
             }
         }
