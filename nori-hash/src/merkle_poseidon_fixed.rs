@@ -11,7 +11,8 @@ use kimchi::{
 };
 
 const MAX_TREE_DEPTH: usize = 16;
-const MERKLE_ZEROS: &[u8; (MAX_TREE_DEPTH + 1) * 32] = include_bytes!("merkle-zeros.dat");
+const N_MERKLE_ZEROS: usize = MAX_TREE_DEPTH + 1;
+const MERKLE_ZEROS: &[u8; N_MERKLE_ZEROS * 32] = include_bytes!("merkle-zeros.dat");
 
 // Kimchi poseidon hash
 
@@ -23,8 +24,8 @@ pub fn poseidon_hash(input: &[Fp]) -> Fp {
 
 // Merkle zeros
 
-pub fn get_merkle_zeros() -> [Fp; MAX_TREE_DEPTH + 1] {
-    let mut zeros = [Fp::from(0); MAX_TREE_DEPTH + 1];
+pub fn get_merkle_zeros() -> [Fp; N_MERKLE_ZEROS] {
+    let mut zeros = [Fp::from(0); N_MERKLE_ZEROS];
     for (i, chunk) in MERKLE_ZEROS.chunks(32).enumerate() {
         zeros[i] = Fp::from_bytes(chunk).expect("invalid Fp bytes");
     }
@@ -44,7 +45,8 @@ pub fn get_merkle_zeros() -> [Fp; MAX_TREE_DEPTH + 1] {
 ///
 /// # Returns
 /// Tuple `(depth, padded_size)` where:
-/// - `depth`: Tree depth (log2 of padded leaf count)
+/// - `depth`: Tree depth (log2 of padded leaf count) which counts the number
+///   of edges and not the number of levels.
 /// - `padded_size`: Next power-of-two size for padding
 ///
 /// # Examples
@@ -82,10 +84,11 @@ pub fn compute_merkle_tree_depth_and_size(n_leaves: usize) -> (usize, usize) {
 ///
 /// # Parameters
 ///
-/// - `merkle_leaves`: Mutable reference to a vector of field elements representing
-///   the leaves, padded to a power-of-two length.
-///
-/// - `depth`: The depth of the tree (log2 of `merkle_leaves.len()`).
+/// - `merkle_leaves`: mutable reference to a vector of `Fp` elements representing
+///   the leaf nodes; padded in-place to length `padded_size`.
+/// - `padded_size`: the total number of leaves after padding (must be a power of two).
+/// - `depth`: the depth of the tree (log2 of `padded_size`).
+/// - `zeros`: array of precomputed zero–hash values for each level (indexed by level).
 ///
 /// # Returns
 ///
@@ -101,7 +104,7 @@ pub fn fold_merkle_left(
     merkle_leaves: &mut Vec<Fp>,
     padded_size: usize,
     depth: usize,
-    zeros: &[Fp; MAX_TREE_DEPTH + 1],
+    zeros: &[Fp; N_MERKLE_ZEROS],
 ) -> Fp {
     // Deal with no leaves.
     if merkle_leaves.is_empty() {
@@ -121,7 +124,7 @@ pub fn fold_merkle_left(
     // n_leaves = merkle_leaves.len() (before padding)
     // if index >= n_leaves we are a dummy on the leaf level
     // generalising this we need to divide n_leaves by 2 each time
-    let mut len_non_dummy_node = n_leaves;
+    let mut n_non_dummy_nodes = n_leaves;
 
     for level in (1..=depth).rev() {
         let level_width = 1 << level;
@@ -129,26 +132,119 @@ pub fn fold_merkle_left(
         for i in 0..(parent_width) {
             let i2 = 2 * i;
             let left_idx = i2;
-            let right_idx = i2 + 1;
             // Need to work out here if our left and right are dummies
-            if left_idx >= len_non_dummy_node {
+            if left_idx >= n_non_dummy_nodes {
                 // We are a dummy node and by virtue so is right_idx
                 // rather than computing the posiedon hash we can look it up.
                 merkle_nodes[i] = zeros[level];
                 println!("Optimisation made 💪");
-            }
-            /*else if right_idx >= len_non_dummy_node {
-                // Our left was non dummy but our right is not .. we can look up the dummy node from the previous level
-                merkle_nodes[i] = poseidon_hash(&[merkle_nodes[left_idx], zeros[level - 1]]);
-            }*/
-            else {
-                // Bot are non dummy nodes....
+            } else {
+                let right_idx = i2 + 1;
+                // Both are non dummy nodes....
                 merkle_nodes[i] = poseidon_hash(&[merkle_nodes[left_idx], merkle_nodes[right_idx]]);
             }
         }
-        len_non_dummy_node = (len_non_dummy_node + 1) / 2;
+        n_non_dummy_nodes = (n_non_dummy_nodes + 1) / 2;
     }
     merkle_nodes[0]
+}
+
+/// Constructs a full Merkle tree by iteratively hashing sibling pairs bottom-up.
+///
+/// This function builds every level of the tree, storing each layer in its own
+/// `Vec<Fp>`, and returns a `Vec<Vec<Fp>>` from root (index 0) to leaves (index `depth`).
+/// It takes input leaves, pads them to `padded_size`, and then folds siblings
+/// into parent nodes one level at a time, collecting each layer separately.
+///
+/// **How it differs from `fold_merkle_left`:**
+/// - `fold_merkle_left` computes only the Merkle root in-place by collapsing levels
+///   into the same vector, which overwrites the original leaves with intermediate hashes.
+/// - `build_merkle_tree` returns **all** intermediate layers as fresh vectors,
+///   preserving the full tree structure.
+///
+/// # Parameters
+///
+/// - `merkle_leaves`: Owned vector of field elements representing the leaf nodes.
+///   The vector is padded with zeros (dummy leaves) to reach `padded_size` before building.
+/// - `padded_size`: The target number of leaves after padding (must be a power of two).
+/// - `depth`: The depth of the tree (log₂ of `padded_size`).
+/// - `zeros`: Precomputed “zero hashes” for each level, used to replace dummy siblings
+///   cheaply instead of hashing two zero leaves each time.
+///
+/// # Returns
+///
+/// A `Vec<Vec<Fp>>` of length `depth + 1`, where:
+/// - `tree[0]` is a single-element vector containing the Merkle root.
+/// - `tree[1]` is the next layer of parent hashes.
+/// - …
+/// - `tree[depth]` is the vector of (padded) leaf values.
+///
+/// This means the returned tree includes all levels from root to leaves.
+///
+/// # Panics
+///
+/// - If `padded_size` is not a power of two.
+/// - If `zeros` does not contain at least `depth + 1` entries.
+///
+/// # Example
+///
+/// ```rust
+/// let mut leaves = vec![a, b, c];
+/// let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
+/// let tree = build_merkle_tree(leaves, padded_size, depth, &ZERO_HASHES);
+/// let root = tree[0][0];
+/// assert_eq!(tree[depth], vec![a, b, c, Fp::from(0)]);
+pub fn build_merkle_tree(
+    mut merkle_leaves: Vec<Fp>,
+    padded_size: usize,
+    depth: usize,
+    zeros: &[Fp; N_MERKLE_ZEROS],
+) -> Vec<Vec<Fp>> {
+    // Same as above but build all levels
+
+    // Number of leaves
+    let n_leaves = merkle_leaves.len();
+
+    // Pad to nearest power of 2
+    let missing = padded_size - merkle_leaves.len();
+    merkle_leaves.extend(std::iter::repeat(Fp::from(0)).take(missing));
+
+    // Need to identify dummies so we can cheaply look them up
+    // n_leaves = merkle_leaves.len() (before padding)
+    // if index >= n_leaves we are a dummy on the leaf level
+    // generalising this we need to divide n_leaves by 2 each time
+    let mut n_non_dummy_nodes = n_leaves;
+
+    let mut merkle_tree = vec![Vec::new(); depth + 1];
+    merkle_tree[depth] = merkle_leaves;
+
+    for level in (1..=depth).rev() {
+        let child_level = &merkle_tree[level];
+        let parent_width = 1 << (level - 1);
+        let mut parent_level: Vec<Fp> = Vec::with_capacity(parent_width);
+        for i in 0..(parent_width) {
+            let i2 = 2 * i;
+            let left_idx = i2;
+            // Need to work out here if our left and right are dummies
+            if left_idx >= n_non_dummy_nodes {
+                // We are a dummy node and by virtue so is right_idx
+                // rather than computing the posiedon hash we can look it up.
+                parent_level.push(zeros[level]);
+                //println!("Optimisation made 💪");
+            } else {
+                let right_idx = i2 + 1;
+                // Both are non dummy nodes....
+                parent_level.push(poseidon_hash(&[
+                    child_level[left_idx],
+                    child_level[right_idx],
+                ]));
+            }
+        }
+        n_non_dummy_nodes = (n_non_dummy_nodes + 1) / 2;
+        merkle_tree[level - 1] = parent_level;
+    }
+
+    merkle_tree
 }
 
 /// Computes the Merkle authentication path for a given leaf index, mutating the leaf vector in-place.
@@ -172,6 +268,8 @@ pub fn fold_merkle_left(
 /// - `padded_size`: The expected number of leaves after padding (must be a power of two).
 /// - `depth`: The depth of the tree (log₂ of `padded_size`; zero for trees with ≤1 leaf).
 /// - `index`: The index of the leaf for which the Merkle path is to be computed.
+/// - `zeros`: Precomputed “zero hashes” for each level, used to replace dummy siblings
+///   cheaply instead of hashing two zero leaves each time.
 ///
 /// ## Returns
 /// A vector of `Fp` elements, each representing a sibling node in the Merkle path.
@@ -191,7 +289,7 @@ pub fn get_merkle_path(
     padded_size: usize,
     depth: usize,
     index: u32,
-    zeros: &[Fp; MAX_TREE_DEPTH + 1],
+    zeros: &[Fp; N_MERKLE_ZEROS],
 ) -> Vec<Fp> {
     if merkle_leaves.is_empty() {
         return vec![];
@@ -208,7 +306,7 @@ pub fn get_merkle_path(
     let mut path: Vec<Fp> = Vec::with_capacity(depth);
     let mut position = index as usize;
 
-    let mut len_non_dummy_node = n_leaves;
+    let mut n_non_dummy_nodes = n_leaves;
 
     for level in (1..=depth).rev() {
         let sibling_index = match position % 2 == 1 {
@@ -224,27 +322,20 @@ pub fn get_merkle_path(
         for i in 0..(level_width / 2) {
             let i2 = 2 * i;
             let left_idx = i2;
-            let right_idx = i2 + 1;
-
             // Need to work out here if our left and right are dummies
-            if left_idx >= len_non_dummy_node {
+            if left_idx >= n_non_dummy_nodes {
                 // We are a dummy node and by virtue so is right_idx
                 // rather than computing the posiedon hash we can look it up.
                 merkle_nodes[i] = zeros[level];
-            }
-            /*else if right_idx >= len_non_dummy_node {
-                // Our left was non dummy but our right is not .. we can look up the dummy node from the previous level
-                merkle_nodes[i] = poseidon_hash(&[merkle_nodes[left_idx], zeros[level - 1]]);
-            }*/
-            else {
-                
+            } else {
+                let right_idx = i2 + 1;
                 // Both are non dummy nodes....
                 merkle_nodes[i] = poseidon_hash(&[merkle_nodes[left_idx], merkle_nodes[right_idx]]);
             }
         }
 
         position /= 2;
-        len_non_dummy_node = (len_non_dummy_node + 1) / 2;
+        n_non_dummy_nodes = (n_non_dummy_nodes + 1) / 2;
     }
 
     path
@@ -404,148 +495,6 @@ mod merkle_fixed_tests {
     }
 
     #[test]
-    fn test_zero_slots() -> Result<()> {
-        let pairs = vec![];
-        // No leaves, leaf_index 0 is arbitrary but should not panic
-        full_merkle_test(&pairs, 0)
-    }
-
-    #[test]
-    fn test_one_slot() -> Result<()> {
-        let pairs = vec![(dummy_address(1), dummy_value(1))];
-        full_merkle_test(&pairs, 0)
-    }
-
-    #[test]
-    fn test_two_slots_0() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-        ];
-        full_merkle_test(&pairs, 0)
-    }
-
-    #[test]
-    fn test_two_slots_1() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-        ];
-        full_merkle_test(&pairs, 1)
-    }
-
-    #[test]
-    fn test_three_slots_0() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-        ];
-        full_merkle_test(&pairs, 0)
-    }
-
-    #[test]
-    fn test_three_slots_1() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-        ];
-        full_merkle_test(&pairs, 1)
-    }
-
-    #[test]
-    fn test_three_slots_2() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-        ];
-        full_merkle_test(&pairs, 2)
-    }
-
-    #[test]
-    fn test_four_slots_0() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-            (dummy_address(4), dummy_value(4)),
-        ];
-        full_merkle_test(&pairs, 0)
-    }
-
-    #[test]
-    fn test_four_slots_1() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-            (dummy_address(4), dummy_value(4)),
-        ];
-        full_merkle_test(&pairs, 1)
-    }
-
-    #[test]
-    fn test_four_slots_2() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-            (dummy_address(4), dummy_value(4)),
-        ];
-        full_merkle_test(&pairs, 2)
-    }
-
-    #[test]
-    fn test_four_slots_3() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-            (dummy_address(4), dummy_value(4)),
-        ];
-        full_merkle_test(&pairs, 3)
-    }
-
-    #[test]
-    fn test_five_slots() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-            (dummy_address(4), dummy_value(4)),
-            (dummy_address(5), dummy_value(5)),
-        ];
-        full_merkle_test(&pairs, 4)
-    }
-
-    #[test]
-    fn test_nine_slots() -> Result<()> {
-        let pairs = vec![
-            (dummy_address(1), dummy_value(1)),
-            (dummy_address(2), dummy_value(2)),
-            (dummy_address(3), dummy_value(3)),
-            (dummy_address(4), dummy_value(4)),
-            (dummy_address(5), dummy_value(5)),
-            (dummy_address(5), dummy_value(5)),
-            (dummy_address(6), dummy_value(6)),
-            (dummy_address(7), dummy_value(7)),
-            (dummy_address(8), dummy_value(8)),
-            (dummy_address(9), dummy_value(9)),
-        ];
-        full_merkle_test(&pairs, 0)?;
-        full_merkle_test(&pairs, 1)?;
-        full_merkle_test(&pairs, 2)?;
-        full_merkle_test(&pairs, 3)?;
-        full_merkle_test(&pairs, 4)?;
-        full_merkle_test(&pairs, 5)?;
-        full_merkle_test(&pairs, 6)?;
-        full_merkle_test(&pairs, 7)?;
-        full_merkle_test(&pairs, 8)
-    }
-
-    #[test]
     fn test_large_slots() -> Result<()> {
         let n = 1000;
         let pairs: Vec<(Address, FixedBytes<32>)> = (0..n)
@@ -563,7 +512,7 @@ mod merkle_fixed_tests {
         Ok(())
     }
 
-    #[test]
+    /*#[test]
     fn test_all_leaf_counts_and_indices() -> Result<()> {
         let zeros = get_merkle_zeros();
         println!("Testing all leaf counts and indices...");
@@ -581,7 +530,7 @@ mod merkle_fixed_tests {
             let leaves = build_leaves(&pairs)?;
             let (depth, padded_size) = compute_merkle_tree_depth_and_size(n_leaves);
 
-            // Compute root once
+            // Compute root
             let mut leaves_for_root = leaves.clone();
             let root = fold_merkle_left(&mut leaves_for_root, padded_size, depth, &zeros);
 
@@ -602,7 +551,10 @@ mod merkle_fixed_tests {
                 if recomputed_root == root {
                     println!("  ✅ n_leaves={}, index={} - PASS", n_leaves, index);
                 } else {
-                    println!("  ❌ n_leaves={}, index={}, root={} - FAIL", n_leaves, index, recomputed_root);
+                    println!(
+                        "  ❌ n_leaves={}, index={}, root={} - FAIL",
+                        n_leaves, index, recomputed_root
+                    );
                     println!("      Expected root: {:?}", root.to_bytes());
                     println!("      Computed root: {:?}", recomputed_root.to_bytes());
                     println!("      Path length: {}", path.len());
@@ -615,12 +567,145 @@ mod merkle_fixed_tests {
             }
         }
         Ok(())
-    }
+    }*/
 
+    /// Full Merkle-tree build and verification test using `build_merkle_tree`
+    #[test]
+    /*fn full_merkle_tree_test() -> Result<(), Box<dyn std::error::Error>> {
+        // Prepare some dummy leaf pairs
+        let pairs: Vec<(Address, FixedBytes<32>)> = vec![
+            (dummy_address(1), dummy_value(1)),
+            (dummy_address(2), dummy_value(2)),
+            (dummy_address(3), dummy_value(3)),
+        ];
+
+        // Precompute zero hashes and leaf values
+        let zeros = get_merkle_zeros();
+        let leaves = build_leaves(&pairs)?;
+        println!("→ leaves = {}", leaves.len());
+
+        let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
+        println!("→ depth, padded_size = {}, {}", depth, padded_size);
+
+        // Compute root via the old in-place fold
+        let mut leaves_clone = leaves.clone();
+        let root_via_fold = fold_merkle_left(&mut leaves_clone, padded_size, depth, &zeros);
+        println!("→ root_via_fold = {:?}", root_via_fold);
+
+        // Build the full tree bottom-up
+        let leaves_clone = leaves.clone();
+        let merkle_tree = build_merkle_tree(leaves_clone, padded_size, depth, &zeros);
+        println!("→ full merkle_tree:\n{:#?}", merkle_tree);
+        println!(
+            "→ leaf layer (tree[{}]): {:?}",
+            depth - 1,
+            merkle_tree[depth - 1]
+        );
+
+        // Verify root is at tree[0][0]
+        assert_eq!(
+            merkle_tree[0][0], root_via_fold,
+            "Root from build_merkle_tree disagrees with fold_merkle_left"
+        );
+
+        // Verify leaf layer equals padded leaves
+        let mut expected_padded = leaves.clone();
+        expected_padded
+            .extend(std::iter::repeat(Fp::from(0)).take(padded_size - expected_padded.len()));
+        assert_eq!(
+            merkle_tree[depth - 1],
+            expected_padded,
+            "Leaf layer not preserved correctly"
+        );
+
+        // For each leaf index, recompute root from its path and compare
+        for idx in 0..leaves.len() {
+            let mut leaves_for_path = leaves.clone();
+            let path =
+                get_merkle_path(&mut leaves_for_path, padded_size, depth, idx as u32, &zeros);
+            let leaf_hash = leaves.get(idx).copied().unwrap_or_else(|| Fp::from(0));
+            let recomputed_root = compute_merkle_root_from_path(leaf_hash, idx as u64, &path);
+            assert_eq!(
+                recomputed_root, root_via_fold,
+                "Recomputed root via path disagrees at index {}",
+                idx
+            );
+        }
+
+        Ok(())
+    }*/
+    #[test]
+    fn test_all_leaf_counts_and_indices_with_build_and_fold() {
+        let zeros = get_merkle_zeros();
+        println!("Testing all leaf counts and indices with both fold and build...");
+
+        for n_leaves in 0..=50 {
+            println!("→ Testing with {} leaves", n_leaves);
+
+            // Build dummy pairs
+            let mut pairs = Vec::with_capacity(n_leaves);
+            for i in 0..n_leaves {
+                pairs.push((dummy_address(i as u8), dummy_value(i as u8)));
+            }
+
+            let leaves = build_leaves(&pairs).expect("build_leaves failed");
+            let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
+            println!("   depth={}, padded_size={}", depth, padded_size);
+
+            // Fold to get root
+            let mut leaves_for_fold = leaves.clone();
+            let root_via_fold = fold_merkle_left(&mut leaves_for_fold, padded_size, depth, &zeros);
+            println!("   root_via_fold = {}", root_via_fold);
+
+            // Build full tree and verify root & leaves
+            let merkle_tree = build_merkle_tree(leaves.clone(), padded_size, depth, &zeros);
+            println!("   root_via_build = {}", merkle_tree[0][0]);
+
+            // Root check
+            assert_eq!(
+                merkle_tree[0][0], root_via_fold,
+                "[n_leaves={}] build root {:?} ≠ fold root {:?}",
+                n_leaves, merkle_tree[0][0], root_via_fold
+            );
+
+            // Change leaf layer verification to use depth instead of depth-1
+            let mut expected_padded = leaves.clone();
+            expected_padded
+                .extend(std::iter::repeat(Fp::from(0)).take(padded_size - expected_padded.len()));
+            assert_eq!(
+                merkle_tree[depth],
+                expected_padded,
+                "Leaf layer not preserved correctly"
+            );
+
+            // For each leaf index, verify path → root
+            for index in 0..n_leaves {
+                let mut leaves_for_path = leaves.clone();
+                let path = get_merkle_path(
+                    &mut leaves_for_path,
+                    padded_size,
+                    depth,
+                    index as u32,
+                    &zeros,
+                );
+                //println!("     path for index {}: {:#?}", index, path);
+
+                let leaf_hash = leaves[index];
+                let recomputed_root = compute_merkle_root_from_path(leaf_hash, index as u64, &path);
+
+                assert_eq!(
+                    recomputed_root, root_via_fold,
+                    "[n_leaves={}, index={}] path root {:?} ≠ fold root {:?}",
+                    n_leaves, index, recomputed_root, root_via_fold
+                );
+                println!("     ✅ [n_leaves={}, index={}] OK", n_leaves, index);
+            }
+        }
+    }
 }
 
 /// STATICALLY BUILT ZEROS
-/// 
+///
 #[cfg(test)]
 mod merkle_zeros {
     use super::*;
@@ -628,12 +713,12 @@ mod merkle_zeros {
     use std::{env, path::PathBuf};
 
     fn calculate_zeros() -> Vec<Fp> {
-        // [Fp; MAX_TREE_DEPTH + 1]
+        // [Fp; N_MERKLE_ZEROS]
         let zeros_iter: std::iter::Take<std::iter::Successors<Fp, _>> =
             std::iter::successors(Some(Fp::from(0)), |last| {
                 Some(poseidon_hash(&[*last, *last]))
             })
-            .take(MAX_TREE_DEPTH + 1);
+            .take(N_MERKLE_ZEROS);
 
         zeros_iter.collect::<Vec<Fp>>()
     }
