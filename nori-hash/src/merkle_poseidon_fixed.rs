@@ -135,7 +135,7 @@ pub fn fold_merkle_left(
                 // We are a dummy node and by virtue so is right_idx
                 // rather than computing the posiedon hash we can look it up.
                 merkle_nodes[i] = zeros[level];
-                //println!("Optimisation made 💪");
+                println!("Optimisation made 💪");
             }
             /*else if right_idx >= len_non_dummy_node {
                 // Our left was non dummy but our right is not .. we can look up the dummy node from the previous level
@@ -568,8 +568,8 @@ mod merkle_fixed_tests {
         let zeros = get_merkle_zeros();
         println!("Testing all leaf counts and indices...");
 
-        // Test leaf counts from 9 to 50
-        for n_leaves in 9..=50 {
+        // Test leaf counts from 0 to 50
+        for n_leaves in 0..=50 {
             println!("Testing with {} leaves", n_leaves);
 
             // Generate dummy data
