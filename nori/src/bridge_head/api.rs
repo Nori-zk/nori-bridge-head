@@ -19,8 +19,8 @@ use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
-use log::{error, info, warn};
-use nori_sp1_helios_primitives::types::{ProofInputs, ProofOutputs};
+use log::{debug, error, info, warn};
+use nori_sp1_helios_primitives::types::{ProofInputs, ProofOutputs, VerifiedContractStorageSlot};
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
@@ -40,6 +40,7 @@ pub struct ProofMessage {
     pub output_store_hash: FixedBytes<32>,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
+    pub contract_storage_slots: Vec<VerifiedContractStorageSlot>,
     pub elapsed_sec: f64,
 }
 
@@ -124,10 +125,10 @@ pub struct BridgeHead {
 impl BridgeHead {
     pub async fn new() -> (CommandHandle, Self) {
         validate_env(&[
-            "SOURCE_CONSENSUS_RPC_URL",
+            "SOURCE_EXECUTION_HTTP_RPCS",
+            "CONSENSUS_RPCS_LIST",
             "SP1_PROVER",
             "NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS",
-            "SOURCE_EXECUTION_HTTP_RPCS",
         ]);
 
         // Initialise slot head / commitee vars
@@ -138,6 +139,7 @@ impl BridgeHead {
         if nb_checkpoint_exists() {
             // Warm start procedure
             info!("Loading nori slot checkpoint from file.");
+            debug!("Debug printing is enabled.");
             let nb_checkpoint = load_nb_checkpoint().unwrap();
             current_slot = nb_checkpoint.slot;
             store_hash = nb_checkpoint.store_hash;
@@ -230,10 +232,11 @@ impl BridgeHead {
         info!("Handling prover job output '{}'.", job_id);
 
         // Extract jobs details are remove job
-        let (input_slot, input_store_hash, elapsed_sec) = {
+        let (input_slot, input_store_hash, contract_storage, elapsed_sec) = {
             let job = self.prover_jobs.get(&job_id).unwrap();
             let input_slot = job.input_slot;
             let input_store_hash = job.inputs.store_hash;
+            let contract_storage = job.inputs.contract_storage.clone();
 
             let elapsed_sec = Instant::now()
                 .duration_since(job.start_instant)
@@ -241,18 +244,19 @@ impl BridgeHead {
 
             self.prover_jobs.remove(&job_id);
 
-            (input_slot, input_store_hash, elapsed_sec)
+            (input_slot, input_store_hash, contract_storage, elapsed_sec)
         };
 
         info!("Job '{}' finished in {} seconds.", job_id, elapsed_sec);
 
-        // Extract the next sync committee out of the proof output
+        // Extract values out of the proof output
         let public_values: sp1_sdk::SP1PublicValues = proof.clone().public_values;
         let public_values_bytes = public_values.as_slice(); // Raw bytes
 
         let proof_outputs = ProofOutputs::from_bytes(public_values_bytes)?;
         let output_slot = proof_outputs.output_slot;
         let output_store_hash = proof_outputs.output_store_hash;
+        
 
         info!(
             "...proof_outputs.next_sync_committee_hash {}",
@@ -267,7 +271,15 @@ impl BridgeHead {
         info!("-----------------------------------------------------------------------------------------");
         info!("-----------------------------------------------------------------------------------------");
 
-        // Notify of a succesful job
+        // Build a vector of VerifiedContractStorageSlot
+        let contract_storage_slots: Vec<VerifiedContractStorageSlot> = contract_storage.storage_slots.iter().map(|slot| {
+            VerifiedContractStorageSlot {
+                slot_key_address: slot.slot_key_address,
+                value: slot.expected_value
+            }
+        }).collect();
+
+        // Notify of a successful job
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobSucceeded(
                 TransitionNoticeExtensionBridgeHeadJobSucceeded {
@@ -278,6 +290,7 @@ impl BridgeHead {
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
                     output_store_hash: proof_outputs.output_store_hash,
+                    contract_storage_slots: contract_storage_slots.clone(),
                 },
             ))
             .await;
@@ -291,6 +304,7 @@ impl BridgeHead {
                 output_store_hash,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
+                contract_storage_slots,
                 elapsed_sec,
             })
             .await;

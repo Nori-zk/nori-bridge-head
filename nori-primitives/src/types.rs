@@ -47,7 +47,7 @@ pub struct ConsensusProofInputs<S: ConsensusSpec> {
     pub store_hash: B256,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ExecutionStateProof {
     #[serde(rename = "executionStateRoot")]
     pub execution_state_root: B256,
@@ -56,10 +56,12 @@ pub struct ExecutionStateProof {
     pub gindex: String,
 }
 
-/*pub struct VerifiedContractStorageSlot {
+// TODO do we need the contract address here.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct VerifiedContractStorageSlot {
     pub slot_key_address: Address,
     pub value: U256,
-}*/
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofOutputs {

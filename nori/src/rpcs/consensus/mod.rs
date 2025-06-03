@@ -24,7 +24,7 @@ use tokio::time::Duration;
 use tree_hash::TreeHash;
 
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
-const CONENSUS_RPCS_ENV_VAR: &str = "CONSENSUS_RPCS_LIST";
+const CONSENSUS_RPCS_ENV_VAR: &str = "CONSENSUS_RPCS_LIST";
 pub const PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
 pub const PROOF_INPUT_VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -432,7 +432,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
 
-        let urls: Vec<Url> = env::var(CONENSUS_RPCS_ENV_VAR)?
+        let urls: Vec<Url> = env::var(CONSENSUS_RPCS_ENV_VAR)?
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -448,7 +448,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         let principal_provider_url = urls.first().cloned().ok_or_else(|| {
             anyhow!(
                 "No valid consensus RPC URLs found in {}",
-                CONENSUS_RPCS_ENV_VAR
+                CONSENSUS_RPCS_ENV_VAR
             )
         })?;
 
@@ -515,6 +515,23 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                                     "Output slot {} was not greater than input slot {}",
                                     output_slot,
                                     input_slot
+                                ));
+                            }
+
+                            // Block non-checkpoint slots (they prevent bootstrapping on restart)
+                            if validate_progress && output_slot % 32 > 0 { 
+                                // FIXME might need the validate_progress guard as its used as a flag to allow
+                                // the proof anyway. And for vk building we need to be able to arbirarily bypass this 
+                                // sort of validation.
+                                return Err(anyhow::anyhow!(
+                                    "Output slot {} was a non-checkpoint slot. Preventing this as it prevents bootstrapping if we go offline.",
+                                    output_slot,
+                                ));
+                            }
+
+                            if validate_progress && proof_outputs.next_sync_committee_hash == B256::ZERO {
+                                return Err(anyhow::anyhow!(
+                                    "Next sync committee was zero. Preventing this as it could stop the recovery of the input_store_hash when restarting.",
                                 ));
                             }
 

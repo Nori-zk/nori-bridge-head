@@ -2,9 +2,9 @@ use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, Uint, B256};
 use alloy_rlp::Encodable;
 use alloy_trie::{proof, Nibbles};
 use anyhow::Result;
-use kimchi::{mina_curves::pasta::Fp, o1_utils::FieldHelpers};
-use nori_hash::merkle_poseidon::{
-    compute_merkle_tree_depth_and_size, fold_merkle_left, hash_storage_slot,
+use kimchi::o1_utils::FieldHelpers;
+use nori_hash::merkle_poseidon_fixed::{
+    compute_merkle_tree_depth_and_size, fold_merkle_left, get_merkle_zeros, hash_storage_slot, MAX_TREE_DEPTH,
 };
 use nori_sp1_helios_primitives::types::{
     get_storage_location_for_key, ContractStorage, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
@@ -32,6 +32,11 @@ pub enum MptError {
         address: Address,
         value: Uint<256, 4>,
         reason: String,
+    },
+    ExceedsMaxTreeDepth {
+        slots: usize,
+        requested_depth: usize,
+        max_depth: usize,
     },
 }
 
@@ -63,7 +68,18 @@ impl fmt::Display for MptError {
                 address,
                 value,
                 reason
-            )
+            ),
+            MptError::ExceedsMaxTreeDepth {
+                slots,
+                requested_depth,
+                max_depth,
+            } => write!(
+                f,
+                "Merkle tree depth {} (derived from contract storage slots = {}) exceeds the maximum allowed depth of {}",
+                requested_depth,
+                slots,
+                max_depth
+            ),
         }
     }
 }
@@ -80,7 +96,7 @@ impl fmt::Display for MptError {
 ///
 /// After successful verification of each storage slots, the function:
 /// - Hashes the verified storage slot details into a Merkle leaf, collecting them into a vector.
-/// 
+///
 /// After successful verification of all storage slots, the function:
 /// - Computes the Merkle root through in-place folding
 ///
@@ -96,7 +112,9 @@ impl fmt::Display for MptError {
 /// - `MptError::InvalidStorageSlotAddressMapping` if address-to-slot mapping is invalid
 /// - `MptError::InvalidStorageSlotProof` if any storage slot proof is invalid
 /// - `MptError::MerkleHashError` if hashing a storage slot leaf fails
-///
+/// - `MptError::ExceedsMaxTreeDepth` if the number of storage slots yields a merkle tree 
+///   which is too large.
+/// 
 /// # Steps
 /// 1. Verify contract account exists in global state trie
 /// 2. For each storage slot:
@@ -133,8 +151,13 @@ pub fn verify_storage_slot_proofs(
     })?;
 
     // Calculate tree depth which is ceil(log2(number)) and padded size (leaves to the nearest power of 2)
-    let (depth, padded_size) =
-        compute_merkle_tree_depth_and_size(contract_storage.storage_slots.len());
+    let n_leaves = contract_storage.storage_slots.len();
+    let (depth, padded_size) = compute_merkle_tree_depth_and_size(n_leaves);
+
+    // Validate
+    if depth > MAX_TREE_DEPTH {
+        return Err(MptError::ExceedsMaxTreeDepth { slots: n_leaves, requested_depth: depth, max_depth: MAX_TREE_DEPTH });
+    }
 
     // 2) Now that we've verified the contract's `TrieAccount`, use it to verify each storage slot proof
     let mut merkle_nodes = Vec::with_capacity(padded_size);
@@ -173,8 +196,7 @@ pub fn verify_storage_slot_proofs(
             reason: e.to_string(),
         })?;
 
-        let slot_merkle_leaf_result =
-            hash_storage_slot(&address, &FixedBytes(value.to_be_bytes()));
+        let slot_merkle_leaf_result = hash_storage_slot(&address, &FixedBytes(value.to_be_bytes()));
         let slot_merkle_leaf = match slot_merkle_leaf_result {
             Ok(val) => val,
             Err(error) => {
@@ -189,7 +211,7 @@ pub fn verify_storage_slot_proofs(
     }
 
     // Calculate the root hash
-    let root = fold_merkle_left(&mut merkle_nodes, padded_size, depth);
+    let root = fold_merkle_left(&mut merkle_nodes, padded_size, depth, &get_merkle_zeros());
 
     let mut fixed_bytes = [0u8; 32];
     fixed_bytes[..32].copy_from_slice(&root.to_bytes());

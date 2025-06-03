@@ -10,7 +10,7 @@ use kimchi::{
     o1_utils::FieldHelpers,
 };
 
-const MAX_TREE_DEPTH: usize = 16;
+pub const MAX_TREE_DEPTH: usize = 16;
 const N_MERKLE_ZEROS: usize = MAX_TREE_DEPTH + 1;
 const MERKLE_ZEROS: &[u8; N_MERKLE_ZEROS * 32] = include_bytes!("merkle-zeros.dat");
 
@@ -137,7 +137,7 @@ pub fn fold_merkle_left(
                 // We are a dummy node and by virtue so is right_idx
                 // rather than computing the posiedon hash we can look it up.
                 merkle_nodes[i] = zeros[level];
-                println!("Optimisation made 💪");
+                //println!("Optimisation made 💪");
             } else {
                 let right_idx = i2 + 1;
                 // Both are non dummy nodes....
@@ -284,7 +284,7 @@ pub fn build_merkle_tree(
 /// let mut leaves = original_leaf_values.clone();
 /// let path = get_merkle_path(&mut leaves, padded_size, depth, 2);
 /// ```
-pub fn get_merkle_path(
+pub fn get_merkle_path_from_leaves(
     merkle_leaves: &mut Vec<Fp>,
     padded_size: usize,
     depth: usize,
@@ -486,7 +486,7 @@ mod merkle_fixed_tests {
         let root = fold_merkle_left(&mut leaves_clone, padded_size, depth, &zeros);
 
         let mut leaves_for_path = leaves.clone();
-        let path = get_merkle_path(
+        let path = get_merkle_path_from_leaves(
             &mut leaves_for_path,
             padded_size,
             depth,
@@ -580,7 +580,7 @@ mod merkle_fixed_tests {
                 let mut leaves_for_path = leaves.clone();
 
                 // Path from fold method
-                let path_fold = get_merkle_path(
+                let path_fold = get_merkle_path_from_leaves(
                     &mut leaves_for_path,
                     padded_size,
                     depth,

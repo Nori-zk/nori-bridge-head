@@ -326,7 +326,10 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    - `InvalidStorageSlotProof { slot_key, reason }` → Storage slot proof failed
 ///    - `InvalidStorageSlotAddressMapping { slot_key, address, computed_address_slot_key }` → Slot-to-address mapping invalid
 ///    - `MerkleHashError { address, value, reason }` → Merkle hash computation error of verified slots
+///    - `ExceedsMaxTreeDepth { slots, requested_depth, max_depth }` → if the number of storage slots yields a merkle tree 
+///       which is too large.
 ///    Any of these returns a `MptError`, wrapped as `ProgramError::MptError`
+/// 
 pub fn consensus_mpt_program<S: ConsensusSpec>(
     proof_inputs: ProofInputs<S>,
     debug_print: bool,

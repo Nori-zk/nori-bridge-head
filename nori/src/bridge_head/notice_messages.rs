@@ -1,7 +1,7 @@
 use alloy_primitives::FixedBytes;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::FinalityUpdate;
-use nori_sp1_helios_primitives::types::ProofInputs;
+use nori_sp1_helios_primitives::types::{ProofInputs, VerifiedContractStorageSlot};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -69,6 +69,7 @@ pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
     pub output_slot: u64,
     pub output_store_hash: FixedBytes<32>,
     pub execution_state_root: FixedBytes<32>,
+    pub contract_storage_slots: Vec<VerifiedContractStorageSlot>,
     pub elapsed_sec: f64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]

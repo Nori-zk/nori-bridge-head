@@ -2,7 +2,7 @@ use alloy_primitives::FixedBytes;
 use helios_consensus_core::consensus_spec::{ConsensusSpec, MainnetConsensusSpec};
 use helios_ethereum::rpc::{http_rpc::HttpRpc, ConsensusRpc};
 //use crate::rpcs::consensus::{get_client, get_client_latest_finality_slot, get_client_latest_finality_update_and_slot, get_latest_checkpoint, FinalityUpdateAndSlot};
-use log::{error, info, debug};
+use log::{debug, error, info};
 use nori_sp1_helios_primitives::types::ProofInputs;
 use std::{process, time::Duration};
 use tokio::{sync::mpsc, time::interval};
@@ -166,9 +166,17 @@ where
                 Some(update) = finality_input_rx.recv() => {
                     slot = update.slot;
                     store_hash = update.store_hash;
-                    if latest_slot < slot {
-                        latest_slot = slot;
-                    }
+                    // we should probably just override the slot here FIXME
+                    // our last computed proof input was from a different input slot and thus is not really valid
+                    // when the observer calls advance -> api advance gets called this is with the output slot of that proof
+                    // which is our new input slot. We need to check finality changes from this point!
+                    // so we should reset our latest_slot because we need a new proof input from this slot to finality.
+                    // so we need to mark the latest_slot as our slot. This may mean we emit multiple finality change
+                    // detections for the same beacon finality... but currently we need to do that as otherwise we would be
+                    // re proving from an input slot we have already emitted a proof from.
+                    //if latest_slot < slot {
+                    latest_slot = slot;
+                    //}
                 },
 
                 // Receive validation results

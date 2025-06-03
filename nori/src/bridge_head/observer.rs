@@ -128,7 +128,12 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             .await;
 
         // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
-        if self.latest_beacon_finality_slot > self.current_slot {
+        // However this proofinputs we have here is proved from our old slot to current finality and thus
+        // is invalid (we would emit a proof from the same input slot again....)
+        // ... so we should just mark the stage_transition_proof which will emit when there is a finality detected
+        // which is beyond our roof_data.output_slot, note this might not need to wait for the 
+        // next beacon finality transition this could have already happened and so might emit almost straight away.
+        /*if self.latest_beacon_finality_slot > self.current_slot {
             info!("Latest beacon finality slot is advanced of our proofs output slot, starting a new job.");
             self.bridge_head_handle
                 .stage_transition_proof(
@@ -136,10 +141,11 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     self.latest_validated_proof_input.as_ref().unwrap().clone(),
                 )
                 .await;
-        } else {
-            info!("Latest beacon finality slot not is advanced of our proofs output slot, queuing a job for the next finality transition.");
+        } else {*/
+            //info!("Latest beacon finality slot not is advanced of our proofs output slot, queuing a job for the next finality transition.");
+            info!("Queuing a job for the next detected finality advancement beyond slot '{}'.", proof_data.output_slot);
             self.stage_transition_proof = true;
-        }
+        //}
 
         // Double check our proof actually advanced the head
         /*if proof_data.output_slot > self.current_slot {
@@ -227,6 +233,10 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 );
 
                 // If there are no other jobs in the queue retry the failure
+                // FIXME TODO perhaps we should not retry the exact same job and just wait for the next finality...? 
+                // We are running behind for no reason here.... Also would simplify the logic here and allow us to remove
+                // latest_validated_proof_input because we don't use it anywhere else!
+                // But this change might end up in needless waiting. Say there is very short term network downtime.
                 if data.extension.n_job_in_buffer == 0 {
                     if let Some(proof_input) = self.latest_validated_proof_input.clone() {
                         let _ = self
