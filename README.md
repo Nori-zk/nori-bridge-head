@@ -62,4 +62,4 @@ NORI_LOG=info
 
 ## Nori Contract
 
-For information on how to deploy the source contract see [here](./nori-contracts/README.md)
+For information on how to deploy the source contract see [here](./nori-contracts/README.md).
