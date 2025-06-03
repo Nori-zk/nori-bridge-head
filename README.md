@@ -14,12 +14,15 @@ Env vars (create a .env file):
 
 ```
 # The source chain, is the chain which the light client will sync from.
-SOURCE_CONSENSUS_RPC_URL=https://ethereum-mainnet.core.chainstack.com/beacon/...
-SOURCE_CHAIN_ID=1
+NORI_SOURCE_CONSENSUS_HTTP_RPCS=https://ethereum-mainnet.core.chainstack.com/beacon/...,<another consensus rpc url>
+NORI_SOURCE_CHAIN_ID=1
+NORI_SOURCE_EXECUTION_HTTP_RPCS=https://ethereum-mainnet.core.chainstack.com/...,<another execution rpc url>
+
+# Source contract address.
+NORI_TOKEN_BRIDGE_ADDRESS=0x0..
 
 # SP1 Prover. Set to mock for testing, or use network to generate proofs on the Succinct Prover Network.
 SP1_PROVER=mock
-PRIVATE_KEY=0x0...
 
 # SP1 Network prover (if using SP1_PROVER=network).
 SP1_VERIFIER_ADDRESS=...
@@ -33,14 +36,15 @@ NORI_HELIOS_POLLING_INTERVAL=
 NORI_LOG=info
 ```
 
-- **SOURCE_CONSENSUS_RPC_URL**: consensus rpc.
-- **SOURCE_CHAIN_ID**: chain identifier.
+- **NORI_SOURCE_CONSENSUS_HTTP_RPCS**: Comma delimited consensus rpc urls.
+- **NORI_SOURCE_CHAIN_ID**: Source chain identifier.
+- **NORI_SOURCE_EXECUTION_HTTP_RPCS**: Comma delimited execution rpc urls.
+- **NORI_TOKEN_BRIDGE_ADDRESS**: The source contract's address in the source chain.
 - **SP1_PROVER**: sets the mode for the ZK prover, options are: "mock", "cpu", "cuda" and "network" (note mock executes the program but mocks the zk proof).
-- **PRIVATE_KEY**: private key for the account that will be deploying the contract
 - **SP1_VERIFIER_ADDRESS**: the address of the verifier contract
 - **NETWORK_PRIVATE_KEY**: network prover private key.
 - **NETWORK_RPC_URL**: network prover rpc url.
-- **NORI_HELIOS_POLLING_INTERVAL**: dictates the polling interval for latest Helios client beacon slot.
+- **NORI_HELIOS_POLLING_INTERVAL**: dictates the polling interval for the Helios client to find the latest finality beacon slot.
 - **NORI_LOG**: Nori logging level.
 
 ## Build Nori-Sp1-Helios-ZK
@@ -55,3 +59,7 @@ NORI_LOG=info
 ## Tests
 
 `cargo test -- --nocapture`
+
+## Nori Contract
+
+For information on how to deploy the source contract see [here](./nori-contracts/README.md)

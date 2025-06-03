@@ -1,5 +1,4 @@
 use std::process;
-
 use super::{
     api::{BridgeHeadEvent, ProofMessage},
     handles::CommandHandle,
@@ -133,51 +132,9 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         // ... so we should just mark the stage_transition_proof which will emit when there is a finality detected
         // which is beyond our roof_data.output_slot, note this might not need to wait for the 
         // next beacon finality transition this could have already happened and so might emit almost straight away.
-        /*if self.latest_beacon_finality_slot > self.current_slot {
-            info!("Latest beacon finality slot is advanced of our proofs output slot, starting a new job.");
-            self.bridge_head_handle
-                .stage_transition_proof(
-                    self.current_slot,
-                    self.latest_validated_proof_input.as_ref().unwrap().clone(),
-                )
-                .await;
-        } else {*/
-            //info!("Latest beacon finality slot not is advanced of our proofs output slot, queuing a job for the next finality transition.");
-            info!("Queuing a job for the next detected finality advancement beyond slot '{}'.", proof_data.output_slot);
-            self.stage_transition_proof = true;
-        //}
-
-        // Double check our proof actually advanced the head
-        /*if proof_data.output_slot > self.current_slot {
-            info!("Proof advanced the bridge head.");
-
-            info!("Saving Nori sp1 proof.");
-            let _ = handle_nori_proof(&proof_data.proof, proof_data.input_slot).await;
-            let _ = handle_nori_proof_message(&proof_data).await;
-
-            // Advance the head
-            info!("Advancing the bridge head.");
-            self.advance(proof_data.output_slot, proof_data.output_store_hash)
-                .await;
-
-            // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
-            if self.latest_beacon_finality_slot > self.current_slot {
-                info!("Latest beacon finality slot is advanced of our proofs output slot, starting a new job.");
-                self.bridge_head_handle
-                    .stage_transition_proof(
-                        self.current_slot,
-                        self.latest_validated_proof_input.as_ref().unwrap().clone(),
-                    )
-                    .await;
-            } else {
-                info!("Latest beacon finality slot not is advanced of our proofs output slot, queuing a job for the next finality transition.");
-                self.stage_transition_proof = true;
-            }
-        } else {
-            info!("Proof failed to advance the bridge head. Proof slot {}, bridge head slot {}. Queuing another job for the next finality transition.", proof_data.output_slot, self.current_slot);
-            self.stage_transition_proof = true;
-        }*/
-
+        info!("Queuing a job for the next detected finality advancement beyond slot '{}'.", proof_data.output_slot);
+        self.stage_transition_proof = true;
+     
         Ok(())
     }
 
@@ -200,20 +157,6 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 if data.extension.latest_beacon_slot > self.latest_beacon_finality_slot {
                     self.latest_beacon_finality_slot = data.extension.latest_beacon_slot;
                 }
-                // During initial startup we need to immediately check if genesis finality head has moved in order to apply any updates
-                // that happened while this process was offline
-
-                /*if data.extension.latest_beacon_slot > self.current_slot {
-                    info!("Staging a transition proof with input slot {}", self.current_slot);
-                    let _ = self
-                    .bridge_head_handle
-                    .stage_transition_proof(self.current_slot, self.store_hash)
-                    .await;
-                }
-                else {
-                    info!("Current slot is {}, staging a job at the next finality transition.", self.current_slot);
-                    self.stage_transition_proof = true;
-                }*/
 
                 self.stage_transition_proof = true;
             }

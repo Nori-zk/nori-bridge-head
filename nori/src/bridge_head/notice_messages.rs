@@ -1,6 +1,5 @@
 use alloy_primitives::FixedBytes;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use helios_consensus_core::types::FinalityUpdate;
 use nori_sp1_helios_primitives::types::{ProofInputs, VerifiedContractStorageSlot};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

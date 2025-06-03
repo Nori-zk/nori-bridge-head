@@ -1,11 +1,11 @@
 use alloy::sol;
-use alloy_primitives::{keccak256, Address, Log, B256};
+use alloy_primitives::{Address, Log, B256};
 use anyhow::{Context, Result};
 use nori_sp1_helios_primitives::types::{
     get_storage_location_for_key, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
 };
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     env,
 };
 use NoriStateBridge::TokensLocked;
@@ -18,8 +18,8 @@ sol!(
 );
 
 pub fn get_source_contract_address() -> Result<Address> {
-    let source_state_bridge_contract_address = env::var("NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS")
-        .context("Missing NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS in environment")?
+    let source_state_bridge_contract_address = env::var("NORI_TOKEN_BRIDGE_ADDRESS")
+        .context("Missing NORI_TOKEN_BRIDGE_ADDRESS in environment")?
         .parse::<Address>()
         .context("Invalid Ethereum address format")?;
     Ok(source_state_bridge_contract_address)

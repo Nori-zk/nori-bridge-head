@@ -19,7 +19,7 @@ use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use nori_sp1_helios_primitives::types::{ProofInputs, ProofOutputs, VerifiedContractStorageSlot};
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
@@ -125,10 +125,10 @@ pub struct BridgeHead {
 impl BridgeHead {
     pub async fn new() -> (CommandHandle, Self) {
         validate_env(&[
-            "SOURCE_EXECUTION_HTTP_RPCS",
-            "CONSENSUS_RPCS_LIST",
+            "NORI_SOURCE_EXECUTION_HTTP_RPCS",
+            "NORI_SOURCE_CONSENSUS_HTTP_RPCS",
             "SP1_PROVER",
-            "NORI_SOURCE_STATE_BRIDGE_CONTACT_ADDRESS",
+            "NORI_TOKEN_BRIDGE_ADDRESS",
         ]);
 
         // Initialise slot head / commitee vars

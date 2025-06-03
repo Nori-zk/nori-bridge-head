@@ -40,8 +40,8 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
 
-        let source_execution_http_urls = env::var("SOURCE_EXECUTION_HTTP_RPCS")
-            .context("Missing SOURCE_EXECUTION_HTTP_RPCS in environment")?;
+        let source_execution_http_urls = env::var("NORI_SOURCE_EXECUTION_HTTP_RPCS")
+            .context("Missing NORI_SOURCE_EXECUTION_HTTP_RPCS in environment")?;
 
         let mut providers: Vec<RootProvider<Http<Client>>> = source_execution_http_urls
             .split(',')
@@ -59,7 +59,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
         if providers.is_empty() {
             return Err(anyhow!(
-                "No valid execution RPC URLs found in SOURCE_EXECUTION_HTTP_RPCS."
+                "No valid execution RPC URLs found in NORI_SOURCE_EXECUTION_HTTP_RPCS."
             ));
         }
 

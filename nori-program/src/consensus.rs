@@ -1,4 +1,4 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use helios_consensus_core::{
     apply_finality_update, apply_update, consensus_spec::ConsensusSpec, verify_finality_update,
     verify_update,

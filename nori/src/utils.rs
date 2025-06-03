@@ -26,7 +26,7 @@ pub async fn handle_nori_proof(proof: &SP1ProofWithPublicValues, latest_block: u
     Ok(())
 }
 
-pub async fn handle_nori_proof_message(proofMessage: &ProofMessage) -> Result<()> {
+pub async fn handle_nori_proof_message(proof_message: &ProofMessage) -> Result<()> {
     // Create directory to save the proofs
     let proof_path = format!("./sp1-helios-proof-messages");
     let proof_dir = Path::new(&proof_path);
@@ -36,10 +36,10 @@ pub async fn handle_nori_proof_message(proofMessage: &ProofMessage) -> Result<()
     } else {
         ""
     };
-    let filename = format!("{}{}-{}.json", if_mock, proofMessage.input_slot, proofMessage.proof.sp1_version);
+    let filename = format!("{}{}-{}.json", if_mock, proof_message.input_slot, proof_message.proof.sp1_version);
     let file_path = proof_dir.join(filename);
     // Save the proof
-    std::fs::write(&file_path, serde_json::to_string(&proofMessage).unwrap()).unwrap();
+    std::fs::write(&file_path, serde_json::to_string(&proof_message).unwrap()).unwrap();
     info!(
         "Proof saved successfully to {}.",
         file_path.to_str().unwrap()

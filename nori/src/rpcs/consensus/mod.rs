@@ -24,7 +24,7 @@ use tokio::time::Duration;
 use tree_hash::TreeHash;
 
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
-const CONSENSUS_RPCS_ENV_VAR: &str = "CONSENSUS_RPCS_LIST";
+const CONSENSUS_RPCS_ENV_VAR: &str = "NORI_SOURCE_CONSENSUS_HTTP_RPCS";
 pub const PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
 pub const PROOF_INPUT_VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -35,8 +35,8 @@ pub struct Client<S: ConsensusSpec, R: ConsensusRpc<S>> {
 impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
     /// Constructor
     pub fn new(consensus_rpc: &Url) -> Result<Self> {
-        let chain_id = std::env::var("SOURCE_CHAIN_ID")
-            .map_err(|e| Error::msg(format!("SOURCE_CHAIN_ID not set or invalid: {}", e)))?;
+        let chain_id = std::env::var("NORI_SOURCE_CHAIN_ID")
+            .map_err(|e| Error::msg(format!("NORI_SOURCE_CHAIN_ID not set or invalid: {}", e)))?;
 
         // Parsing chain ID and creating network
         let network = Network::from_chain_id(
@@ -132,9 +132,9 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
             .await
             .map_err(|e| Error::msg(format!("Failed to build checkpoint fallback: {}", e)))?;
 
-        let chain_id = std::env::var("SOURCE_CHAIN_ID").map_err(|e| {
+        let chain_id = std::env::var("NORI_SOURCE_CHAIN_ID").map_err(|e| {
             Error::msg(format!(
-                "SOURCE_CHAIN_ID environment variable not set: {}",
+                "NORI_SOURCE_CHAIN_ID environment variable not set: {}",
                 e
             ))
         })?;
@@ -476,6 +476,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     /// # Arguments
     /// * `input_slot` - The starting slot number for the state transition.
     /// * `store_hash` - The hash of the client store state at the `input_slot`.
+    /// * `validate` - Whether or not validation rules of output_slot > input_slot,
+    ///   next_sync_commitee is non zero and output_slot % 32 is non zero are applied.
     ///
     /// # Returns
     /// Tuple of (input slot, output slot, validated proof inputs).
@@ -487,7 +489,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         &self,
         input_slot: u64,
         store_hash: FixedBytes<32>,
-        validate_progress: bool
+        validate: bool
     ) -> Result<(u64, u64, ProofInputs<S>)> {
         // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
         // Deserves it own location
@@ -510,7 +512,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                             let output_slot = proof_outputs.output_slot;
 
                             // Validate progression
-                            if validate_progress && output_slot <= input_slot {
+                            if validate && output_slot <= input_slot {
                                 return Err(anyhow::anyhow!(
                                     "Output slot {} was not greater than input slot {}",
                                     output_slot,
@@ -519,7 +521,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                             }
 
                             // Block non-checkpoint slots (they prevent bootstrapping on restart)
-                            if validate_progress && output_slot % 32 > 0 { 
+                            if validate && output_slot % 32 > 0 { 
                                 // FIXME might need the validate_progress guard as its used as a flag to allow
                                 // the proof anyway. And for vk building we need to be able to arbirarily bypass this 
                                 // sort of validation.
@@ -529,7 +531,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                                 ));
                             }
 
-                            if validate_progress && proof_outputs.next_sync_committee_hash == B256::ZERO {
+                            if validate && proof_outputs.next_sync_committee_hash == B256::ZERO {
                                 return Err(anyhow::anyhow!(
                                     "Next sync committee was zero. Preventing this as it could stop the recovery of the input_store_hash when restarting.",
                                 ));
