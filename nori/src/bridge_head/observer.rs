@@ -179,7 +179,8 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 // FIXME TODO perhaps we should not retry the exact same job and just wait for the next finality...? 
                 // We are running behind for no reason here.... Also would simplify the logic here and allow us to remove
                 // latest_validated_proof_input because we don't use it anywhere else!
-                // But this change might end up in needless waiting. Say there is very short term network downtime.
+                // But this change might end up in needless waiting. Say there is very short term network downtime. What about
+                // number of retries?
                 if data.extension.n_job_in_buffer == 0 {
                     if let Some(proof_input) = self.latest_validated_proof_input.clone() {
                         let _ = self
@@ -187,7 +188,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                             .stage_transition_proof(self.current_slot, proof_input)
                             .await;
                     } else {
-                        error!("Tried to redo a job but finality update was not defined");
+                        error!("Tried to redo a job but latest_validated_proof_input was not defined");
                         process::exit(1);
                     }
                 }
