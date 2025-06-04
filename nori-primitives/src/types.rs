@@ -36,6 +36,16 @@ pub struct ProofInputs<S: ConsensusSpec> {
     pub store_hash: B256,
     pub contract_storage: ContractStorage,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProofInputsWithWindow<S: ConsensusSpec> {
+    pub input_slot: u64,
+    pub expected_output_slot: u64,
+    pub input_block_number: u64,
+    pub expected_output_block_number: u64,
+    pub proof_inputs: ProofInputs<S>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConsensusProofInputs<S: ConsensusSpec> {
     pub updates: Vec<Update<S>>,

@@ -1,15 +1,14 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
 use super::finality_change_detector::{
     start_validated_consensus_finality_change_detector, FinalityChangeDetectorInput,
-    FinalityChangeDetectorOutput,
 };
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension,
-    TransitionNoticeExtensionBridgeHeadAdvanced, TransitionNoticeExtensionBridgeHeadJobCreated,
-    TransitionNoticeExtensionBridgeHeadJobFailed, TransitionNoticeExtensionBridgeHeadJobSucceeded,
-    TransitionNoticeExtensionBridgeHeadStarted,
-    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected,
+    TransitionNoticeExtensionBridgeHeadAdvanced,
+    TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected,
+    TransitionNoticeExtensionBridgeHeadJobCreated, TransitionNoticeExtensionBridgeHeadJobFailed,
+    TransitionNoticeExtensionBridgeHeadJobSucceeded, TransitionNoticeExtensionBridgeHeadStarted,
 };
 use super::validate::validate_env;
 use crate::rpcs::consensus::ConsensusHttpProxy;
@@ -20,7 +19,9 @@ use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
 use log::{debug, error, info};
-use nori_sp1_helios_primitives::types::{ProofInputs, ProofOutputs, VerifiedContractStorageSlot};
+use nori_sp1_helios_primitives::types::{
+    ProofInputsWithWindow, ProofOutputs, VerifiedContractStorageSlot,
+};
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
@@ -35,8 +36,10 @@ use tokio::time::Instant;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProofMessage {
     pub input_slot: u64,
+    pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
     pub output_slot: u64,
+    pub output_block_number: u64,
     pub output_store_hash: FixedBytes<32>,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
@@ -45,11 +48,8 @@ pub struct ProofMessage {
 }
 
 struct ProverJob {
-    input_slot: u64,
-    inputs: ProofInputs<MainnetConsensusSpec>,
-    //input_store_hash: FixedBytes<32>,
+    inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>,
     start_instant: Instant,
-    expected_output_slot: u64,
 }
 
 pub struct ProverJobError {
@@ -109,7 +109,7 @@ pub struct BridgeHead {
     /// Channel for receiving bridge head commands
     command_rx: Option<mpsc::Receiver<Command>>,
     /// Chanel for receiving consensus finality transition events
-    finality_output_rx: Option<mpsc::Receiver<FinalityChangeDetectorOutput<MainnetConsensusSpec>>>,
+    finality_output_rx: Option<mpsc::Receiver<ProofInputsWithWindow<MainnetConsensusSpec>>>,
     /// Chanel for informing consensus finality change detector above bridge head advances
     finality_input_tx: Option<mpsc::Sender<FinalityChangeDetectorInput>>,
     /// Channel for receiving job results
@@ -232,11 +232,9 @@ impl BridgeHead {
         info!("Handling prover job output '{}'.", job_id);
 
         // Extract jobs details are remove job
-        let (input_slot, input_store_hash, contract_storage, elapsed_sec) = {
+        let (inputs_with_window, elapsed_sec) = {
             let job = self.prover_jobs.get(&job_id).unwrap();
-            let input_slot = job.input_slot;
-            let input_store_hash = job.inputs.store_hash;
-            let contract_storage = job.inputs.contract_storage.clone();
+            let inputs_with_window = job.inputs_with_window.clone();
 
             let elapsed_sec = Instant::now()
                 .duration_since(job.start_instant)
@@ -244,7 +242,7 @@ impl BridgeHead {
 
             self.prover_jobs.remove(&job_id);
 
-            (input_slot, input_store_hash, contract_storage, elapsed_sec)
+            (inputs_with_window, elapsed_sec)
         };
 
         info!("Job '{}' finished in {} seconds.", job_id, elapsed_sec);
@@ -254,9 +252,10 @@ impl BridgeHead {
         let public_values_bytes = public_values.as_slice(); // Raw bytes
 
         let proof_outputs = ProofOutputs::from_bytes(public_values_bytes)?;
+        let input_slot = proof_outputs.input_slot;
+        let input_store_hash = proof_outputs.input_store_hash;
         let output_slot = proof_outputs.output_slot;
         let output_store_hash = proof_outputs.output_store_hash;
-        
 
         info!(
             "...proof_outputs.next_sync_committee_hash {}",
@@ -272,20 +271,26 @@ impl BridgeHead {
         info!("-----------------------------------------------------------------------------------------");
 
         // Build a vector of VerifiedContractStorageSlot
-        let contract_storage_slots: Vec<VerifiedContractStorageSlot> = contract_storage.storage_slots.iter().map(|slot| {
-            VerifiedContractStorageSlot {
+        let contract_storage_slots: Vec<VerifiedContractStorageSlot> = inputs_with_window
+            .proof_inputs
+            .contract_storage
+            .storage_slots
+            .iter()
+            .map(|slot| VerifiedContractStorageSlot {
                 slot_key_address: slot.slot_key_address,
-                value: slot.expected_value
-            }
-        }).collect();
+                value: slot.expected_value,
+            })
+            .collect();
 
         // Notify of a successful job
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobSucceeded(
                 TransitionNoticeExtensionBridgeHeadJobSucceeded {
                     input_slot,
+                    input_block_number: inputs_with_window.input_block_number,
                     input_store_hash,
                     output_slot,
+                    output_block_number: inputs_with_window.expected_output_block_number,
                     job_id,
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
@@ -299,8 +304,10 @@ impl BridgeHead {
         let _ = self
             .trigger_listener_with_proof(ProofMessage {
                 input_slot,
+                input_block_number: inputs_with_window.input_block_number,
                 input_store_hash,
                 output_slot,
+                output_block_number: inputs_with_window.expected_output_block_number,
                 output_store_hash,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
@@ -315,11 +322,9 @@ impl BridgeHead {
     // Handle prover job failures
     async fn handle_prover_failure(&mut self, err: &ProverJobError) {
         // Extract job details and remove job
-        let (input_slot, input_store_hash, expected_output_slot, n_jobs, elapsed_sec) = {
+        let (inputs_with_window, n_jobs, elapsed_sec) = {
             let job = self.prover_jobs.get(&err.job_id).unwrap();
-            let input_slot = job.input_slot;
-            let input_store_hash = job.inputs.store_hash;
-            let expected_output_slot = job.expected_output_slot;
+            let inputs_with_window = job.inputs_with_window.clone();
 
             let elapsed_sec = Instant::now()
                 .duration_since(job.start_instant)
@@ -327,13 +332,7 @@ impl BridgeHead {
 
             self.prover_jobs.remove(&err.job_id);
 
-            (
-                input_slot,
-                input_store_hash,
-                expected_output_slot,
-                self.prover_jobs.len(),
-                elapsed_sec,
-            )
+            (inputs_with_window, self.prover_jobs.len(), elapsed_sec)
         };
 
         // Build job failure error message
@@ -344,11 +343,13 @@ impl BridgeHead {
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobFailed(
                 TransitionNoticeExtensionBridgeHeadJobFailed {
-                    input_slot,
-                    input_store_hash,
-                    expected_output_slot,
+                    input_slot: inputs_with_window.input_slot,
+                    input_block_number: inputs_with_window.input_block_number,
+                    input_store_hash: inputs_with_window.proof_inputs.store_hash,
+                    expected_output_slot: inputs_with_window.expected_output_slot,
+                    expected_output_block_number: inputs_with_window.expected_output_block_number,
                     job_id: err.job_id,
-                    message,
+                    error: message,
                     elapsed_sec,
                     n_job_in_buffer: n_jobs as u64,
                 },
@@ -359,8 +360,7 @@ impl BridgeHead {
     // Create prover job
     async fn stage_transition_proof(
         &mut self,
-        slot: u64,
-        proof_inputs: ProofInputs<MainnetConsensusSpec>,
+        proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>,
     ) {
         // Get job id
         self.job_id += 1;
@@ -376,11 +376,8 @@ impl BridgeHead {
         self.prover_jobs.insert(
             job_id,
             ProverJob {
-                input_slot: slot,
-                inputs: proof_inputs.clone(),
-                //input_store_hash: store_hash,
+                inputs_with_window: proof_inputs_with_window.clone(),
                 start_instant: Instant::now(),
-                expected_output_slot: self.next_slot,
             },
         );
 
@@ -390,7 +387,7 @@ impl BridgeHead {
         // Clone job arguments
         let current_slot = self.current_slot;
         let store_hash = self.store_hash;
-        let inputs = proof_inputs;
+        let inputs = proof_inputs_with_window.proof_inputs;
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
@@ -414,8 +411,11 @@ impl BridgeHead {
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobCreated(
                 TransitionNoticeExtensionBridgeHeadJobCreated {
                     input_slot: self.current_slot,
+                    input_block_number: proof_inputs_with_window.input_block_number,
                     job_id,
                     expected_output_slot: self.next_slot,
+                    expected_output_block_number: proof_inputs_with_window
+                        .expected_output_block_number,
                     input_store_hash: store_hash,
                 },
             ))
@@ -446,23 +446,23 @@ impl BridgeHead {
     // Update next slot logic
     async fn on_beacon_finality_change(
         &mut self,
-        event: FinalityChangeDetectorOutput<MainnetConsensusSpec>,
+        event: ProofInputsWithWindow<MainnetConsensusSpec>,
     ) {
         // Notify of transition
         let _ = self
             .trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
-                    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected {
-                        slot: event.output_slot,
+                    TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
+                        slot: event.expected_output_slot,
                         input_slot: event.input_slot,
-                        proof_inputs: Box::new(event.validated_proof_inputs),
+                        proof_inputs_with_window: Box::new(event.clone()),
                     },
                 ),
             )
             .await;
 
         // Update next head
-        self.next_slot = event.output_slot;
+        self.next_slot = event.expected_output_slot;
 
         // Print the head change detection
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
@@ -498,7 +498,7 @@ impl BridgeHead {
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         Command::StageTransitionProof(message) => {
-                            let _ = self.stage_transition_proof(message.slot, *message.proof_inputs).await;
+                            let _ = self.stage_transition_proof(*message).await;
                         }
                         Command::Advance(message) => {
                             // Notify finality change detector of a change to the head position

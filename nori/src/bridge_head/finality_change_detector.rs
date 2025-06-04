@@ -3,10 +3,9 @@ use helios_consensus_core::consensus_spec::{ConsensusSpec, MainnetConsensusSpec}
 use helios_ethereum::rpc::{http_rpc::HttpRpc, ConsensusRpc};
 //use crate::rpcs::consensus::{get_client, get_client_latest_finality_slot, get_client_latest_finality_update_and_slot, get_latest_checkpoint, FinalityUpdateAndSlot};
 use log::{debug, error, info};
-use nori_sp1_helios_primitives::types::ProofInputs;
+use nori_sp1_helios_primitives::types::ProofInputsWithWindow;
 use std::{process, time::Duration};
 use tokio::{sync::mpsc, time::interval};
-
 use crate::rpcs::consensus::ConsensusHttpProxy;
 
 // So this needs to be aware of the input slot and store hash...
@@ -35,8 +34,9 @@ pub struct FinalityChangeDetectorInput {
 /// - simulate the zkVM consensus logic that will be applied but does so natively to avoid the expense,
 /// - and validate the state transition from `input_slot` to `output_slot`.
 ///
-/// On success, the actor sends back a tuple `(input_slot, output_slot, validated_proof_inputs)`
-/// representing the fully validated transition inputs suitable for zk proof generation.
+/// On success, the actor sends back a tuple `validated_consensus_mpt_proof_input_with_window` which 
+/// contains the fully validated transition inputs suitable for zk proof generation and the block and 
+/// slot window for which it pertains.
 ///
 /// On failure, it sends an error via the results channel indicating invalid transitions
 /// or issues with provider data, instead of returning directly.
@@ -44,18 +44,10 @@ pub struct FinalityChangeDetectorInput {
 /// # Returns
 /// A tuple containing:
 /// - `mpsc::Sender<FinalityChangeDetectorInput>`: channel to submit validation jobs.
-/// - `mpsc::Receiver<Result<(u64, u64, ProofInputs<S>), anyhow::Error>>`: channel to receive validation results.
-pub struct FinalityChangeDetectorOutput<S: ConsensusSpec> {
-    /// The beacon slot number from which the transition proof was generated.
-    pub input_slot: u64,
-    /// The beacon slot number that the transition proof targets.
-    pub output_slot: u64,
-    /// The validated proof inputs for the slot transition.
-    pub validated_proof_inputs: ProofInputs<S>,
-}
+/// - `mpsc::Receiver<Result<ProofInputsWithWindows<S>, anyhow::Error>>`: channel to receive validation results.
 pub fn validate_and_prepare_proof_inputs_actor<S, R>() -> (
     mpsc::Sender<FinalityChangeDetectorInput>,
-    mpsc::Receiver<Result<(u64, u64, ProofInputs<S>), anyhow::Error>>,
+    mpsc::Receiver<Result<ProofInputsWithWindow<S>, anyhow::Error>>,
 )
 where
     S: ConsensusSpec + Send + 'static,
@@ -63,7 +55,7 @@ where
 {
     let (job_tx, mut job_rx) = mpsc::channel::<FinalityChangeDetectorInput>(1);
     let (result_tx, result_rx) =
-        mpsc::channel::<Result<(u64, u64, ProofInputs<S>), anyhow::Error>>(1);
+        mpsc::channel::<Result<ProofInputsWithWindow<S>, anyhow::Error>>(1);
 
     tokio::spawn(async move {
         while let Some(job) = job_rx.recv().await {
@@ -100,8 +92,8 @@ where
 /// # Returns
 /// Tuple containing:
 /// - `u64`: Initial latest finalized slot from consensus layer for we which have validated proof input
-/// - `mpsc::Receiver<FinalityChangeDetectorOutput>`: Channel for receiving validated transition proof inputs
-/// - `mpsc::Sender<FinalityChangeDetectorInput>`: Channel for updating monitoring the current trusted slot / consensus store hash
+/// - `mpsc::Receiver<ProofInputsWithWindow>`: Channel for receiving validated transition proof inputs and window information
+/// - `mpsc::Sender<ProofInputsWithWindow>`: Channel for updating monitoring the current trusted slot / consensus store hash
 ///
 /// # Behavior Details
 /// - Maintains internal state of current head (slot + store hash)
@@ -122,7 +114,7 @@ pub async fn start_validated_consensus_finality_change_detector<S, R>(
     mut store_hash: FixedBytes<32>,
 ) -> (
     u64,
-    mpsc::Receiver<FinalityChangeDetectorOutput<S>>,
+    mpsc::Receiver<ProofInputsWithWindow<S>>,
     mpsc::Sender<FinalityChangeDetectorInput>,
 )
 where
@@ -184,15 +176,13 @@ where
                     in_flight = false;
 
                     match result {
-                        Ok((input_slot, output_slot, validated_proof_inputs)) => {
+                        Ok(validated_proof_inputs_with_window) => {
+                            let input_slot = validated_proof_inputs_with_window.input_slot;
+                            let output_slot = validated_proof_inputs_with_window.expected_output_slot;
                             // Only emit output if the input_slot matches current and our output is ahead of the current slot
-                            if input_slot == slot {
-                                if output_slot > latest_slot {
-                                    if finality_output_tx.send(FinalityChangeDetectorOutput {
-                                        input_slot,
-                                        output_slot,
-                                        validated_proof_inputs,
-                                    }).await.is_err() {
+                            if validated_proof_inputs_with_window.input_slot == slot {
+                                if validated_proof_inputs_with_window.expected_output_slot > latest_slot {
+                                    if finality_output_tx.send(validated_proof_inputs_with_window).await.is_err() {
                                         // Receiver dropped, exit task
                                         break;
                                     }

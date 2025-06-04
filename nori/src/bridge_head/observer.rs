@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use helios_consensus_core::{consensus_spec::MainnetConsensusSpec};
 use log::{error, info, warn};
-use nori_sp1_helios_primitives::types::ProofInputs;
+use nori_sp1_helios_primitives::types::ProofInputsWithWindow;
 
 /// Event observer trait for handling bridge head events
 #[async_trait]
@@ -78,7 +78,7 @@ pub struct ExampleBridgeHeadEventObserver {
     /// Boolean for indicating a job should be issued on the next beacon slot change event
     stage_transition_proof: bool,
     /// Latest validated proof input
-    latest_validated_proof_input: Option<ProofInputs<MainnetConsensusSpec>>,
+    latest_validated_proof_input_with_window: Option<ProofInputsWithWindow<MainnetConsensusSpec>>,
 }
 
 impl ExampleBridgeHeadEventObserver {
@@ -90,7 +90,7 @@ impl ExampleBridgeHeadEventObserver {
             current_slot: 0,
             store_hash: FixedBytes::default(),
             stage_transition_proof: false,
-            latest_validated_proof_input: None,
+            latest_validated_proof_input_with_window: None,
         }
     }
 
@@ -172,23 +172,23 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             TransitionNoticeBridgeHeadMessage::JobFailed(data) => {
                 info!(
                     "NOTICE_TYPE| Job Failed: {:?}: {}",
-                    data.extension.job_id, data.extension.message
+                    data.extension.job_id, data.extension.error
                 );
 
                 // If there are no other jobs in the queue retry the failure
                 // FIXME TODO perhaps we should not retry the exact same job and just wait for the next finality...? 
                 // We are running behind for no reason here.... Also would simplify the logic here and allow us to remove
-                // latest_validated_proof_input because we don't use it anywhere else!
+                // latest_validated_proof_input_with_window because we don't use it anywhere else!
                 // But this change might end up in needless waiting. Say there is very short term network downtime. What about
                 // number of retries?
                 if data.extension.n_job_in_buffer == 0 {
-                    if let Some(proof_input) = self.latest_validated_proof_input.clone() {
+                    if let Some(proof_input_with_window) = self.latest_validated_proof_input_with_window.clone() {
                         let _ = self
                             .bridge_head_handle
-                            .stage_transition_proof(self.current_slot, proof_input)
+                            .stage_transition_proof(proof_input_with_window)
                             .await;
                     } else {
-                        error!("Tried to redo a job but latest_validated_proof_input was not defined");
+                        error!("Tried to redo a job but latest_validated_proof_input_with_window was not defined");
                         process::exit(1);
                     }
                 }
@@ -200,14 +200,13 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 );
 
                 self.latest_beacon_finality_slot = data.extension.slot;
-                self.latest_validated_proof_input = Some(*data.extension.proof_inputs.clone());
+                self.latest_validated_proof_input_with_window = Some(*data.extension.proof_inputs_with_window.clone());
 
                 if self.stage_transition_proof {
                     let _ = self
                         .bridge_head_handle
                         .stage_transition_proof(
-                            self.current_slot,
-                            *data.extension.proof_inputs.clone(),
+                            *data.extension.proof_inputs_with_window.clone(),
                         )
                         .await;
                     self.stage_transition_proof = false;

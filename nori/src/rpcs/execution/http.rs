@@ -17,7 +17,7 @@ use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, warn};
 use nori_sp1_helios_primitives::types::{
-    ConsensusProofInputs, ContractStorage, ProofInputs, StorageSlot,
+    ConsensusProofInputs, ContractStorage, ProofInputs, ProofInputsWithWindow, StorageSlot
 };
 use nori_sp1_helios_program::consensus::consensus_mpt_program;
 use reqwest::{Client, Url};
@@ -280,12 +280,14 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
     // TODO Doc string
     pub async fn prepare_consensus_mpt_proof_inputs(
         &self,
+        input_slot: u64,
+        output_slot: u64,
         input_block_number: u64,
         output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
-    ) -> Result<ProofInputs<S>> {
+    ) -> Result<ProofInputsWithWindow<S>> {
         let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
-        query_with_fallback(
+        let output = query_with_fallback(
             &self.principal_provider,
             &self.backup_providers,
             |provider| {
@@ -305,7 +307,17 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             },
             TIMEOUT,
         )
-        .await
+        .await?;
+
+        let output_with_blocks = ProofInputsWithWindow::<S> {
+            input_slot,
+            expected_output_slot: output_slot,
+            input_block_number,
+            expected_output_block_number: output_block_number,
+            proof_inputs: output,
+        };
+
+        Ok(output_with_blocks)
     }
 
     pub async fn get_source_contract_events<T>(

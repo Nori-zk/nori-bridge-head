@@ -15,14 +15,14 @@ pub async fn benchmark_finality_update(
 ) -> Result<SP1PublicValues> {
     let consensus_client = ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env();
 
-    let (_,_,proof_inputs) = consensus_client
+    let proof_inputs_with_window = consensus_client
         .prepare_consensus_mpt_proof_inputs(input_head, store_hash, false)
         .await
         .unwrap();
 
     // Encode proof inputs
     println!("Encoding sp1 proof inputs.");
-    let encoded_proof_inputs = serde_cbor::to_vec(&proof_inputs)?;
+    let encoded_proof_inputs = serde_cbor::to_vec(&proof_inputs_with_window)?;
 
     let public_values = tokio::task::spawn_blocking(move || -> Result<SP1PublicValues> {
         // Setup prover client

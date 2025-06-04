@@ -1,6 +1,6 @@
 use alloy_primitives::FixedBytes;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use nori_sp1_helios_primitives::types::{ProofInputs, VerifiedContractStorageSlot};
+use nori_sp1_helios_primitives::types::{ProofInputsWithWindow, VerifiedContractStorageSlot};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -57,15 +57,19 @@ pub struct TransitionNoticeExtensionBridgeHeadWarning {
 pub struct TransitionNoticeExtensionBridgeHeadJobCreated {
     pub job_id: u64,
     pub input_slot: u64,
+    pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
     pub expected_output_slot: u64,
+    pub expected_output_block_number: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
     pub job_id: u64,
     pub input_slot: u64,
+    pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
     pub output_slot: u64,
+    pub output_block_number: u64,
     pub output_store_hash: FixedBytes<32>,
     pub execution_state_root: FixedBytes<32>,
     pub contract_storage_slots: Vec<VerifiedContractStorageSlot>,
@@ -75,19 +79,21 @@ pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
 pub struct TransitionNoticeExtensionBridgeHeadJobFailed {
     pub job_id: u64,
     pub input_slot: u64,
+    pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
     pub expected_output_slot: u64,
-    pub message: String,
+    pub expected_output_block_number: u64,
+    pub error: String,
     pub elapsed_sec: f64,
     pub n_job_in_buffer: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected {
+pub struct TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
     pub slot: u64,
     #[serde(skip_serializing)]
     pub input_slot: u64,
     #[serde(skip_serializing)]
-    pub proof_inputs: Box<ProofInputs<MainnetConsensusSpec>>,
+    pub proof_inputs_with_window: Box<ProofInputsWithWindow<MainnetConsensusSpec>>,
     //#[serde(skip_serializing)]
     //pub finality_update: FinalityUpdate<MainnetConsensusSpec>,
 }
@@ -105,7 +111,7 @@ pub enum TransitionNoticeBridgeHeadMessageExtension {
     JobCreated(TransitionNoticeExtensionBridgeHeadJobCreated),
     JobSucceeded(TransitionNoticeExtensionBridgeHeadJobSucceeded),
     JobFailed(TransitionNoticeExtensionBridgeHeadJobFailed),
-    FinalityTransitionDetected(TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected),
+    FinalityTransitionDetected(TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected),
     HeadAdvanced(TransitionNoticeExtensionBridgeHeadAdvanced),
 }
 
@@ -121,7 +127,7 @@ define_message!(
 define_message!(BridgeHeadJobFailed, TransitionNoticeExtensionBridgeHeadJobFailed);
 define_message!(
     BridgeHeadFinalityTransitionDetected,
-    TransitionNoticeNoticeExtensionBridgeHeadFinalityTransitionDetected
+    TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected
 );
 define_message!(BridgeHeadAdvanced, TransitionNoticeExtensionBridgeHeadAdvanced);
 

@@ -15,7 +15,7 @@ use helios_ethereum::{
 };
 use log::{debug, info, warn};
 use nori_hash::sha256_hash::sha256_hash_helios_store;
-use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputs};
+use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputs, ProofInputsWithWindow};
 use nori_sp1_helios_program::consensus::consensus_program;
 use reqwest::Url;
 use std::{env, marker::PhantomData, sync::Arc};
@@ -490,7 +490,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         input_slot: u64,
         store_hash: FixedBytes<32>,
         validate: bool
-    ) -> Result<(u64, u64, ProofInputs<S>)> {
+    ) -> Result<ProofInputsWithWindow<S>> {
         // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
         // Deserves it own location
         let (input_slot, output_slot, validated_consensus_proof_inputs) = multiplex(
@@ -570,15 +570,17 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             .block_number();
 
         // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
-        let validated_consensus_mpt_proof_input = ExecutionHttpProxy::<S>::try_from_env()
+        let validated_consensus_mpt_proof_input_with_window = ExecutionHttpProxy::<S>::try_from_env()
             .prepare_consensus_mpt_proof_inputs(
+                input_slot,
+                output_slot,
                 finalized_input_block_number,
                 finalized_output_block_number,
                 validated_consensus_proof_inputs
             )
             .await?;
 
-        Ok((input_slot, output_slot, validated_consensus_mpt_proof_input))
+        Ok(validated_consensus_mpt_proof_input_with_window)
     }
 
     /// Get the latest slot & store hash from the latest finality checkpoint.
