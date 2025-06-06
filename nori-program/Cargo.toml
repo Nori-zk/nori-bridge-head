@@ -10,7 +10,7 @@ authors.workspace = true
 #name = "nori-program"
 
 [dependencies]
-sp1-zkvm = "4.1.7"
+sp1-zkvm = "5.0.0"
 helios-consensus-core = { workspace = true }
 serde_cbor = { workspace = true }
 alloy-sol-types = { workspace = true }
