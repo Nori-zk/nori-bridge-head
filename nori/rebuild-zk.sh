@@ -12,14 +12,11 @@ cd ..
 # Step 4: Clear cache forcefully (due to files created with root permissions in target, because docker is used to compute the zk elf [impacts CI])
 sudo rm -rf target
 
-# Step 5: Build with release
-cargo build --release
-
-# Step 6: Build zk
+# Step 5: Build zk
 cd script
-cargo run --bin make
+cargo run --release --bin make
 cd ..
 
-# Step 7: Create public outputs
+# Step 6: Create public outputs
 cd nori
-cargo run --bin extract_zeroth_public_input
+cargo run --release --bin extract_zeroth_public_input
