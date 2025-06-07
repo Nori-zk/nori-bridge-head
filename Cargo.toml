@@ -18,7 +18,10 @@ nori-sp1-helios-primitives = { path = "nori-primitives" }
 nori-sp1-helios-program = { path = "nori-program" }
 
 # o1-js
-kimchi = { git = "https://github.com/jk89/proof-systems", branch = "jk89/remove-tikv" }
+mina-poseidon = {git = "https://github.com/jk89/proof-systems", branch = "jk89/remove-tikv", package = "mina-poseidon" }
+mina-curves = { git = "https://github.com/jk89/proof-systems", branch = "jk89/remove-tikv", package = "mina-curves" }
+o1-utils = { git = "https://github.com/jk89/proof-systems", branch = "jk89/remove-tikv", package = "o1-utils" }
+
 
 # sp1-helios
 sp1-helios-script = { path = "script" }

@@ -2,13 +2,14 @@ use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, Uint, B256};
 use alloy_rlp::Encodable;
 use alloy_trie::{proof, Nibbles};
 use anyhow::Result;
-use kimchi::o1_utils::FieldHelpers;
 use nori_hash::merkle_poseidon_fixed::{
-    compute_merkle_tree_depth_and_size, fold_merkle_left, get_merkle_zeros, hash_storage_slot, MAX_TREE_DEPTH,
+    compute_merkle_tree_depth_and_size, fold_merkle_left, get_merkle_zeros, hash_storage_slot,
+    MAX_TREE_DEPTH,
 };
 use nori_sp1_helios_primitives::types::{
     get_storage_location_for_key, ContractStorage, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
 };
+use o1_utils::FieldHelpers;
 use std::fmt;
 
 /// Custom MPT Errors
@@ -112,9 +113,9 @@ impl fmt::Display for MptError {
 /// - `MptError::InvalidStorageSlotAddressMapping` if address-to-slot mapping is invalid
 /// - `MptError::InvalidStorageSlotProof` if any storage slot proof is invalid
 /// - `MptError::MerkleHashError` if hashing a storage slot leaf fails
-/// - `MptError::ExceedsMaxTreeDepth` if the number of storage slots yields a merkle tree 
+/// - `MptError::ExceedsMaxTreeDepth` if the number of storage slots yields a merkle tree
 ///   which is too large.
-/// 
+///
 /// # Steps
 /// 1. Verify contract account exists in global state trie
 /// 2. For each storage slot:
@@ -156,7 +157,11 @@ pub fn verify_storage_slot_proofs(
 
     // Validate
     if depth > MAX_TREE_DEPTH {
-        return Err(MptError::ExceedsMaxTreeDepth { slots: n_leaves, requested_depth: depth, max_depth: MAX_TREE_DEPTH });
+        return Err(MptError::ExceedsMaxTreeDepth {
+            slots: n_leaves,
+            requested_depth: depth,
+            max_depth: MAX_TREE_DEPTH,
+        });
     }
 
     // 2) Now that we've verified the contract's `TrieAccount`, use it to verify each storage slot proof

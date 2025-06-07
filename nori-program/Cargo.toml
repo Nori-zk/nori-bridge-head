@@ -22,4 +22,6 @@ anyhow = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }
 nori-hash = { workspace = true }
 log = { workspace = true }
-kimchi = { workspace = true }
+mina-poseidon = { workspace = true }
+mina-curves = { workspace = true }
+o1-utils = { workspace = true }

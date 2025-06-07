@@ -1,14 +1,12 @@
 use alloy_primitives::{Address, FixedBytes};
 use anyhow::Result;
-use kimchi::{
-    mina_curves::pasta::Fp,
-    mina_poseidon::{
-        constants::PlonkSpongeConstantsKimchi,
-        pasta::fp_kimchi,
-        poseidon::{ArithmeticSponge as Poseidon, Sponge as _},
-    },
-    o1_utils::FieldHelpers,
+use mina_curves::pasta::Fp;
+use mina_poseidon::{
+    constants::PlonkSpongeConstantsKimchi,
+    pasta::fp_kimchi,
+    poseidon::{ArithmeticSponge as Poseidon, Sponge as _},
 };
+use o1_utils::FieldHelpers;
 
 pub const MAX_TREE_DEPTH: usize = 16;
 const N_MERKLE_ZEROS: usize = MAX_TREE_DEPTH + 1;
@@ -498,7 +496,8 @@ mod merkle_fixed_tests {
             .get(leaf_index)
             .copied()
             .unwrap_or_else(|| Fp::from(0));
-        let recomputed_root = compute_merkle_root_from_path(leaf_hash, leaf_index as u64, &path);
+        let recomputed_root =
+            compute_merkle_root_from_path(leaf_hash, leaf_index as u64, &path.to_vec());
 
         assert_eq!(
             recomputed_root, root,
@@ -601,7 +600,7 @@ mod merkle_fixed_tests {
                 // Recompute root from path (fold method)
                 let leaf_hash = leaves[index];
                 let recomputed_root =
-                    compute_merkle_root_from_path(leaf_hash, index as u64, &path_fold);
+                    compute_merkle_root_from_path(leaf_hash, index as u64, &path_fold.to_vec());
 
                 assert_eq!(
                     recomputed_root, root_via_fold,

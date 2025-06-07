@@ -2731,16 +2731,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "groupmap"
-version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "rand 0.8.5",
-]
-
-[[package]]
 name = "h2"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3456,11 +3446,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "internal-tracing"
-version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
-
-[[package]]
 name = "interprocess"
 version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3744,40 +3729,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kimchi"
-version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-poly",
- "ark-serialize 0.4.2",
- "blake2",
- "groupmap",
- "hex",
- "internal-tracing",
- "itertools 0.12.1",
- "log",
- "mina-curves",
- "mina-poseidon",
- "num-bigint 0.4.6",
- "num-integer",
- "o1-utils",
- "once_cell",
- "poly-commitment",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rayon",
- "rmp-serde",
- "serde",
- "serde_with",
- "strum",
- "strum_macros",
- "thiserror 2.0.11",
- "turshi",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4028,7 +3979,9 @@ dependencies = [
  "alloy-sol-types",
  "anyhow",
  "helios-consensus-core",
- "kimchi",
+ "mina-curves",
+ "mina-poseidon",
+ "o1-utils",
  "rmp-serde",
  "serde_cbor",
  "serde_json",
@@ -4058,10 +4011,12 @@ dependencies = [
  "alloy-trie",
  "anyhow",
  "helios-consensus-core",
- "kimchi",
  "log",
+ "mina-curves",
+ "mina-poseidon",
  "nori-hash",
  "nori-sp1-helios-primitives",
+ "o1-utils",
  "serde_cbor",
  "sp1-zkvm",
  "tree_hash",
@@ -4852,33 +4807,6 @@ name = "pkg-config"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
-
-[[package]]
-name = "poly-commitment"
-version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
-dependencies = [
- "ark-ec",
- "ark-ff 0.4.2",
- "ark-poly",
- "ark-serialize 0.4.2",
- "blake2",
- "groupmap",
- "hex",
- "itertools 0.12.1",
- "mina-curves",
- "mina-poseidon",
- "num-bigint 0.4.6",
- "o1-utils",
- "once_cell",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rayon",
- "rmp-serde",
- "serde",
- "serde_with",
- "thiserror 2.0.11",
-]
 
 [[package]]
 name = "portable-atomic"
@@ -7446,16 +7374,6 @@ dependencies = [
  "sha1",
  "thiserror 1.0.69",
  "utf-8",
-]
-
-[[package]]
-name = "turshi"
-version = "0.1.0"
-source = "git+https://github.com/jk89/proof-systems?branch=jk89%2Fremove-tikv#822970c1916a27b049fa7d81f820327e02c1fc85"
-dependencies = [
- "ark-ff 0.4.2",
- "hex",
- "o1-utils",
 ]
 
 [[package]]
