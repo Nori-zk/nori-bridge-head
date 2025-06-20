@@ -18,9 +18,9 @@ nori-sp1-helios-primitives = { path = "nori-primitives" }
 nori-sp1-helios-program = { path = "nori-program" }
 
 # o1-js
-mina-poseidon = {git = "https://github.com/jk89/proof-systems", branch = "jk89/remove-tikv", package = "mina-poseidon" }
-mina-curves = { git = "https://github.com/jk89/proof-systems", branch = "jk89/remove-tikv", package = "mina-curves" }
-o1-utils = { git = "https://github.com/jk89/proof-systems", branch = "jk89/remove-tikv", package = "o1-utils" }
+mina-poseidon = {git = "https://github.com/o1-labs/proof-systems", package = "mina-poseidon" }
+mina-curves = { git = "https://github.com/o1-labs/proof-systems", package = "mina-curves" }
+o1-utils = { git = "https://github.com/o1-labs/proof-systems", package = "o1-utils" }
 
 
 # sp1-helios
@@ -36,8 +36,8 @@ helios-ethereum = { git = "https://github.com/a16z/helios", tag = "0.8.8" }
 # general
 dotenv = "0.15.0"
 eyre = "0.6.12"
-sp1-sdk = "5.0.0"
-sp1-build = "5.0.0"
+sp1-sdk = "5.0.5"
+sp1-build = "5.0.5"
 tokio = "1.38.0"
 tracing = "0.1.37"
 serde = "=1.0.219"
