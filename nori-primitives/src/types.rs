@@ -255,7 +255,7 @@ pub fn get_storage_location_for_key(
     outer_encoded[63] = mapping_index;
 
     // Hash the encoded data to get the outer slot
-    let outer_slot = keccak256(&outer_encoded);
+    let outer_hash = keccak256(&outer_encoded);
 
     // Encode the attestation_hash and the inner_encoding
     let mut inner_encoded: Vec<u8> = vec![0u8; 64];
@@ -264,7 +264,7 @@ pub fn get_storage_location_for_key(
     inner_encoded[0..32].copy_from_slice(&attestation_hash.to_be_bytes::<32>());
 
     // Place inner_encoded
-    inner_encoded[32..64].copy_from_slice(outer_slot.as_slice());
+    inner_encoded[32..64].copy_from_slice(outer_hash.as_slice());
 
     keccak256(inner_encoded)
 }

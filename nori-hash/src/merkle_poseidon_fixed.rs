@@ -114,7 +114,7 @@ pub fn fold_merkle_left(
 
     // Pad to nearest power of 2
     let missing = padded_size - merkle_leaves.len();
-    merkle_leaves.extend(std::iter::repeat(Fp::from(0)).take(missing));
+    merkle_leaves.extend(std::iter::repeat_n(Fp::from(0), missing));
 
     let merkle_nodes = merkle_leaves;
 
@@ -138,11 +138,11 @@ pub fn fold_merkle_left(
                 //println!("Optimisation made 💪");
             } else {
                 let right_idx = i2 + 1;
-                // Both are non dummy nodes....
+                // Atleast one is a real node
                 merkle_nodes[i] = poseidon_hash(&[merkle_nodes[left_idx], merkle_nodes[right_idx]]);
             }
         }
-        n_non_dummy_nodes = (n_non_dummy_nodes + 1) / 2;
+        n_non_dummy_nodes = n_non_dummy_nodes.div_ceil(2);
     }
     merkle_nodes[0]
 }
@@ -205,7 +205,7 @@ pub fn build_merkle_tree(
 
     // Pad to nearest power of 2
     let missing = padded_size - merkle_leaves.len();
-    merkle_leaves.extend(std::iter::repeat(Fp::from(0)).take(missing));
+    merkle_leaves.extend(std::iter::repeat_n(Fp::from(0), missing));
 
     // Need to identify dummies so we can cheaply look them up
     // n_leaves = merkle_leaves.len() (before padding)
@@ -231,14 +231,14 @@ pub fn build_merkle_tree(
                 //println!("Optimisation made 💪");
             } else {
                 let right_idx = i2 + 1;
-                // Both are non dummy nodes....
+                // Atleast one is a real node
                 parent_level.push(poseidon_hash(&[
                     child_level[left_idx],
                     child_level[right_idx],
                 ]));
             }
         }
-        n_non_dummy_nodes = (n_non_dummy_nodes + 1) / 2;
+        n_non_dummy_nodes = n_non_dummy_nodes.div_ceil(2);
         merkle_tree[level - 1] = parent_level;
     }
 
@@ -298,7 +298,7 @@ pub fn get_merkle_path_from_leaves(
 
     // Pad to nearest power of 2
     let missing = padded_size - merkle_leaves.len();
-    merkle_leaves.extend(std::iter::repeat(Fp::from(0)).take(missing));
+    merkle_leaves.extend(std::iter::repeat_n(Fp::from(0), missing));
 
     let merkle_nodes = merkle_leaves;
     let mut path: Vec<Fp> = Vec::with_capacity(depth);
@@ -327,13 +327,13 @@ pub fn get_merkle_path_from_leaves(
                 merkle_nodes[i] = zeros[level];
             } else {
                 let right_idx = i2 + 1;
-                // Both are non dummy nodes....
+                // Atleast one is a real node
                 merkle_nodes[i] = poseidon_hash(&[merkle_nodes[left_idx], merkle_nodes[right_idx]]);
             }
         }
 
         position /= 2;
-        n_non_dummy_nodes = (n_non_dummy_nodes + 1) / 2;
+        n_non_dummy_nodes = n_non_dummy_nodes.div_ceil(2);
     }
 
     path
@@ -400,67 +400,6 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
     hash
 }
 
-/// Computes a Poseidon hash for a storage slot leaf node given a contract address,
-/// an attestation hash, and a 32-byte value.
-///
-/// The storage slot leaf combines the 20-byte contract address, a 32-byte attestation hash,
-/// and a 32-byte value into three field elements, which are then hashed together using Poseidon.
-/// This process encodes the data carefully to avoid overflow issues due to the 254-bit field size
-/// (which cannot safely hold 256 bits).
-///
-/// Specifically:
-/// - The first field contains the 20-byte address, the first byte of the attestation hash,
-///   and the first byte of the value (total 22 bytes).
-/// - The second field contains the remaining 31 bytes of the attestation hash.
-/// - The third field contains the remaining 31 bytes of the value.
-/// - All three are converted from bytes to field elements and then hashed.
-///
-/// # Parameters
-/// - `address`: Reference to a 20-byte Address key.
-/// - `attestation_hash`: A 256-bit `U256` representing the attestation_hash key.
-/// - `value`: The 32-byte slot value.
-///
-/// # Returns
-/// Returns a `Result<Fp>` containing the Poseidon hash of the concatenated first, second, and third fields,
-/// or an error if the byte-to-field conversion fails.
-///
-/// # Errors
-/// Returns an error if the byte slices cannot be converted into field elements (e.g., invalid byte encoding).
-///
-/// # Example
-/// ```rust
-/// let address = Address::from_hex("0x1234567890abcdef1234567890abcdef12345678").unwrap();
-/// let attestation_hash = U256::from_be_hex("0xdeadbeef...");
-/// let value = FixedBytes::from_hex("0xabcdef...").unwrap();
-/// let leaf_hash = hash_storage_slot_leaf(&address, &attestation_hash, &value).unwrap();
-/// ```
-pub fn hash_storage_slot(
-    address: &Address,
-    attestation_hash: &U256,
-    value: &FixedBytes<32>,
-) -> Result<Fp> {
-    let address_slice = address.as_slice();
-    let value_slice = value.as_slice();
-    let att_hash_bytes = attestation_hash.to_be_bytes::<32>();
-
-    let mut first_field_bytes = [0u8; 32];
-    first_field_bytes[0..20].copy_from_slice(&address_slice[0..20]);
-    first_field_bytes[20] = att_hash_bytes[0];
-    first_field_bytes[21] = value_slice[0];
-
-    let mut second_field_bytes = [0u8; 32];
-    second_field_bytes[0..31].copy_from_slice(&att_hash_bytes[1..32]);
-
-    let mut third_field_bytes = [0u8; 32];
-    third_field_bytes[0..31].copy_from_slice(&value_slice[1..32]);
-
-    let first_field = Fp::from_bytes(&first_field_bytes)?;
-    let second_field = Fp::from_bytes(&second_field_bytes)?;
-    let third_field = Fp::from_bytes(&third_field_bytes)?;
-
-    Ok(poseidon_hash(&[first_field, second_field, third_field]))
-}
-
 /// Computes a Poseidon hash for a storage slot leaf node given a contract address and a 32-byte value.
 ///
 /// The storage slot leaf combines the 20-byte contract address and a 32-byte value into two field elements,
@@ -509,12 +448,74 @@ pub fn hash_storage_slot(
     Ok(poseidon_hash(&fields))
 }*/
 
+/// Computes a Poseidon hash for a storage slot leaf node given a contract address,
+/// an attestation hash, and a 32-byte value.
+///
+/// The storage slot leaf combines the 20-byte contract address, a 32-byte attestation hash,
+/// and a 32-byte value into three field elements, which are then hashed together using Poseidon.
+/// This process encodes the data carefully to avoid overflow issues due to the 254-bit field size
+/// (which cannot safely hold 256 bits).
+///
+/// Specifically:
+/// - The first field contains the 20-byte address, the first byte of the attestation hash,
+///   and the first byte of the value (total 22 bytes).
+/// - The second field contains the remaining 31 bytes of the attestation hash.
+/// - The third field contains the remaining 31 bytes of the value.
+/// - All three are converted from bytes to field elements and then hashed.
+///
+/// # Parameters
+/// - `address`: Reference to a 20-byte Address key.
+/// - `attestation_hash`: A 256-bit `U256` representing the attestation_hash key.
+/// - `value`: The 32-byte slot value.
+///
+/// # Returns
+/// Returns a `Result<Fp>` containing the Poseidon hash of the concatenated first, second, and third fields,
+/// or an error if the byte-to-field conversion fails.
+///
+/// # Errors
+/// Returns an error if the byte slices cannot be converted into field elements (e.g., invalid byte encoding).
+///
+/// # Example
+/// ```rust
+/// let address = Address::from_hex("0x1234567890abcdef1234567890abcdef12345678").unwrap();
+/// let attestation_hash = U256::from_be_hex("0xdeadbeef...");
+/// let value = FixedBytes::from_hex("0xabcdef...").unwrap();
+/// let leaf_hash = hash_storage_slot_leaf(&address, &attestation_hash, &value).unwrap();
+/// ```
+pub fn hash_storage_slot(
+    address: &Address,
+    attestation_hash: &U256,
+    value: &FixedBytes<32>,
+) -> Result<Fp> {
+    let address_slice = address.as_slice();
+    let att_hash_bytes = attestation_hash.to_le_bytes::<32>();
+    let value_slice = value.as_slice();
+
+    let mut first_field_bytes = [0u8; 32];
+    first_field_bytes[0..20].copy_from_slice(&address_slice[0..20]);
+    first_field_bytes[20] = att_hash_bytes[0];
+    first_field_bytes[21] = value_slice[0];
+
+    let mut second_field_bytes = [0u8; 32];
+    second_field_bytes[0..31].copy_from_slice(&att_hash_bytes[1..32]);
+
+    let mut third_field_bytes = [0u8; 32];
+    third_field_bytes[0..31].copy_from_slice(&value_slice[1..32]);
+
+    let first_field = Fp::from_bytes(&first_field_bytes)?;
+    let second_field = Fp::from_bytes(&second_field_bytes)?;
+    let third_field = Fp::from_bytes(&third_field_bytes)?;
+
+    Ok(poseidon_hash(&[first_field, second_field, third_field]))
+}
+
 #[cfg(test)]
 mod merkle_fixed_tests {
     use super::*;
     use alloy_primitives::{Address, FixedBytes};
     use anyhow::Result;
 
+    /*
     // Helper: Generate dummy Address with bytes all set to given value
     fn dummy_address(byte: u8) -> Address {
         let bytes = [byte; 20];
@@ -523,12 +524,34 @@ mod merkle_fixed_tests {
 
     // Helper: Generate dummy U256 with bytes all set to given value
     fn dummy_attestation(byte: u8) -> U256 {
-        U256::from_be_bytes([byte; 32])
+        U256::from_le_bytes([byte; 32])
     }
 
     // Helper: Generate dummy FixedBytes<32> with bytes all set to given value
     fn dummy_value(byte: u8) -> FixedBytes<32> {
         FixedBytes::<32>::new([byte; 32])
+    }
+    */
+
+    fn dummy_address(i: i32) -> Address {
+        let mut bytes = [0u8; 20];
+        let i_bytes = i.to_le_bytes();
+        bytes[16..20].copy_from_slice(&i_bytes);
+        Address::from_slice(&bytes)
+    }
+
+    fn dummy_attestation(i: i32) -> U256 {
+        let mut bytes = [0u8; 32];
+        let i_bytes = i.to_le_bytes();
+        bytes[0..4].copy_from_slice(&i_bytes);
+        U256::from_le_bytes(bytes)
+    }
+
+    fn dummy_value(i: i32) -> FixedBytes<32> {
+        let mut bytes = [0u8; 32];
+        let i_bytes = i.to_le_bytes();
+        bytes[0..4].copy_from_slice(&i_bytes);
+        FixedBytes::<32>::new(bytes)
     }
 
     // Build leaf hashes from given (address, attestation_hash, value) tuples
@@ -582,9 +605,9 @@ mod merkle_fixed_tests {
         let triples: Vec<(Address, U256, FixedBytes<32>)> = (0..n)
             .map(|i| {
                 (
-                    dummy_address(i as u8),
-                    dummy_attestation(i as u8),
-                    dummy_value(i as u8),
+                    dummy_address(i),
+                    dummy_attestation(i),
+                    dummy_value(i),
                 )
             })
             .collect();
@@ -613,9 +636,9 @@ mod merkle_fixed_tests {
             let triples: Vec<(Address, U256, FixedBytes<32>)> = (0..n_leaves)
                 .map(|i| {
                     (
-                        dummy_address(i as u8),
-                        dummy_attestation(i as u8),
-                        dummy_value(i as u8),
+                        dummy_address(i),
+                        dummy_attestation(i),
+                        dummy_value(i),
                     )
                 })
                 .collect();
@@ -682,7 +705,7 @@ mod merkle_fixed_tests {
                 );
 
                 // Recompute root from path (fold method)
-                let leaf_hash = leaves[index];
+                let leaf_hash = leaves[index as usize];
                 let recomputed_root =
                     compute_merkle_root_from_path(leaf_hash, index as u64, &path_fold.to_vec());
 
