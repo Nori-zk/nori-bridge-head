@@ -1,6 +1,6 @@
 use crate::{
     contracts::bindings::{
-        addresses_to_storage_slots, get_source_contract_address, NoriStateBridge,
+        addresses_attestation_pair_to_storage_slots, get_source_contract_address, NoriStateBridge,
     },
     rpcs::query_with_fallback,
 };
@@ -17,7 +17,7 @@ use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, warn};
 use nori_sp1_helios_primitives::types::{
-    ConsensusProofInputs, ContractStorage, ProofInputs, ProofInputsWithWindow, StorageSlot
+    ConsensusProofInputs, ContractStorage, ProofInputs, ProofInputsWithWindow, StorageSlot,
 };
 use nori_sp1_helios_program::consensus::consensus_mpt_program;
 use reqwest::{Client, Url};
@@ -194,7 +194,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         )
         .await?;
 
-        let storage_slot_address_map = addresses_to_storage_slots(contract_events);
+        let storage_slot_address_map = addresses_attestation_pair_to_storage_slots(contract_events);
 
         for (storage_slot, address) in storage_slot_address_map.iter() {
             debug!(
@@ -221,12 +221,13 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             .storage_proof
             .iter()
             .map(|slot| {
-                let address = storage_slot_address_map
+                let address_attestation_pair = storage_slot_address_map
                     .get(&slot.key.as_b256())
                     .copied()
-                    .expect("Missing address for storage slot");
+                    .expect("Missing address attestation pair for storage slot");
                 StorageSlot {
-                    slot_key_address: address,
+                    slot_key_address: address_attestation_pair.0,
+                    slot_nested_key_attestation_hash: address_attestation_pair.1,
                     key: slot.key.as_b256(),
                     expected_value: slot.value,
                     mpt_proof: slot.proof.clone(),
@@ -235,7 +236,13 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             .collect();
 
         // Sort by address order for stability (in case rpc returns strange order)
-        storage_slots.sort_by_key(|s| s.slot_key_address);
+        //storage_slots.sort_by_key(|s| s.slot_key_address);
+        storage_slots.sort_by(|a, b| {
+            a.slot_key_address.cmp(&b.slot_key_address).then_with(|| {
+                a.slot_nested_key_attestation_hash
+                    .cmp(&b.slot_nested_key_attestation_hash)
+            })
+        });
 
         let contract_storage = ContractStorage {
             address: mpt_account_proof.address,

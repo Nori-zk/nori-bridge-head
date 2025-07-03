@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, Uint, B256};
+use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, Uint, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{proof, Nibbles};
 use anyhow::Result;
@@ -27,6 +27,7 @@ pub enum MptError {
     InvalidStorageSlotAddressMapping {
         slot_key: B256,
         address: Address,
+        attestation_hash: U256,
         computed_address_slot_key: B256,
     },
     MerkleHashError {
@@ -56,11 +57,12 @@ impl fmt::Display for MptError {
                 slot_key,
                 reason
             ),
-            MptError::InvalidStorageSlotAddressMapping {slot_key, address, computed_address_slot_key} => write!(
+            MptError::InvalidStorageSlotAddressMapping {slot_key, address, attestation_hash, computed_address_slot_key} => write!(
                 f,
-                "MPT invalid storage slot address, expected {:?}, but for address '{:?}' this slot '{:?}' was computed",
+                "MPT invalid storage slot address, expected {:?}, but for address '{:?}' and attestation_hash '{:?}' this slot '{:?}' was computed",
                 slot_key,
                 address,
+                attestation_hash,
                 computed_address_slot_key
             ),
             MptError::MerkleHashError { address, value , reason} => write!(
@@ -179,12 +181,14 @@ pub fn verify_storage_slot_proofs(
 
         // Verify slot address mapping
         let address = slot.slot_key_address;
+        let attestation_hash = slot.slot_nested_key_attestation_hash;
         let computed_address_slot_key =
-            get_storage_location_for_key(address, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
+            get_storage_location_for_key(address, attestation_hash, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
         if computed_address_slot_key != key {
             return Err(MptError::InvalidStorageSlotAddressMapping {
                 slot_key: key,
                 address,
+                attestation_hash,
                 computed_address_slot_key,
             });
         }

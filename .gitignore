@@ -30,3 +30,6 @@ nori-bridge-head-rabbit/
 
 # Ignore checkpoints
 checkpoint/
+
+# Ignore node_modules
+node_modules
