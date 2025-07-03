@@ -205,7 +205,7 @@ pub fn verify_storage_slot_proofs(
             reason: e.to_string(),
         })?;
 
-        let slot_merkle_leaf_result = hash_storage_slot(&address, &FixedBytes(value.to_be_bytes()));
+        let slot_merkle_leaf_result = hash_storage_slot(&address, &attestation_hash, &FixedBytes(value.to_be_bytes()));
         let slot_merkle_leaf = match slot_merkle_leaf_result {
             Ok(val) => val,
             Err(error) => {

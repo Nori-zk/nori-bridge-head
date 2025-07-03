@@ -10,6 +10,7 @@ use std::{
 };
 use NoriStateBridge::TokensLocked;
 
+// Npm install in this folder if the below indicates its not found.
 sol!(
     #[allow(missing_docs)]
     #[sol(rpc)]

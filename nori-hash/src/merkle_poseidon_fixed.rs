@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, FixedBytes};
+use alloy_primitives::{Address, FixedBytes, U256};
 use anyhow::Result;
 use mina_curves::pasta::Fp;
 use mina_poseidon::{
@@ -400,6 +400,67 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
     hash
 }
 
+/// Computes a Poseidon hash for a storage slot leaf node given a contract address,
+/// an attestation hash, and a 32-byte value.
+///
+/// The storage slot leaf combines the 20-byte contract address, a 32-byte attestation hash,
+/// and a 32-byte value into three field elements, which are then hashed together using Poseidon.
+/// This process encodes the data carefully to avoid overflow issues due to the 254-bit field size
+/// (which cannot safely hold 256 bits).
+///
+/// Specifically:
+/// - The first field contains the 20-byte address, the first byte of the attestation hash,
+///   and the first byte of the value (total 22 bytes).
+/// - The second field contains the remaining 31 bytes of the attestation hash.
+/// - The third field contains the remaining 31 bytes of the value.
+/// - All three are converted from bytes to field elements and then hashed.
+///
+/// # Parameters
+/// - `address`: Reference to a 20-byte Address key.
+/// - `attestation_hash`: A 256-bit `U256` representing the attestation_hash key.
+/// - `value`: The 32-byte slot value.
+///
+/// # Returns
+/// Returns a `Result<Fp>` containing the Poseidon hash of the concatenated first, second, and third fields,
+/// or an error if the byte-to-field conversion fails.
+///
+/// # Errors
+/// Returns an error if the byte slices cannot be converted into field elements (e.g., invalid byte encoding).
+///
+/// # Example
+/// ```rust
+/// let address = Address::from_hex("0x1234567890abcdef1234567890abcdef12345678").unwrap();
+/// let attestation_hash = U256::from_be_hex("0xdeadbeef...");
+/// let value = FixedBytes::from_hex("0xabcdef...").unwrap();
+/// let leaf_hash = hash_storage_slot_leaf(&address, &attestation_hash, &value).unwrap();
+/// ```
+pub fn hash_storage_slot(
+    address: &Address,
+    attestation_hash: &U256,
+    value: &FixedBytes<32>,
+) -> Result<Fp> {
+    let address_slice = address.as_slice();
+    let value_slice = value.as_slice();
+    let att_hash_bytes = attestation_hash.to_be_bytes::<32>();
+
+    let mut first_field_bytes = [0u8; 32];
+    first_field_bytes[0..20].copy_from_slice(&address_slice[0..20]);
+    first_field_bytes[20] = att_hash_bytes[0];
+    first_field_bytes[21] = value_slice[0];
+
+    let mut second_field_bytes = [0u8; 32];
+    second_field_bytes[0..31].copy_from_slice(&att_hash_bytes[1..32]);
+
+    let mut third_field_bytes = [0u8; 32];
+    third_field_bytes[0..31].copy_from_slice(&value_slice[1..32]);
+
+    let first_field = Fp::from_bytes(&first_field_bytes)?;
+    let second_field = Fp::from_bytes(&second_field_bytes)?;
+    let third_field = Fp::from_bytes(&third_field_bytes)?;
+
+    Ok(poseidon_hash(&[first_field, second_field, third_field]))
+}
+
 /// Computes a Poseidon hash for a storage slot leaf node given a contract address and a 32-byte value.
 ///
 /// The storage slot leaf combines the 20-byte contract address and a 32-byte value into two field elements,
@@ -428,7 +489,7 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
 /// let value = FixedBytes::from_hex("0xabcdef...").unwrap();
 /// let leaf_hash = hash_storage_slot_leaf(&address, value).unwrap();
 /// ```
-pub fn hash_storage_slot(address: &Address, value: &FixedBytes<32>) -> Result<Fp> {
+/*pub fn hash_storage_slot(address: &Address, value: &FixedBytes<32>) -> Result<Fp> {
     // First encode the bytes into fields
     // We have 20 bytes on the Address and 32 on value
     // We cannot have 32 Bytes on value because we fields are 254bits and 8*32 is 256 which would be an overflow
@@ -446,7 +507,7 @@ pub fn hash_storage_slot(address: &Address, value: &FixedBytes<32>) -> Result<Fp
     let second_field = Fp::from_bytes(&second_field_bytes)?;
     let fields = [first_field, second_field];
     Ok(poseidon_hash(&fields))
-}
+}*/
 
 #[cfg(test)]
 mod merkle_fixed_tests {
@@ -460,24 +521,32 @@ mod merkle_fixed_tests {
         Address::from_slice(&bytes)
     }
 
+    // Helper: Generate dummy U256 with bytes all set to given value
+    fn dummy_attestation(byte: u8) -> U256 {
+        U256::from_be_bytes([byte; 32])
+    }
+
     // Helper: Generate dummy FixedBytes<32> with bytes all set to given value
     fn dummy_value(byte: u8) -> FixedBytes<32> {
         FixedBytes::<32>::new([byte; 32])
     }
 
-    // Build leaf hashes from given (address, value) pairs
-    fn build_leaves(pairs: &[(Address, FixedBytes<32>)]) -> Result<Vec<Fp>> {
-        let mut leaves = Vec::with_capacity(pairs.len());
-        for (addr, val) in pairs {
-            leaves.push(hash_storage_slot(addr, val)?);
+    // Build leaf hashes from given (address, attestation_hash, value) tuples
+    fn build_leaves(triples: &[(Address, U256, FixedBytes<32>)]) -> Result<Vec<Fp>> {
+        let mut leaves = Vec::with_capacity(triples.len());
+        for (addr, att_hash, val) in triples {
+            leaves.push(hash_storage_slot(addr, att_hash, val)?);
         }
         Ok(leaves)
     }
 
     // Full Merkle lifecycle test using your actual hashed leaves
-    fn full_merkle_test(pairs: &[(Address, FixedBytes<32>)], leaf_index: usize) -> Result<()> {
+    fn full_merkle_test(
+        triples: &[(Address, U256, FixedBytes<32>)],
+        leaf_index: usize,
+    ) -> Result<()> {
         let zeros = get_merkle_zeros();
-        let leaves = build_leaves(pairs)?;
+        let leaves = build_leaves(triples)?;
         let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
 
         let mut leaves_clone = leaves.clone();
@@ -510,17 +579,24 @@ mod merkle_fixed_tests {
     #[test]
     fn test_large_slots() -> Result<()> {
         let n = 1000;
-        let pairs: Vec<(Address, FixedBytes<32>)> = (0..n)
-            .map(|i| (dummy_address(i as u8), dummy_value(i as u8)))
+        let triples: Vec<(Address, U256, FixedBytes<32>)> = (0..n)
+            .map(|i| {
+                (
+                    dummy_address(i as u8),
+                    dummy_attestation(i as u8),
+                    dummy_value(i as u8),
+                )
+            })
             .collect();
-        full_merkle_test(&pairs, 543)
+        full_merkle_test(&triples, 543)
     }
 
     #[test]
     fn test_hash_storage_slot_basic() -> Result<()> {
         let address = dummy_address(1);
-        let value = dummy_value(2);
-        let leaf_hash = hash_storage_slot(&address, &value)?;
+        let att_hash = dummy_attestation(2);
+        let value = dummy_value(3);
+        let leaf_hash = hash_storage_slot(&address, &att_hash, &value)?;
         assert_ne!(leaf_hash, Fp::from(0));
         Ok(())
     }
@@ -534,12 +610,17 @@ mod merkle_fixed_tests {
             println!("→ Testing with {} leaves", n_leaves);
 
             // Build dummy pairs
-            let mut pairs = Vec::with_capacity(n_leaves);
-            for i in 0..n_leaves {
-                pairs.push((dummy_address(i as u8), dummy_value(i as u8)));
-            }
+            let triples: Vec<(Address, U256, FixedBytes<32>)> = (0..n_leaves)
+                .map(|i| {
+                    (
+                        dummy_address(i as u8),
+                        dummy_attestation(i as u8),
+                        dummy_value(i as u8),
+                    )
+                })
+                .collect();
 
-            let leaves = build_leaves(&pairs).expect("build_leaves failed");
+            let leaves = build_leaves(&triples).expect("build_leaves failed");
             print!("   leaves=");
             for leaf in leaves.clone() {
                 print!("{}, ", leaf);
@@ -567,8 +648,11 @@ mod merkle_fixed_tests {
 
             // Change leaf layer verification to use depth instead of depth-1
             let mut expected_padded = leaves.clone();
-            expected_padded
-                .extend(std::iter::repeat(Fp::from(0)).take(padded_size - expected_padded.len()));
+            expected_padded.extend(std::iter::repeat_n(
+                Fp::from(0),
+                padded_size - expected_padded.len(),
+            ));
+
             assert_eq!(
                 merkle_tree[depth], expected_padded,
                 "Leaf layer not preserved correctly"
