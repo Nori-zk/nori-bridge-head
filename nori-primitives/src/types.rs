@@ -206,35 +206,7 @@ impl ConsensusProofOutputs {
 
 // TODO FIX ME FIND A BETTER PLACE FOR THIS!
 
-// Deprecated
-/// Returns the storage slot for a given address in a mapping at the specified index
-///
-/// This follows Solidity's ABI encoding rules:
-/// 1. Each value is padded to 32 bytes
-/// 2. Address is left-padded with zeros (12 bytes of zeros, then 20 bytes of address)
-/// 3. Uint8 is right-padded with zeros (1 byte value, then 31 bytes of zeros)
-/// 4. The encoding is big-endian
-/*pub fn get_storage_location_for_key(address: Address, mapping_index: u8) -> B256 {
-    // Encode the key and index as Solidity's abi.encode would
-    let mut encoded = vec![0u8; 64]; // 2 × 32 bytes
-
-    // Place address (padded to 32 bytes) in first slot
-    // Address is already 20 bytes, so we need to place it at offset 12 (32-20)
-    encoded[12..32].copy_from_slice(address.as_slice());
-
-    // Place mapping_index (padded to 32 bytes) in second slot
-    encoded[63] = mapping_index;
-
-    // Hash the encoded data to get the storage slot
-    keccak256(&encoded)
-}*/
-
-// We are changing this mapping(address => uint256) at slot 0
-// ...to this mapping(address => mapping(uint256 => uint256)) at slot 0
-// From this keccak256(address ++ 0)
-// ... to this keccak256(attestation_hash ++ keccak256(address ++ 0))
 /// Returns the storage slot for a given address / attestation_hash in a mapping at the specified index
-///
 /// This follows Solidity's ABI encoding rules:
 /// 1. Each value is encoded as a 32-byte (256-bit) word
 /// 2. Address is left-padded with zeros to 32 bytes (12 bytes zeros + 20 bytes address)

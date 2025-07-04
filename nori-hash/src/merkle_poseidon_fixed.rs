@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, FixedBytes, U256};
+use alloy_primitives::{Address, U256};
 use anyhow::Result;
 use mina_curves::pasta::Fp;
 use mina_poseidon::{
@@ -400,54 +400,6 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
     hash
 }
 
-/// Computes a Poseidon hash for a storage slot leaf node given a contract address and a 32-byte value.
-///
-/// The storage slot leaf combines the 20-byte contract address and a 32-byte value into two field elements,
-/// which are then hashed together using Poseidon. This process encodes the data carefully to avoid
-/// overflow issues due to the 254-bit field size (which cannot safely hold 256 bits).
-///
-/// Specifically:
-/// - The first field contains the full 20-byte address plus the first byte of the value (total 21 bytes).
-/// - The second field contains the remaining 31 bytes of the value.
-/// - Both are converted from bytes to field elements and then hashed.
-///
-/// # Parameters
-/// - `address`: Reference to a 20-byte contract `Address`.
-/// - `value`: A 32-byte fixed-length array representing the slot value.
-///
-/// # Returns
-/// Returns a `Result<Fp>` containing the Poseidon hash of the concatenated address and value fields,
-/// or an error if the byte-to-field conversion fails.
-///
-/// # Errors
-/// Returns an error if the byte slices cannot be converted into field elements (e.g., invalid byte encoding).
-///
-/// # Example
-/// ```rust
-/// let address = Address::from_hex("0x1234567890abcdef1234567890abcdef12345678").unwrap();
-/// let value = FixedBytes::from_hex("0xabcdef...").unwrap();
-/// let leaf_hash = hash_storage_slot_leaf(&address, value).unwrap();
-/// ```
-/*pub fn hash_storage_slot(address: &Address, value: &FixedBytes<32>) -> Result<Fp> {
-    // First encode the bytes into fields
-    // We have 20 bytes on the Address and 32 on value
-    // We cannot have 32 Bytes on value because we fields are 254bits and 8*32 is 256 which would be an overflow
-    // So we need a max number of bytes 31 248.
-    // We can move one bit from the value to the address encode 2 fields and hash to convert to one field
-    let address_slice = address.as_slice();
-    let value_slice = value.as_slice();
-    let mut first_field_bytes = [0u8; 32];
-    first_field_bytes[0..20].copy_from_slice(&address_slice[0..20]);
-    first_field_bytes[20] = value_slice[0];
-
-    let mut second_field_bytes = [0u8; 32];
-    second_field_bytes[..31].copy_from_slice(&value_slice[1..32]);
-    let first_field = Fp::from_bytes(&first_field_bytes)?;
-    let second_field = Fp::from_bytes(&second_field_bytes)?;
-    let fields = [first_field, second_field];
-    Ok(poseidon_hash(&fields))
-}*/
-
 /// Computes a Poseidon hash for a storage slot leaf node given a contract address,
 /// an attestation hash, and a 32-byte value.
 ///
@@ -490,18 +442,7 @@ pub fn hash_storage_slot(
 ) -> Result<Fp> {
     let address_slice = address.as_slice();
     let att_hash_bytes = attestation_hash.to_le_bytes::<32>();
-    let value_slice = value.to_be_bytes::<32>(); //value.as_slice();
-                                                 //let value_slice = value.as_slice();
-    print!("{:?} 0x", address);
-    for b in attestation_hash.to_be_bytes::<32>().iter() {
-        print!("{:02x}", b);
-    }
-    print!(" ");
-    //println!(" {:?}", value);
-    for b in value.to_be_bytes::<32>().iter() {
-        print!("{:02x}", b);
-    }
-    println!();
+    let value_slice = value.to_be_bytes::<32>();
 
     let mut first_field_bytes = [0u8; 32];
     first_field_bytes[0..20].copy_from_slice(&address_slice[0..20]);
@@ -518,40 +459,14 @@ pub fn hash_storage_slot(
     let second_field = Fp::from_bytes(&second_field_bytes)?;
     let third_field = Fp::from_bytes(&third_field_bytes)?;
 
-    println!("first_field {:?}", first_field);
-    println!("second_field {:?}", second_field);
-    println!("third_field {:?}", third_field);
-
-    let hash = poseidon_hash(&[first_field, second_field, third_field]);
-
-    println!("hash {:?}", hash);
-
-    Ok(hash)
+    Ok(poseidon_hash(&[first_field, second_field, third_field]))
 }
 
 #[cfg(test)]
 mod merkle_fixed_tests {
     use super::*;
-    use alloy_primitives::{hex::FromHex, Address, FixedBytes};
+    use alloy_primitives::Address;
     use anyhow::Result;
-
-    /*
-    // Helper: Generate dummy Address with bytes all set to given value
-    fn dummy_address(byte: u8) -> Address {
-        let bytes = [byte; 20];
-        Address::from_slice(&bytes)
-    }
-
-    // Helper: Generate dummy U256 with bytes all set to given value
-    fn dummy_attestation(byte: u8) -> U256 {
-        U256::from_le_bytes([byte; 32])
-    }
-
-    // Helper: Generate dummy FixedBytes<32> with bytes all set to given value
-    fn dummy_value(byte: u8) -> FixedBytes<32> {
-        FixedBytes::<32>::new([byte; 32])
-    }
-    */
 
     fn dummy_address(i: i32) -> Address {
         let mut bytes = [0u8; 20];
