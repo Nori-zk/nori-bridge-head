@@ -236,7 +236,6 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                     .get(&slot.key.as_b256())
                     .copied()
                     .expect("Missing address attestation pair for storage slot");
-                println!("slot value FIXME {:?}", slot.value);
                 StorageSlot {
                     slot_key_address: address_attestation_pair.0,
                     slot_nested_key_attestation_hash: address_attestation_pair.1,

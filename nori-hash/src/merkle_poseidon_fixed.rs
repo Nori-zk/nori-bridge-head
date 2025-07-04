@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, FixedBytes, U256};
 use anyhow::Result;
 use mina_curves::pasta::Fp;
 use mina_poseidon::{
@@ -441,8 +441,19 @@ pub fn hash_storage_slot(
     //value: &FixedBytes<32>,
 ) -> Result<Fp> {
     let address_slice = address.as_slice();
-    let att_hash_bytes = attestation_hash.to_le_bytes::<32>();
-    let value_slice = value.to_be_bytes::<32>();
+    let att_hash_bytes = attestation_hash.to_be_bytes::<32>();
+    let value_slice = value.to_be_bytes::<32>(); //value.as_slice();
+                                                 //let value_slice = value.as_slice();
+    print!("{:?} 0x", address);
+    for b in attestation_hash.to_be_bytes::<32>().iter() {
+        print!("{:02x}", b);
+    }
+    print!(" ");
+    //println!(" {:?}", value);
+    for b in value.to_be_bytes::<32>().iter() {
+        print!("{:02x}", b);
+    }
+    println!();
 
     let mut first_field_bytes = [0u8; 32];
     first_field_bytes[0..20].copy_from_slice(&address_slice[0..20]);
@@ -459,7 +470,15 @@ pub fn hash_storage_slot(
     let second_field = Fp::from_bytes(&second_field_bytes)?;
     let third_field = Fp::from_bytes(&third_field_bytes)?;
 
-    Ok(poseidon_hash(&[first_field, second_field, third_field]))
+    println!("first_field {:?}", first_field);
+    println!("second_field {:?}", second_field);
+    println!("third_field {:?}", third_field);
+
+    let hash = poseidon_hash(&[first_field, second_field, third_field]);
+
+    println!("hash {:?}", hash);
+
+    Ok(hash)
 }
 
 #[cfg(test)]
@@ -537,8 +556,8 @@ mod merkle_fixed_tests {
         // Provided hex strings (without 0x prefix)
         let slot_key_address_str = "c7e910807dd2e3f49b34efe7133cfb684520da69";
         let slot_nested_key_attestation_hash_str =
-            "6500000000000000000000000000000000000000000000000000000000000000";
-        let value_str = "2ba7def3000";
+            "2f000000000000000000000000000000000000000000000000038d7ec293e52f";
+        let value_str = "e8d4a51000";
 
         // Convert slot_key_address_str to Address ([u8; 20])
         let mut address_bytes = [0u8; 20];
