@@ -485,11 +485,18 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
 pub fn hash_storage_slot(
     address: &Address,
     attestation_hash: &U256,
+    //value: &U256,
     value: &FixedBytes<32>,
 ) -> Result<Fp> {
     let address_slice = address.as_slice();
     let att_hash_bytes = attestation_hash.to_le_bytes::<32>();
+    //let value_slice = value.to_be_bytes::<32>();//value.as_slice();
     let value_slice = value.as_slice();
+    print!("{:?} 0x", address);
+    for b in attestation_hash.to_be_bytes::<32>().iter() {
+        print!("{:02x}", b);
+    }
+    println!(" {:?}", value);
 
     let mut first_field_bytes = [0u8; 32];
     first_field_bytes[0..20].copy_from_slice(&address_slice[0..20]);
@@ -506,13 +513,17 @@ pub fn hash_storage_slot(
     let second_field = Fp::from_bytes(&second_field_bytes)?;
     let third_field = Fp::from_bytes(&third_field_bytes)?;
 
+    println!("first_field {:?}", first_field);
+    println!("second_field {:?}", second_field);
+    println!("third_field {:?}", third_field);
+
     Ok(poseidon_hash(&[first_field, second_field, third_field]))
 }
 
 #[cfg(test)]
 mod merkle_fixed_tests {
     use super::*;
-    use alloy_primitives::{Address, FixedBytes};
+    use alloy_primitives::{hex::FromHex, Address, FixedBytes};
     use anyhow::Result;
 
     /*
@@ -596,20 +607,79 @@ mod merkle_fixed_tests {
             "Root mismatch for leaf index {}",
             leaf_index
         );
+
+        println!("Root {:?}", root.to_biguint());
         Ok(())
+    }
+    #[test]
+    fn rarg_test_hash_storage_slot() {
+        // Provided hex strings (without 0x prefix)
+        let slot_key_address_str = "c7e910807dd2e3f49b34efe7133cfb684520da69";
+        let slot_nested_key_attestation_hash_str =
+            "6500000000000000000000000000000000000000000000000000000000000000";
+        let value_str = "2ba7def3000";
+
+        // Convert slot_key_address_str to Address ([u8; 20])
+        let mut address_bytes = [0u8; 20];
+        for i in 0..20 {
+            let byte_str = &slot_key_address_str[i * 2..i * 2 + 2];
+            address_bytes[i] = u8::from_str_radix(byte_str, 16).unwrap();
+        }
+        let address = Address::from(address_bytes);
+
+        let mut hash_bytes = [0u8; 32];
+        for i in 0..32 {
+            let byte_str = &slot_nested_key_attestation_hash_str[i * 2..i * 2 + 2];
+            hash_bytes[31 - i] = u8::from_str_radix(byte_str, 16).unwrap(); // reverse into LE
+        }
+        let attestation_hash = U256::from_le_bytes(hash_bytes);
+
+        let mut value_bytes = [0u8; 32];
+
+        /*// Convert value_str to FixedBytes<32>, right-padded with zeros
+
+        let value_len = value_str.len() / 2;
+        for i in 0..value_len {
+            let byte_str = &value_str[i * 2..i * 2 + 2];
+            value_bytes[i] = u8::from_str_radix(byte_str, 16).unwrap();
+        }*/
+
+        // Convert value_str to FixedBytes<32>, left-padded with zeros
+        let mut value_bytes = [0u8; 32];
+        let value_len = value_str.len() / 2;
+        for i in 0..value_len {
+            let byte_str = &value_str[i * 2..i * 2 + 2];
+            value_bytes[32 - value_len + i] = u8::from_str_radix(byte_str, 16).unwrap();
+        }
+
+        let value = FixedBytes::<32>::from(&value_bytes);
+
+        print!("{:?} 0x", address);
+        for b in attestation_hash.to_be_bytes::<32>().iter() {
+            print!("{:02x}", b);
+        }
+        println!(" {:?}", value);
+        // Call hash_storage_slot function
+        let result = hash_storage_slot(&address, &attestation_hash, &value).unwrap();
+
+        // Assert or print result as needed
+        println!("Hash result big int: {:?}", result.to_bigint_positive());
+        println!("Hash result hex: {:?}", result.to_hex());
+        println!("Hash result bytes: {:?}", result.to_bytes());
+
+        let bytes = result.to_bytes();
+        print!("Hash result (hex): 0x");
+        for b in bytes.iter() {
+            print!("{:02x}", b);
+        }
+        println!();
     }
 
     #[test]
     fn test_large_slots() -> Result<()> {
         let n = 1000;
         let triples: Vec<(Address, U256, FixedBytes<32>)> = (0..n)
-            .map(|i| {
-                (
-                    dummy_address(i),
-                    dummy_attestation(i),
-                    dummy_value(i),
-                )
-            })
+            .map(|i| (dummy_address(i), dummy_attestation(i), dummy_value(i)))
             .collect();
         full_merkle_test(&triples, 543)
     }
@@ -634,13 +704,7 @@ mod merkle_fixed_tests {
 
             // Build dummy pairs
             let triples: Vec<(Address, U256, FixedBytes<32>)> = (0..n_leaves)
-                .map(|i| {
-                    (
-                        dummy_address(i),
-                        dummy_attestation(i),
-                        dummy_value(i),
-                    )
-                })
+                .map(|i| (dummy_address(i), dummy_attestation(i), dummy_value(i)))
                 .collect();
 
             let leaves = build_leaves(&triples).expect("build_leaves failed");

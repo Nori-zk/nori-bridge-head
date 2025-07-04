@@ -182,14 +182,14 @@ pub fn verify_storage_slot_proofs(
         // Verify slot address mapping
         let address = slot.slot_key_address;
         let attestation_hash = slot.slot_nested_key_attestation_hash;
-        let computed_address_slot_key =
+        let computed_address_attestation_slot_key =
             get_storage_location_for_key(address, attestation_hash, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
-        if computed_address_slot_key != key {
+        if computed_address_attestation_slot_key != key {
             return Err(MptError::InvalidStorageSlotAddressMapping {
                 slot_key: key,
                 address,
                 attestation_hash,
-                computed_address_slot_key,
+                computed_address_slot_key: computed_address_attestation_slot_key,
             });
         }
 

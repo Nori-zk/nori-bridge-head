@@ -278,6 +278,7 @@ impl BridgeHead {
             .iter()
             .map(|slot| VerifiedContractStorageSlot {
                 slot_key_address: slot.slot_key_address,
+                slot_nested_key_attestation_hash: slot.slot_nested_key_attestation_hash,
                 value: slot.expected_value,
             })
             .collect();

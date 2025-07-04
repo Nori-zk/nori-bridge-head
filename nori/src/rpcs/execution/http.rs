@@ -12,7 +12,7 @@ use alloy::{
     transports::http::Http,
 };
 use alloy_primitives::{Address, Log, B256};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Context, Result, Error};
 use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, warn};
@@ -27,18 +27,28 @@ use tokio::time::{sleep, Duration};
 const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
-const TIMEOUT: Duration = Duration::from_secs(20);
+const EXECUTION_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct ExecutionHttpProxy<S: ConsensusSpec> {
     principal_provider: RootProvider<Http<Client>>,
     backup_providers: Vec<RootProvider<Http<Client>>>,
     source_state_bridge_contract_address: Address,
     _marker: PhantomData<S>,
+    validation_timeout: Duration,
 }
 
 impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
+
+        // Parsing the proof validation timeout
+        let validation_timeout_sec = std::env::var("NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT")
+            .ok()
+            .map(|v| v.parse::<u64>().map_err(|e| Error::msg(format!("Failed to parse NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT as u64: {}", e))))
+            .transpose()?
+            .unwrap_or(300);
+
+        let validation_timeout = Duration::from_secs(validation_timeout_sec);
 
         let source_execution_http_urls = env::var("NORI_SOURCE_EXECUTION_HTTP_RPCS")
             .context("Missing NORI_SOURCE_EXECUTION_HTTP_RPCS in environment")?;
@@ -72,6 +82,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             principal_provider,
             backup_providers: providers,
             _marker: PhantomData,
+            validation_timeout
         })
     }
 
@@ -225,6 +236,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                     .get(&slot.key.as_b256())
                     .copied()
                     .expect("Missing address attestation pair for storage slot");
+                println!("slot value FIXME {:?}", slot.value);
                 StorageSlot {
                     slot_key_address: address_attestation_pair.0,
                     slot_nested_key_attestation_hash: address_attestation_pair.1,
@@ -277,7 +289,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         // Dry run this proof
         let _ = tokio::task::spawn_blocking(move || {
             // Run program logic
-            consensus_mpt_program(consensus_mpt_proof_input_clone, enable_debug)
+            consensus_mpt_program(consensus_mpt_proof_input_clone, enable_debug) // enable_debug
         })
         .await??;
 
@@ -312,7 +324,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                 }
                 .boxed()
             },
-            TIMEOUT,
+            self.validation_timeout,
         )
         .await?;
 
@@ -351,7 +363,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                 }
                 .boxed()
             },
-            TIMEOUT,
+            EXECUTION_PROVIDER_TIMEOUT,
         )
         .await
     }

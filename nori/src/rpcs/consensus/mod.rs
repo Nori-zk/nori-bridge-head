@@ -25,8 +25,7 @@ use tree_hash::TreeHash;
 
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 const CONSENSUS_RPCS_ENV_VAR: &str = "NORI_SOURCE_CONSENSUS_HTTP_RPCS";
-pub const PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
-pub const PROOF_INPUT_VALIDATION_TIMEOUT: Duration = Duration::from_secs(20);
+pub const CONSENSUS_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct Client<S: ConsensusSpec, R: ConsensusRpc<S>> {
     inner: Inner<S, R>,
@@ -35,10 +34,11 @@ pub struct Client<S: ConsensusSpec, R: ConsensusRpc<S>> {
 impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
     /// Constructor
     pub fn new(consensus_rpc: &Url) -> Result<Self> {
+        // Parsing chain ID and creating network
+
         let chain_id = std::env::var("NORI_SOURCE_CHAIN_ID")
             .map_err(|e| Error::msg(format!("NORI_SOURCE_CHAIN_ID not set or invalid: {}", e)))?;
 
-        // Parsing chain ID and creating network
         let network = Network::from_chain_id(
             chain_id
                 .parse()
@@ -426,11 +426,21 @@ pub struct ConsensusHttpProxy<S: ConsensusSpec, R: ConsensusRpc<S>> {
     backup_providers_urls: Vec<Url>,
     all_providers_urls: Vec<Url>,
     _marker: PhantomData<(S, R)>,
+    validation_timeout: Duration,
 }
 
 impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<S, R> {
     pub fn from_env() -> Result<Self> {
         dotenv::dotenv().ok();
+
+        // Parsing the proof validation timeout
+        let validation_timeout_sec = std::env::var("NORI_CONSENSUS_PROOF_INPUT_VALIDATION_TIMEOUT")
+            .ok()
+            .map(|v| v.parse::<u64>().map_err(|e| Error::msg(format!("Failed to parse NORI_CONSENSUS_PROOF_INPUT_VALIDATION_TIMEOUT as u64: {}", e))))
+            .transpose()?
+            .unwrap_or(300);
+
+        let validation_timeout = Duration::from_secs(validation_timeout_sec);
 
         let urls: Vec<Url> = env::var(CONSENSUS_RPCS_ENV_VAR)?
             .split(',')
@@ -459,6 +469,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             backup_providers_urls,
             all_providers_urls: urls,
             _marker: PhantomData,
+            validation_timeout
         })
     }
 
@@ -546,7 +557,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 .boxed()
             },
             &self.all_providers_urls,
-            PROOF_INPUT_VALIDATION_TIMEOUT,
+            self.validation_timeout,
         )
         .await?;
 
@@ -595,7 +606,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 async move { Client::<S, R>::get_latest_finality_slot_and_store_hash(&url).await }
                     .boxed()
             },
-            PROVIDER_TIMEOUT,
+            CONSENSUS_PROVIDER_TIMEOUT,
         )
         .await
     }
@@ -613,7 +624,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 .boxed()
             },
             &self.all_providers_urls,
-            PROVIDER_TIMEOUT,
+            CONSENSUS_PROVIDER_TIMEOUT,
         )
         .await
     }

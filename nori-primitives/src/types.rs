@@ -71,6 +71,7 @@ pub struct ExecutionStateProof {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VerifiedContractStorageSlot {
     pub slot_key_address: Address,
+    pub slot_nested_key_attestation_hash: U256,
     pub value: U256,
 }
 
