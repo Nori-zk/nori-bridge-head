@@ -6,7 +6,13 @@ Note the relevant workspace is within the `/nori` folder. And nori specific libr
 
 ## Installation
 
+Rust installation:
+
 `cargo build`
+
+Smart contract installation (as `NoriTokenBridge.json` is needed from [Nori Bridge SDK](https://github.com/Nori-zk/nori-bridge-sdk) ):
+
+`cd cd nori/src/contracts/ && npm install`
 
 ## Configuration
 
@@ -45,8 +51,8 @@ NORI_LOG=info
 - **NETWORK_PRIVATE_KEY**: network prover private key.
 - **NETWORK_RPC_URL**: network prover rpc url.
 - **NORI_HELIOS_POLLING_INTERVAL**: dictates the polling interval for the Helios client to find the latest finality beacon slot.
-- **NORI_CONSENSUS_PROOF_INPUT_VALIDATION_TIMEOUT**: how long a consensus proof validation check is given before timing out.
-- **NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT**: how long a mpt consensus proof validation check is given before timing out.
+- **NORI_CONSENSUS_PROOF_INPUT_VALIDATION_TIMEOUT**: how long a consensus proof validation check is given (in seconds) before timing out.
+- **NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT**: how long a mpt consensus proof validation check is given (in seconds) before timing out.
 - **NORI_LOG**: Nori logging level.
 
 ## Build Nori-Sp1-Helios-ZK

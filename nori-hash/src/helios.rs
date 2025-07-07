@@ -16,7 +16,8 @@ pub fn serialize_helios_store_serde<S: ConsensusSpec>(
     )?);
     result.extend(rmp_serde::to_vec(
         &helios_store.current_max_active_participants,
-    )?);*/ // Commented out as when we are reconstructing these values using get_store_with_next_sync_committee we get a mismatch with current_max_active_participants of 511 vs 512
+    )?);*/ 
+    // Commented out as when we are reconstructing these values using get_store_with_next_sync_committee we get a mismatch with current_max_active_participants of 511 vs 512
     // Seemingly current_max_active_participants is only used in helios for saftey checks concerning optimism.
 
     // Optional fields

@@ -442,8 +442,9 @@ pub fn hash_storage_slot(
 ) -> Result<Fp> {
     let address_slice = address.as_slice();
     let att_hash_bytes = attestation_hash.to_be_bytes::<32>();
-    let value_slice = value.to_be_bytes::<32>(); //value.as_slice();
-                                                 //let value_slice = value.as_slice();
+    let value_slice = value.to_be_bytes::<32>();
+
+    // Left here for debugging purposes
     /*print!("{:?} 0x", address);
     for b in attestation_hash.to_be_bytes::<32>().iter() {
         print!("{:02x}", b);
@@ -470,12 +471,14 @@ pub fn hash_storage_slot(
     let second_field = Fp::from_bytes(&second_field_bytes)?;
     let third_field = Fp::from_bytes(&third_field_bytes)?;
 
+    // Left here for debugging purposes
     /*println!("first_field {:?}", first_field);
     println!("second_field {:?}", second_field);
     println!("third_field {:?}", third_field);*/
 
     let hash = poseidon_hash(&[first_field, second_field, third_field]);
 
+    // Left here for debugging purposes
     //println!("hash {:?}", hash);
 
     Ok(hash)

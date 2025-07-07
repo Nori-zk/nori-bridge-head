@@ -124,7 +124,7 @@ where
     dotenv::dotenv().ok();
 
     let polling_interval_sec: f64 = std::env::var("NORI_HELIOS_POLLING_INTERVAL")
-        .unwrap_or_else(|_| "1.0".to_string())
+        .unwrap_or_else(|_| "10.0".to_string())
         .parse()
         .expect("Failed to parse NORI_HELIOS_POLLING_INTERVAL as f64.");
 
