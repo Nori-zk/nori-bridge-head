@@ -195,8 +195,9 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             }
             TransitionNoticeBridgeHeadMessage::FinalityTransitionDetected(data) => {
                 info!(
-                    "NOTICE_TYPE| Finality Transition Detected: {:?}",
-                    data.extension.slot
+                    "NOTICE_TYPE| Finality Transition Detected: Slot: {:?}, Block Number: {:?}",
+                    data.extension.slot,
+                    data.extension.block_number
                 );
 
                 self.latest_beacon_finality_slot = data.extension.slot;

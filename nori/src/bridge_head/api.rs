@@ -454,6 +454,7 @@ impl BridgeHead {
             .trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
                     TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
+                        block_number: event.expected_output_block_number,
                         slot: event.expected_output_slot,
                         input_slot: event.input_slot,
                         proof_inputs_with_window: Box::new(event.clone()),

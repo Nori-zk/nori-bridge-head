@@ -89,6 +89,7 @@ pub struct TransitionNoticeExtensionBridgeHeadJobFailed {
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
+    pub block_number: u64,
     pub slot: u64,
     #[serde(skip_serializing)]
     pub input_slot: u64,
