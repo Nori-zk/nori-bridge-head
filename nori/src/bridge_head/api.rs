@@ -172,6 +172,7 @@ impl BridgeHead {
             start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(
                 current_slot,
                 store_hash,
+                None // FIXME this needs to come from state
             )
             .await;
 
@@ -389,6 +390,8 @@ impl BridgeHead {
         let current_slot = self.current_slot;
         let store_hash = self.store_hash;
         let inputs = proof_inputs_with_window.proof_inputs;
+        let expected_output_slot = proof_inputs_with_window.expected_output_slot;
+        //let expected_output_store_hash = proof_inputs_with_window. ??
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
@@ -406,6 +409,9 @@ impl BridgeHead {
                 }
             }
         });
+
+        // Here we should tell the finality_change_detector that we have a job inflight and its expected_output_slot
+        // So it can begin preparing proof inputs from this input slot as well..
 
         // Notify of a job created
         let _ = self

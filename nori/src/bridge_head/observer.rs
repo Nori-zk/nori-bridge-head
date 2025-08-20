@@ -126,6 +126,9 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         self.advance(proof_data.output_slot, proof_data.output_store_hash)
             .await;
 
+        // Here we should check if we have prepared finality proof inputs for the next window. If we do we don't need 
+        // to stage for the next transition proof we can use what is in cache directly.
+
         // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
         // However this proofinputs we have here is proved from our old slot to current finality and thus
         // is invalid (we would emit a proof from the same input slot again....)

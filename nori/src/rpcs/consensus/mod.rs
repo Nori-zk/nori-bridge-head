@@ -548,6 +548,9 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                                 ));
                             }
 
+                            // what about??
+                            //proof_outputs.output_store_hash;
+
                             Ok((output_slot, consensus_proof_inputs))
                         })
                         .await??;
@@ -590,6 +593,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 validated_consensus_proof_inputs
             )
             .await?;
+
+        //validated_consensus_mpt_proof_input_with_window. what about the output store hash?
 
         Ok(validated_consensus_mpt_proof_input_with_window)
     }

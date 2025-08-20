@@ -23,6 +23,9 @@ pub struct FinalityChangeDetectorInput {
     pub slot: u64,
     /// The consensus store hash corresponding to the slot.
     pub store_hash: FixedBytes<32>,
+    // Here we should add two more the next_slot and the next_store_hash which are the destinations of a proof which is inflight
+    // but note we need two types as it become somewhat disjointed between the actor and handler methods
+    // Perhaps options are the right idea.
 }
 
 /// Spawns an asynchronous actor responsible for querying RPC providers and locally validating
@@ -62,6 +65,9 @@ where
             let res = ConsensusHttpProxy::<S, R>::try_from_env()
                 .prepare_consensus_mpt_proof_inputs(job.slot, job.store_hash, true)
                 .await;
+
+            // Here we are preparing A -> D (While A->B is in process [if it is in the pipeline])
+            // But we should also be preparing B->D
 
             if result_tx.send(res).await.is_err() {
                 break;
@@ -112,6 +118,10 @@ where
 pub async fn start_validated_consensus_finality_change_detector<S, R>(
     mut slot: u64,
     mut store_hash: FixedBytes<32>,
+    // need an pipeline_inflight_output_slot to represent the end of the window slot of a proof that is currently being processed
+    // by the pipeline if it exists such that we can compute windowed proof inputs from this as an input slot in case that the inflight
+    // job succeeds
+    mut pipeline_inflight_output_slot: Option<u64>
 ) -> (
     u64,
     mpsc::Receiver<ProofInputsWithWindow<S>>,
@@ -147,14 +157,16 @@ where
     tokio::spawn(async move {
         // State tracking
         info!("Consensus change detector has started.");
+        // Update the cache which is used to filter what input slot to process from (avoids accepting when the rpc giving us earlier values).
         let mut latest_slot = slot;
+        //let mut next_slot: Option<u64> = None; 
         let mut in_flight = false; // indicates if validation request is outstanding
 
         let mut tick_interval = interval(Duration::from_secs_f64(polling_interval_sec));
 
         loop {
             tokio::select! {
-                // Receive input updates
+                // Receive input updates when the bridge head advances.
                 Some(update) = finality_input_rx.recv() => {
                     slot = update.slot;
                     store_hash = update.store_hash;
@@ -180,10 +192,11 @@ where
                             let input_slot = validated_proof_inputs_with_window.input_slot;
                             let output_slot = validated_proof_inputs_with_window.expected_output_slot;
                             // Only emit output if the input_slot matches current and our output is ahead of the current slot
+                            // We will accept this new output slot in the window beginning at 'slot'
                             if validated_proof_inputs_with_window.input_slot == slot {
                                 if validated_proof_inputs_with_window.expected_output_slot > latest_slot {
                                     if finality_output_tx.send(validated_proof_inputs_with_window).await.is_err() {
-                                        // Receiver dropped, exit task
+                                        // Receiver dropped, exit task, should maybe process exit?
                                         break;
                                     }
                                     latest_slot = output_slot;
