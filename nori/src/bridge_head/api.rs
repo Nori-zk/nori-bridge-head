@@ -172,6 +172,7 @@ impl BridgeHead {
             start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(
                 current_slot,
                 store_hash,
+                None, // FIXME this needs to come from state
                 None // FIXME this needs to come from state
             )
             .await;
@@ -391,7 +392,7 @@ impl BridgeHead {
         let store_hash = self.store_hash;
         let inputs = proof_inputs_with_window.proof_inputs;
         let expected_output_slot = proof_inputs_with_window.expected_output_slot;
-        //let expected_output_store_hash = proof_inputs_with_window. ??
+        let expected_output_store_hash = proof_inputs_with_window.expected_output_store_hash;
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
@@ -510,6 +511,7 @@ impl BridgeHead {
                         }
                         Command::Advance(message) => {
                             // Notify finality change detector of a change to the head position
+                            // message.slot is the output slot which was finalised
                             let _ = finality_input_tx.send(FinalityChangeDetectorInput {slot: message.slot, store_hash: message.store_hash}).await;
                             // Deal with advance invocation
                             let _ = self.advance(message.slot, message.store_hash).await;

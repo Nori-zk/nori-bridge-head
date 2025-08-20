@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, B256, U256};
 use alloy_trie::TrieAccount;
 use anyhow::{bail, Context, Result};
 use helios_consensus_core::consensus_spec::ConsensusSpec;
@@ -45,6 +45,7 @@ pub struct ProofInputsWithWindow<S: ConsensusSpec> {
     pub input_block_number: u64,
     pub expected_output_block_number: u64,
     pub proof_inputs: ProofInputs<S>,
+    pub expected_output_store_hash: FixedBytes<32>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

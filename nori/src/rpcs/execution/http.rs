@@ -8,10 +8,10 @@ use alloy::{
     eips::BlockId,
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::{EIP1186AccountProofResponse, Filter},
-    sol_types::SolEvent,
+    sol_types::{SolEvent},
     transports::http::Http,
 };
-use alloy_primitives::{Address, Log, B256};
+use alloy_primitives::{Address, FixedBytes, Log, B256};
 use anyhow::{anyhow, Context, Result, Error};
 use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
@@ -303,6 +303,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         input_block_number: u64,
         output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
+        expected_output_store_hash: FixedBytes<32>
     ) -> Result<ProofInputsWithWindow<S>> {
         let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
         let output = query_with_fallback(
@@ -333,6 +334,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             input_block_number,
             expected_output_block_number: output_block_number,
             proof_inputs: output,
+            expected_output_store_hash
         };
 
         Ok(output_with_blocks)

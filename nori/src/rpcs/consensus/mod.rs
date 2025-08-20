@@ -504,7 +504,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     ) -> Result<ProofInputsWithWindow<S>> {
         // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
         // Deserves it own location
-        let (input_slot, output_slot, validated_consensus_proof_inputs) = multiplex(
+        let (input_slot, output_slot, validated_consensus_proof_inputs, expected_output_store_hash) = multiplex(
             |url| {
                 async move {
                     // Fetch proof_inputs
@@ -514,7 +514,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                     .await?;
 
                     // Run the CPU-heavy program and slot validation inside spawn_blocking
-                    let (output_slot, validated_proof_inputs) =
+                    let (output_slot, validated_proof_inputs, expected_output_store_hash) =
                         tokio::task::spawn_blocking(move || {
                             // Run program logic
                             let proof_outputs = consensus_program(consensus_proof_inputs.clone())?;
@@ -551,11 +551,11 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                             // what about??
                             //proof_outputs.output_store_hash;
 
-                            Ok((output_slot, consensus_proof_inputs))
+                            Ok((output_slot, consensus_proof_inputs, proof_outputs.output_store_hash))
                         })
                         .await??;
 
-                    Ok((input_slot, output_slot, validated_proof_inputs))
+                    Ok((input_slot, output_slot, validated_proof_inputs, expected_output_store_hash))
                 }
                 .boxed()
             },
@@ -590,7 +590,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 output_slot,
                 finalized_input_block_number,
                 finalized_output_block_number,
-                validated_consensus_proof_inputs
+                validated_consensus_proof_inputs,
+                expected_output_store_hash
             )
             .await?;
 

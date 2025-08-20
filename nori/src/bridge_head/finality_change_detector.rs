@@ -15,6 +15,7 @@ use crate::rpcs::consensus::ConsensusHttpProxy;
 // We continuously query until we have some change... which we will have validated if we dont get any response from validate_and_prepare_proof_inputs
 // When we do have change we emit the input output slots along with the proof_inputs to the bridge head to be forwarded to any observer.
 
+
 /// Represents an input job for the finality change detector.
 ///
 /// Contains the beacon slot number and the associated consensus store hash from which we want prove a transition proof from.
@@ -26,6 +27,37 @@ pub struct FinalityChangeDetectorInput {
     // Here we should add two more the next_slot and the next_store_hash which are the destinations of a proof which is inflight
     // but note we need two types as it become somewhat disjointed between the actor and handler methods
     // Perhaps options are the right idea.
+}
+
+
+/// Represents an input job for the finality change detector.
+///
+/// Contains the beacon slot number and the associated consensus store hash from which we want prove a transition proof from.
+pub struct FinalityChangeDetectorAdvance {
+    /// The beacon slot number which indicates where we are proving from during the transition proof
+    pub slot: u64,
+    /// The consensus store hash corresponding to the slot.
+    pub store_hash: FixedBytes<32>,
+    // Here we should add two more the next_slot and the next_store_hash which are the destinations of a proof which is inflight
+    // but note we need two types as it become somewhat disjointed between the actor and handler methods
+    // Perhaps options are the right idea.
+}
+
+/// Represents an input job for the finality change detector.
+///
+/// Contains the beacon slot number and the associated consensus store hash from which we want prove a transition proof from.
+pub struct FinalityChangeDetectorJobInput {
+    /// The beacon slot number which indicates where we are proving from during the transition proof
+    pub slot: u64,
+    /// The consensus store hash corresponding to the slot.
+    pub store_hash: FixedBytes<32>,
+    // Here we should add two more the next_slot and the next_store_hash which are the destinations of a proof which is inflight
+    // but note we need two types as it become somewhat disjointed between the actor and handler methods
+    // Perhaps options are the right idea.
+
+    // These represent the expected output slot / store hash of the the proof which starts from 'slot'
+    pub next_expected_output_slot: u64,
+    pub next_expected_output_store_hash: FixedBytes<32>
 }
 
 /// Spawns an asynchronous actor responsible for querying RPC providers and locally validating
@@ -121,7 +153,8 @@ pub async fn start_validated_consensus_finality_change_detector<S, R>(
     // need an pipeline_inflight_output_slot to represent the end of the window slot of a proof that is currently being processed
     // by the pipeline if it exists such that we can compute windowed proof inputs from this as an input slot in case that the inflight
     // job succeeds
-    mut pipeline_inflight_output_slot: Option<u64>
+    mut pipeline_inflight_expected_output_slot: Option<u64>,
+    mut pipeline_inflight_expected_output_store_hash: Option<u64>,
 ) -> (
     u64,
     mpsc::Receiver<ProofInputsWithWindow<S>>,
