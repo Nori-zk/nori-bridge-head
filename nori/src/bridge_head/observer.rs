@@ -1,4 +1,3 @@
-use std::process;
 use super::{
     api::{BridgeHeadEvent, ProofMessage},
     handles::CommandHandle,
@@ -8,9 +7,10 @@ use crate::utils::{handle_nori_proof, handle_nori_proof_message};
 use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use helios_consensus_core::{consensus_spec::MainnetConsensusSpec};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use log::{error, info, warn};
 use nori_sp1_helios_primitives::types::ProofInputsWithWindow;
+use std::process;
 
 /// Event observer trait for handling bridge head events
 #[async_trait]
@@ -77,8 +77,11 @@ pub struct ExampleBridgeHeadEventObserver {
     store_hash: FixedBytes<32>,
     /// Boolean for indicating a job should be issued on the next beacon slot change event
     stage_transition_proof: bool,
-    /// Latest validated proof input
-    latest_validated_proof_input_with_window: Option<ProofInputsWithWindow<MainnetConsensusSpec>>,
+    /// Latest validated proof input for the current window
+    latest_current_window_validated_proof_input:
+        Option<ProofInputsWithWindow<MainnetConsensusSpec>>,
+    /// Latest validated proof input for the next window
+    latest_next_window_validated_proof_input: Option<ProofInputsWithWindow<MainnetConsensusSpec>>,
 }
 
 impl ExampleBridgeHeadEventObserver {
@@ -90,7 +93,8 @@ impl ExampleBridgeHeadEventObserver {
             current_slot: 0,
             store_hash: FixedBytes::default(),
             stage_transition_proof: false,
-            latest_validated_proof_input_with_window: None,
+            latest_current_window_validated_proof_input: None,
+            latest_next_window_validated_proof_input: None,
         }
     }
 
@@ -115,8 +119,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
 
         if proof_data.output_slot > self.current_slot {
             info!("Proof advanced the bridge head.");
-        }
-        else {
+        } else {
             warn!("PROOF DID NOT ADVANCE BRIDGE HEAD");
             warn!("PROOF DID NOT ADVANCE BRIDGE HEAD");
             warn!("PROOF DID NOT ADVANCE BRIDGE HEAD");
@@ -126,18 +129,35 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         self.advance(proof_data.output_slot, proof_data.output_store_hash)
             .await;
 
-        // Here we should check if we have prepared finality proof inputs for the next window. If we do we don't need 
+        // Here we should check if we have prepared finality proof inputs for the next window. If we do we don't need
         // to stage for the next transition proof we can use what is in cache directly.
+        if let Some(ref next_window) = self.latest_next_window_validated_proof_input {
+            info!("We have proof inputs for the next window, determining VIABILITY.");
+            // If we have a valid next window we should use it immediately
+            if next_window.input_slot == proof_data.output_slot {
+                info!("VIABILE: Next window proof inputs ARE contiguous proof data output slot '{}', next window input slot: '{}', staging the next proof immediately.", proof_data.output_slot, next_window.input_slot);
+                // The windows are contiguous so we can immediately start on the next proof
+                let _ = self
+                    .bridge_head_handle
+                    .stage_transition_proof(next_window.clone())
+                    .await;
+                return Ok(());
+            }
+            info!("NOT VIABILE: Next window proof inputs are NOT contiguous proof data output slot '{}', next window input slot: '{}'", proof_data.output_slot, next_window.input_slot);
+        }
 
         // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
         // However this proofinputs we have here is proved from our old slot to current finality and thus
         // is invalid (we would emit a proof from the same input slot again....)
         // ... so we should just mark the stage_transition_proof which will emit when there is a finality detected
-        // which is beyond our roof_data.output_slot, note this might not need to wait for the 
+        // which is beyond our roof_data.output_slot, note this might not need to wait for the
         // next beacon finality transition this could have already happened and so might emit almost straight away.
-        info!("Queuing a job for the next detected finality advancement beyond slot '{}'.", proof_data.output_slot);
+        info!(
+            "Queuing a job for the next detected finality advancement beyond slot '{}'.",
+            proof_data.output_slot
+        );
         self.stage_transition_proof = true;
-     
+
         Ok(())
     }
 
@@ -179,13 +199,15 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 );
 
                 // If there are no other jobs in the queue retry the failure
-                // FIXME TODO perhaps we should not retry the exact same job and just wait for the next finality...? 
+                // FIXME TODO perhaps we should not retry the exact same job and just wait for the next finality...?
                 // We are running behind for no reason here.... Also would simplify the logic here and allow us to remove
                 // latest_validated_proof_input_with_window because we don't use it anywhere else!
                 // But this change might end up in needless waiting. Say there is very short term network downtime. What about
                 // number of retries?
                 if data.extension.n_job_in_buffer == 0 {
-                    if let Some(proof_input_with_window) = self.latest_validated_proof_input_with_window.clone() {
+                    if let Some(proof_input_with_window) =
+                        self.latest_current_window_validated_proof_input.clone()
+                    {
                         let _ = self
                             .bridge_head_handle
                             .stage_transition_proof(proof_input_with_window)
@@ -199,18 +221,30 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             TransitionNoticeBridgeHeadMessage::FinalityTransitionDetected(data) => {
                 info!(
                     "NOTICE_TYPE| Finality Transition Detected: Slot: {:?}, Block Number: {:?}",
-                    data.extension.slot,
-                    data.extension.block_number
+                    data.extension.slot, data.extension.block_number
                 );
 
                 self.latest_beacon_finality_slot = data.extension.slot;
-                self.latest_validated_proof_input_with_window = Some(*data.extension.proof_inputs_with_window.clone());
+                self.latest_current_window_validated_proof_input = Some(
+                    *data
+                        .extension
+                        .current_window_proof_inputs_with_window
+                        .clone(),
+                );
+                self.latest_next_window_validated_proof_input = data
+                    .extension
+                    .next_window_proof_inputs_with_window
+                    .as_deref()
+                    .cloned();
 
                 if self.stage_transition_proof {
                     let _ = self
                         .bridge_head_handle
                         .stage_transition_proof(
-                            *data.extension.proof_inputs_with_window.clone(),
+                            *data
+                                .extension
+                                .current_window_proof_inputs_with_window
+                                .clone(),
                         )
                         .await;
                     self.stage_transition_proof = false;

@@ -1,6 +1,6 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
 use super::finality_change_detector::{
-    start_validated_consensus_finality_change_detector, FinalityChangeDetectorInput,
+    start_validated_consensus_finality_change_detector,
 };
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
@@ -11,6 +11,7 @@ use super::notice_messages::{
     TransitionNoticeExtensionBridgeHeadJobSucceeded, TransitionNoticeExtensionBridgeHeadStarted,
 };
 use super::validate::validate_env;
+use crate::bridge_head::finality_change_detector::FinalityChangeDetectorUpdate;
 use crate::rpcs::consensus::ConsensusHttpProxy;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy_primitives::FixedBytes;
@@ -20,7 +21,7 @@ use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
 use log::{debug, error, info};
 use nori_sp1_helios_primitives::types::{
-    ProofInputsWithWindow, ProofOutputs, VerifiedContractStorageSlot,
+    DualProofInputsWithWindow, ProofInputsWithWindow, ProofOutputs, VerifiedContractStorageSlot
 };
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
@@ -109,9 +110,11 @@ pub struct BridgeHead {
     /// Channel for receiving bridge head commands
     command_rx: Option<mpsc::Receiver<Command>>,
     /// Chanel for receiving consensus finality transition events
-    finality_output_rx: Option<mpsc::Receiver<ProofInputsWithWindow<MainnetConsensusSpec>>>,
+    finality_output_rx: Option<mpsc::Receiver<DualProofInputsWithWindow<MainnetConsensusSpec>>>,
     /// Chanel for informing consensus finality change detector above bridge head advances
-    finality_input_tx: Option<mpsc::Sender<FinalityChangeDetectorInput>>,
+    finality_advance_input_tx: Option<mpsc::Sender<FinalityChangeDetectorUpdate>>,
+    /// Chanel for informing consensus finality change detector above bridge head stage event
+    finality_stage_input_tx: Option<mpsc::Sender<FinalityChangeDetectorUpdate>>,
     /// Channel for receiving job results
     job_rx: Option<mpsc::UnboundedReceiver<Result<ProverJobOutput, ProverJobError>>>,
     /// Channel for sending job results
@@ -168,12 +171,11 @@ impl BridgeHead {
 
         // Setup polling client for finality change detection
         info!("Starting helios polling client.");
-        let (init_latest_beacon_slot, finality_output_rx, finality_input_tx) =
+        let (init_latest_beacon_slot, finality_output_rx, finality_advance_input_tx, finality_stage_input_tx) =
             start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(
                 current_slot,
                 store_hash,
-                None, // FIXME this needs to come from state
-                None // FIXME this needs to come from state
+                None, // FIXME this needs to come from persistant state aka from the checkpoint file
             )
             .await;
 
@@ -187,7 +189,8 @@ impl BridgeHead {
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
                 finality_output_rx: Some(finality_output_rx),
-                finality_input_tx: Some(finality_input_tx),
+                finality_advance_input_tx: Some(finality_advance_input_tx),
+                finality_stage_input_tx: Some(finality_stage_input_tx),
                 job_rx: Some(job_rx),
                 job_tx,
                 event_tx,
@@ -412,7 +415,11 @@ impl BridgeHead {
         });
 
         // Here we should tell the finality_change_detector that we have a job inflight and its expected_output_slot
-        // So it can begin preparing proof inputs from this input slot as well..
+        // So it can begin preparing proof inputs from this input slot as well.. 
+        // Borrow the transmitter
+        if let Some(finality_stage_input_tx) = &self.finality_stage_input_tx {
+            let _ = finality_stage_input_tx.send(FinalityChangeDetectorUpdate {slot: expected_output_slot, store_hash: expected_output_store_hash}).await;
+        }
 
         // Notify of a job created
         let _ = self
@@ -454,24 +461,29 @@ impl BridgeHead {
     // Update next slot logic
     async fn on_beacon_finality_change(
         &mut self,
-        event: ProofInputsWithWindow<MainnetConsensusSpec>,
+        event: DualProofInputsWithWindow<MainnetConsensusSpec>,
     ) {
+        // FIXME we should do something with next here!
         // Notify of transition
+
+        let next_window_proof_inputs_with_window = event.next_window.as_ref().map(|b| Box::new(b.clone()));
+
         let _ = self
             .trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
                     TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
-                        block_number: event.expected_output_block_number,
-                        slot: event.expected_output_slot,
-                        input_slot: event.input_slot,
-                        proof_inputs_with_window: Box::new(event.clone()),
+                        block_number: event.current_window.expected_output_block_number,
+                        slot: event.current_window.expected_output_slot,
+                        input_slot: event.current_window.input_slot,
+                        current_window_proof_inputs_with_window: Box::new(event.current_window.clone()),
+                        next_window_proof_inputs_with_window
                     },
                 ),
             )
             .await;
 
         // Update next head
-        self.next_slot = event.expected_output_slot;
+        self.next_slot = event.current_window.expected_output_slot;
 
         // Print the head change detection
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
@@ -493,7 +505,7 @@ impl BridgeHead {
         info!("Event loop started.");
 
         let mut finality_output_rx = self.finality_output_rx.take().unwrap();
-        let finality_input_tx = self.finality_input_tx.take().unwrap();
+        let finality_advance_input_tx = self.finality_advance_input_tx.take().unwrap();
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
 
@@ -512,7 +524,7 @@ impl BridgeHead {
                         Command::Advance(message) => {
                             // Notify finality change detector of a change to the head position
                             // message.slot is the output slot which was finalised
-                            let _ = finality_input_tx.send(FinalityChangeDetectorInput {slot: message.slot, store_hash: message.store_hash}).await;
+                            let _ = finality_advance_input_tx.send(FinalityChangeDetectorUpdate {slot: message.slot, store_hash: message.store_hash}).await;
                             // Deal with advance invocation
                             let _ = self.advance(message.slot, message.store_hash).await;
                         }

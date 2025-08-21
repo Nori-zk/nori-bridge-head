@@ -49,6 +49,12 @@ pub struct ProofInputsWithWindow<S: ConsensusSpec> {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct DualProofInputsWithWindow<S: ConsensusSpec> {
+    pub current_window: ProofInputsWithWindow<S>,
+    pub next_window: Option<ProofInputsWithWindow<S>>
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConsensusProofInputs<S: ConsensusSpec> {
     pub updates: Vec<Update<S>>,
     pub finality_update: FinalityUpdate<S>,

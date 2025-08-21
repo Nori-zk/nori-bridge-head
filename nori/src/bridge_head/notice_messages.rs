@@ -94,7 +94,9 @@ pub struct TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
     #[serde(skip_serializing)]
     pub input_slot: u64,
     #[serde(skip_serializing)]
-    pub proof_inputs_with_window: Box<ProofInputsWithWindow<MainnetConsensusSpec>>,
+    pub current_window_proof_inputs_with_window: Box<ProofInputsWithWindow<MainnetConsensusSpec>>,
+    #[serde(skip_serializing)]
+    pub next_window_proof_inputs_with_window: Option<Box<ProofInputsWithWindow<MainnetConsensusSpec>>>,
     //#[serde(skip_serializing)]
     //pub finality_update: FinalityUpdate<MainnetConsensusSpec>,
 }
