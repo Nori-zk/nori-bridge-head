@@ -76,17 +76,16 @@ where
 
     tokio::spawn(async move {
         while let Some(job) = job_rx.recv().await {
-            warn!("RECEIVED REQUEST FOR finality dual proof input validation");
             let res = if let Some(next_expected_output) = job.next_expected_output {
                 let consensus_http_proxy = ConsensusHttpProxy::<S, R>::try_from_env();
 
                 // We might get the same input slot for both current and next we shouldnt compute both...
 
-                warn!(
+                debug!(
                     "Calculating proof input for CURRENT window, input slot: {}",
                     job.slot
                 );
-                warn!(
+                debug!(
                     "Calculating proof input for NEXT window, input slot: {}",
                     next_expected_output.slot
                 );
@@ -111,11 +110,11 @@ where
 
                 let current_res = match current {
                     Ok(val) => {
-                        warn!("Dual window proof input calculation. Success in CURRENT window proof input validation. Input slot: {}, Output slot: {}", val.input_slot, val.expected_output_slot);
+                        debug!("Dual window proof input calculation. Success in CURRENT window proof input validation. Input slot: {}, Output slot: {}", val.input_slot, val.expected_output_slot);
                         val
                     }
                     Err(e) => {
-                        warn!("Dual window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
+                        debug!("Dual window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
                         let _ = result_tx.send(Err(e)).await;
                         continue;
                     }
@@ -124,11 +123,11 @@ where
                 // Here is it fails we will just exclude it? turn this into an ok if it happens to often.
                 let next_res = match next {
                     Ok(val) => {
-                        warn!("Dual window proof input calculation. Success in NEXT window proof input validation. Input slot: {}, Output slot: {}", val.input_slot, val.expected_output_slot);
+                        debug!("Dual window proof input calculation. Success in NEXT window proof input validation. Input slot: {}, Output slot: {}", val.input_slot, val.expected_output_slot);
                         val
                     }
                     Err(e) => {
-                        warn!("Dual window proof input calculation. Error in NEXT window proof input validation:\n{}", e);
+                        debug!("Dual window proof input calculation. Error in NEXT window proof input validation:\n{}", e);
                         let _ = result_tx.send(Err(e)).await;
                         continue;
                     }
@@ -145,11 +144,11 @@ where
 
                 let current_res = match current_res {
                     Ok(val) => {
-                        warn!("Solo current window proof input calculation. Success in CURRENT window proof input validation. Input slot: '{}', Output slot '{}'", val.input_slot, val.expected_output_slot);
+                        debug!("Solo current window proof input calculation. Success in CURRENT window proof input validation. Input slot: '{}', Output slot '{}'", val.input_slot, val.expected_output_slot);
                         val
                     }
                     Err(e) => {
-                        warn!("Solo current window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
+                        debug!("Solo current window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
                         let _ = result_tx.send(Err(e)).await;
                         continue;
                     }
@@ -183,7 +182,7 @@ async fn try_start_validation_job(
     let filtered_next = match next_expected_output {
         Some(n) if n.slot != slot => Some(n.clone()),
         Some(n) => {
-            warn!(
+            debug!(
                 "Suppressing next_expected_output because its input slot '{}' equals the current input slot '{}'",
                 n.slot, slot
             );
@@ -205,6 +204,7 @@ async fn try_start_validation_job(
         }
         Err(e) => {
             error!("Validation actor job channel closed unexpectedly: {:?}", e);
+            // FIXME should probably process exit
             Err(())
         }
     }
@@ -315,7 +315,7 @@ where
                     let next_expected_output_slot = update.slot;
                     next_expected_output = Some(update);
                     stale = true;
-                    warn!("Finality transition detector notified of new staging event. Next window expected proof input slot: '{}'", next_expected_output_slot);
+                    info!("Finality transition detector notified of new staging event. Next window expected proof input slot: '{}'", next_expected_output_slot);
                 },
                 // Receive input updates when the bridge head advances.
                 Some(update) = finality_advance_input_rx.recv() => {
@@ -338,12 +338,12 @@ where
                     // FIXME here we should remove next_expected_output if it matches the advance....
                     if let Some(ref next_expected_output_some) = next_expected_output {
                         if (next_expected_output_some.slot == slot) {
-                            warn!("Scrubbing next_expected_output as its the same as out slot");
+                            info!("Scrubbing next_expected_output as its the same as out slot");
                             next_expected_output = None
                         }
                     }
 
-                    warn!("Finality transition detector notified of bridge advance. Current input slot: '{}'", slot);
+                    info!("Finality transition detector notified of bridge advance. Current input slot: '{}'", slot);
                 },
 
                 // Receive validation results
@@ -353,7 +353,7 @@ where
                     match result {
                         Ok(dual_validated_proof_inputs) => {
                             if stale {
-                                warn!("Received dual_validated_proof_inputs but result was stale dropping.");
+                                debug!("Received dual_validated_proof_inputs but result was stale dropping.");
                                 // Drop this result
                                 stale = false;
                                 // We should immediately start an new proof validation job validation_job_tx.send(job). FIXME
@@ -370,13 +370,13 @@ where
                             if dual_validated_proof_inputs.current_window.input_slot == slot {
                                 if dual_validated_proof_inputs.current_window.expected_output_slot > latest_slot {
 
-                                    warn!("We could have SENT an update SOLO");
+                                    debug!("We could have SENT an update SOLO");
 
                                     // Do we have a next window?
                                     if let Some(ref next_window) = dual_validated_proof_inputs.next_window {
                                         // Is the next window's output slot greater than the current slot
                                         if next_window.expected_output_slot > latest_slot {
-                                            warn!("We SENT an update DUAL");
+                                            debug!("We SENT an update DUAL");
                                             if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {
                                                 // Receiver dropped, exit task, should maybe process exit?
                                                 break;
