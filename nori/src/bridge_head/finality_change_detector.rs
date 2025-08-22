@@ -1,10 +1,9 @@
+use crate::rpcs::consensus::ConsensusHttpProxy;
 use alloy_primitives::FixedBytes;
 use helios_consensus_core::consensus_spec::{ConsensusSpec, MainnetConsensusSpec};
 use helios_ethereum::rpc::{http_rpc::HttpRpc, ConsensusRpc};
-//use crate::rpcs::consensus::{get_client, get_client_latest_finality_slot, get_client_latest_finality_update_and_slot, get_latest_checkpoint, FinalityUpdateAndSlot};
-use crate::rpcs::consensus::ConsensusHttpProxy;
-use log::{debug, error, info, warn};
-use nori_sp1_helios_primitives::types::{DualProofInputsWithWindow, ProofInputsWithWindow};
+use log::{debug, error, info};
+use nori_sp1_helios_primitives::types::DualProofInputsWithWindow;
 use std::{process, time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
@@ -28,12 +27,12 @@ use tokio::{sync::mpsc, time::interval};
 /// - Next window: `(expected output slot of the in-flight staged proof → latest finalized slot)`
 ///
 /// # Update variants
-/// 
+///
 /// - `BridgeAdvancement`  
 ///   Defines the start of the **current window** from the bridge head’s slot and store hash
 ///   after a staged proof has finalized. This advances the active head, updates the start of the
 ///   current window, and triggers recalculation of proof inputs.
-/// 
+///
 /// - `ProofStaging`  
 ///   Defines the start of the **next window** from the expected output slot and store hash of
 ///   an in-flight staged proof. This anchors the next window and is used to prepare upcoming
@@ -54,7 +53,7 @@ pub struct FinalityChangeDetectorUpdate {
     pub store_hash: FixedBytes<32>,
 }
 
-/// FinalityChangeDetector job input struct describing the window starts the detector worker must 
+/// FinalityChangeDetector job input struct describing the window starts the detector worker must
 /// materialize into proof inputs.
 ///
 /// ## Current Window
@@ -131,8 +130,6 @@ where
             let res = if let Some(next_expected_output) = job.next_expected_output {
                 let consensus_http_proxy = ConsensusHttpProxy::<S, R>::try_from_env();
 
-                // We might get the same input slot for both current and next we shouldnt compute both...
-
                 debug!(
                     "Calculating proof input for CURRENT window, input slot: {}",
                     job.slot
@@ -142,13 +139,12 @@ where
                     next_expected_output.slot
                 );
 
-                // Prepare job inputs from job.slot -> new slot (unknown one)
+                // Prepare job inputs from current bridge header slot job.slot -> new slot (unknown one)
                 let current_res = consensus_http_proxy.prepare_consensus_mpt_proof_inputs(
                     job.slot,
                     job.store_hash,
                     true,
                 );
-                //.await;
 
                 // Prepare job inputs from next expected output slot of a staged job -> new slot (unknown one)
                 let next_res = consensus_http_proxy.prepare_consensus_mpt_proof_inputs(
@@ -156,7 +152,6 @@ where
                     next_expected_output.store_hash,
                     true,
                 );
-                //.await;
 
                 let (current, next) = tokio::join!(current_res, next_res);
 
@@ -172,7 +167,6 @@ where
                     }
                 };
 
-                // Here is it fails we will just exclude it? turn this into an ok if it happens to often.
                 let next_res = match next {
                     Ok(val) => {
                         debug!("Dual window proof input calculation. Success in NEXT window proof input validation. Input slot: {}, Output slot: {}", val.input_slot, val.expected_output_slot);
@@ -212,9 +206,6 @@ where
                 }
             };
 
-            // Here we are preparing A -> D (While A->B is in process [if it is in the pipeline])
-            // But we should also be preparing B->D
-
             if result_tx.send(Ok(res)).await.is_err() {
                 break;
             }
@@ -228,7 +219,7 @@ where
 /// then attempts to start a validation job with those inputs.
 ///
 /// This function prepares a `FinalityChangeDetectorJobInput` and sends it to the validation actor. The actor:
-/// 
+///
 /// - Computes **proof inputs for the current window** based on the given slot and store hash.
 /// - Optionally computes **proof inputs for the next window** if `next_expected_output` is provided.
 /// - Ensures that duplicate jobs are not submitted when the next window matches the current one.
@@ -252,10 +243,13 @@ async fn try_start_validation_job(
     next_expected_output: &Option<FinalityChangeDetectorUpdate>,
     in_flight: &mut bool,
 ) -> Result<(), ()> {
+    // This may be unnecessary as start_validated_consensus_finality_change_detector sets next_expected_output
+    // to none if next_expected_output_some.slot == the bridge header slot
+    // leaving the print in for testing
     let filtered_next = match next_expected_output {
         Some(n) if n.slot != slot => Some(n.clone()),
         Some(n) => {
-            debug!(
+            info!(
                 "Suppressing next_expected_output because its input slot '{}' equals the current input slot '{}'",
                 n.slot, slot
             );
@@ -293,7 +287,7 @@ async fn try_start_validation_job(
 /// 3. Listening for **bridge head advancement events** to update the input slot of the **current window**
 ///    (the slot from which the bridge head's header slot currently tracks)
 /// 4. Listening for **staged proof events** to register the expected output of the proof currently in-flight,
-///    which becomes the input slot of the **next window**. 
+///    which becomes the input slot of the **next window**.
 /// 5. If the current in-flight proof succeeds the **next window's** proof inputs must be taken. On failure,
 ///    the bridge must resort to the latest **current window** proof inputs. In either case both windows target the latest accepted consensus finality slot.
 /// 6. Validating proof inputs across windows using multiple RPC sources in parallel
@@ -307,7 +301,7 @@ async fn try_start_validation_job(
 /// - `store_hash`: The hash of the store at the input slot for the **current window**.
 /// - `pipeline_inflight_next_expected_output`: Optional in-flight proof job representing the
 ///   expected output slot and store hash of a staged proof currently being processed, i.e. the **next window's** input slot.  
-/// 
+///
 /// Purpose:
 ///   The detector computes the **current window’s** proof inputs from the bridge head’s finality slot
 ///   to the latest consensus finality slot, while simultaneously pre-computing the **next window’s**
@@ -389,14 +383,18 @@ where
     tokio::spawn(async move {
         // State tracking
         info!("Consensus change detector has started.");
-        // Update the cache which is used to filter what input slot to process from (avoids accepting when the rpc giving us earlier values).
+        // Update the latest_slot cache which is used to filter what consensus finality slot we will be targeting,
+        // it is used to avoids acceptance of a transition output slot, when the rpc gives us earlier slot values,
+        // which happens annoyingly frequently around a transition.
         let mut latest_slot = slot;
-
-        let mut in_flight = false; // indicates if validation request is outstanding
-        let mut stale: bool = false; // indicates if we had some update while our last dual proof inputs were being calculated
-
+        // Indicates if validation request to the actor is outstanding
+        let mut in_flight = false;
+        // Indicates if we had some update, while our last dual proof inputs were being calculated by the actor.
+        let mut stale: bool = false;
+        // Interval between RPC requests (bundles of request per prepare_consensus_mpt_proof_inputs invocation)
         let mut tick_interval = interval(Duration::from_secs_f64(polling_interval_sec));
-
+        // Option for if we have a currently staged job in the pipeline, it represents the window start which is the
+        // output slot of the currently staged job, it can be used to calculate input for if the staged job succeeds.
         let mut next_expected_output: Option<FinalityChangeDetectorUpdate> =
             pipeline_inflight_next_expected_output;
 
@@ -404,16 +402,23 @@ where
             tokio::select! {
                 // Receive input updates when the bridge head stages a job.
                 Some(update) = finality_stage_input_rx.recv() => {
-                    // Do something with this stage event
-                    // these represent the output slot of the staged job
-                    // they represent the other half of the dual input that we need to calculate proofs from
+                    // The staged events represent the output slot / hash of a staged job,
+                    // they represent the other half of the dual input that we need to calculate proofs from.
+
+                    // Cache the update
                     let next_expected_output_slot = update.slot;
                     next_expected_output = Some(update);
-                    stale = true;
+
+                    // Mark any inflight jobs as stale
+                    if in_flight {
+                        stale = true;
+                    }
+
                     info!("Finality transition detector notified of new staging event. Next window expected proof input slot: '{}'", next_expected_output_slot);
                 },
                 // Receive input updates when the bridge head advances.
                 Some(update) = finality_advance_input_rx.recv() => {
+                    // Cache the update
                     slot = update.slot;
                     store_hash = update.store_hash;
                     // we should probably just override the slot here FIXME
@@ -427,11 +432,15 @@ where
                     //if latest_slot < slot {
                     latest_slot = slot;
                     //}
-                    // Not sure if the below is needed
-                    stale = true;
 
+                    // Not sure if the below is needed
+                    if in_flight {
+                        stale = true;
+                    }
+
+                    // Remove the next_expected_output if it represents the same window start as our current window start
                     if let Some(ref next_expected_output_some) = next_expected_output {
-                        if (next_expected_output_some.slot == slot) {
+                        if next_expected_output_some.slot == slot {
                             info!("Scrubbing next_expected_output as its the same as out slot");
                             next_expected_output = None
                         }
@@ -442,10 +451,12 @@ where
 
                 // Receive validation results
                 Some(result) = validation_result_rx.recv() => {
+                    // We received output from our actor thus we have nothing in-flight anymore.
                     in_flight = false;
 
                     match result {
                         Ok(dual_validated_proof_inputs) => {
+                            // If our job received here was stale drop it and try again.
                             if stale {
                                 debug!("Received dual_validated_proof_inputs but result was stale dropping.");
                                 // Drop this result
@@ -456,9 +467,13 @@ where
                                 }
                                 continue;
                             }
+
+                            // Update our input and output slot from the current windows proof inputs result.
                             let input_slot = dual_validated_proof_inputs.current_window.input_slot;
                             let output_slot = dual_validated_proof_inputs.current_window.expected_output_slot;
-                            // Only emit output if the input_slot matches current and our output is ahead of the current slot
+
+                            // Only emit output if the input_slot matches the current windows input 'slot' and our output is ahead 
+                            // of the latest_slot (the latest accepted consensus finality slot), thus representing progress.
                             // We will accept this new output slot in the window beginning at 'slot'
                             if dual_validated_proof_inputs.current_window.input_slot == slot {
                                 if dual_validated_proof_inputs.current_window.expected_output_slot > latest_slot {
@@ -469,13 +484,13 @@ where
                                     if let Some(ref next_window) = dual_validated_proof_inputs.next_window {
                                         // Is the next window's output slot greater than the current slot
                                         if next_window.expected_output_slot > latest_slot {
-                                            debug!("We SENT an update DUAL");
                                             if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {
                                                 // Receiver dropped, exit task, should maybe process exit?
                                                 break;
                                             }
+                                            debug!("We SENT an update DUAL");
                                         }  else {
-                                            debug!("No change detected for next window's result: '{}' when the latest_slot was: '{}'. Ignoring.", output_slot, latest_slot);
+                                            debug!("No change detected for next window's result: '{}' when the latest_slot was: '{}'. Ignoring.", next_window.expected_output_slot, latest_slot);
                                         }
                                     }
                                     else if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {

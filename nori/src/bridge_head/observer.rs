@@ -135,7 +135,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             info!("We have proof inputs for the next window, determining VIABILITY.");
             // If we have a valid next window we should use it immediately
             if next_window.input_slot == proof_data.output_slot {
-                info!("VIABILE: Next window proof inputs ARE contiguous proof data output slot '{}', next window input slot: '{}', staging the next proof immediately.", proof_data.output_slot, next_window.input_slot);
+                info!("VIABLE: Next window proof inputs ARE contiguous, proof data output slot '{}', next window input slot: '{}', staging the next proof immediately.", proof_data.output_slot, next_window.input_slot);
                 // The windows are contiguous so we can immediately start on the next proof
                 let _ = self
                     .bridge_head_handle
@@ -143,7 +143,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     .await;
                 return Ok(());
             }
-            info!("NOT VIABILE: Next window proof inputs are NOT contiguous proof data output slot '{}', next window input slot: '{}'", proof_data.output_slot, next_window.input_slot);
+            info!("NOT VIABLE: Next window proof inputs are NOT contiguous, proof data output slot '{}', next window input slot: '{}'", proof_data.output_slot, next_window.input_slot);
         }
 
         // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
@@ -153,7 +153,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         // which is beyond our roof_data.output_slot, note this might not need to wait for the
         // next beacon finality transition this could have already happened and so might emit almost straight away.
         info!(
-            "Queuing a job for the next detected finality advancement beyond slot '{}'.",
+            "We only have proof inputs for the current window. Queuing a job for the next detected finality advancement beyond slot '{}'.",
             proof_data.output_slot
         );
         self.stage_transition_proof = true;
