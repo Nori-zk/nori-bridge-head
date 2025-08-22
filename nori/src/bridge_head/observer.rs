@@ -142,8 +142,9 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     .stage_transition_proof(next_window.clone())
                     .await;
                 return Ok(());
+            } else {
+                info!("NOT VIABLE: Next window proof inputs are NOT contiguous, proof data output slot '{}', next window input slot: '{}'", proof_data.output_slot, next_window.input_slot);
             }
-            info!("NOT VIABLE: Next window proof inputs are NOT contiguous, proof data output slot '{}', next window input slot: '{}'", proof_data.output_slot, next_window.input_slot);
         }
 
         // We should wait until finality has advanced to trigger our next proof unless the beacon slot has advanced...
