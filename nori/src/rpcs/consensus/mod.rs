@@ -533,7 +533,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
 
                             // The below didnt work as well as we had hoped https://github.com/Nori-zk/nori-bridge-head/issues/10
                             // Block non-checkpoint slots (they prevent bootstrapping on restart)
-                            /*if validate && output_slot % 32 > 0 { 
+                            if validate && output_slot % 32 > 0 { 
                                 // FIXME might need the validate_progress guard as its used as a flag to allow
                                 // the proof anyway. And for vk building we need to be able to arbirarily bypass this 
                                 // sort of validation.
@@ -541,7 +541,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                                     "Output slot {} was a non-checkpoint slot. Preventing this as it prevents bootstrapping if we go offline.",
                                     output_slot,
                                 ));
-                            }*/
+                            }
 
                             if validate && proof_outputs.next_sync_committee_hash == B256::ZERO {
                                 return Err(anyhow::anyhow!(
@@ -559,6 +559,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                         // Block non-checkpoint slots
                         // This replaces the output_slot % 32 > 0 validation check.
                         // Instead of checking the output_slot number % 32 lets try to bootstrap from this slot explicitly
+                        // NOTE THIS STRATEGY DID NOT WORK....
                         if validate {
                             Client::<S, R>::bootstrap_from_slot(&url, output_slot).await
                             .map_err(|e| anyhow::anyhow!(
