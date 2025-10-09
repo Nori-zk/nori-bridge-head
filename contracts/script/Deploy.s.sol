@@ -2,7 +2,7 @@
 pragma solidity ^0.8.22;
 
 import "forge-std/Script.sol";
-import {SP1Helios} from "../src/SP1Helios.sol";
+import {SP1Helios, InitParams} from "../src/SP1Helios.sol";
 import {SP1MockVerifier} from "@sp1-contracts/SP1MockVerifier.sol";
 import {ISP1Verifier} from "@sp1-contracts/ISP1Verifier.sol";
 import {Vm} from "forge-std/Vm.sol";
@@ -15,10 +15,7 @@ contract DeployScript is Script {
     function run() public returns (address) {
         vm.startBroadcast();
 
-        // Update the rollup config to match the current chain. If the starting block number is 0, the latest block number and starting output root will be fetched.
-        updateGenesisConfig();
-
-        SP1Helios.InitParams memory params = readGenesisConfig();
+        InitParams memory params = readGenesisConfig();
 
         // If the verifier address is set to 0, set it to the address of the mock verifier.
         if (params.verifier == address(0)) {
@@ -31,41 +28,29 @@ contract DeployScript is Script {
         return address(helios);
     }
 
-    function readGenesisConfig() public returns (SP1Helios.InitParams memory) {
+    function readGenesisConfig() public view returns (InitParams memory) {
         string memory root = vm.projectRoot();
         string memory path = string.concat(root, "/", "genesis.json");
         string memory json = vm.readFile(path);
-        bytes memory data = vm.parseJson(json);
-        return abi.decode(data, (SP1Helios.InitParams));
-    }
 
-    function updateGenesisConfig() public {
-        // If ENV_FILE is set, pass it to the genesis binary.
-        string memory envFile = vm.envOr("ENV_FILE", string(".env"));
+        InitParams memory params = InitParams({
+            executionStateRoot: vm.parseJsonBytes32(json, ".executionStateRoot"),
+            executionBlockNumber: vm.parseJsonUint(json, ".executionBlockNumber"),
+            genesisTime: vm.parseJsonUint(json, ".genesisTime"),
+            genesisValidatorsRoot: vm.parseJsonBytes32(json, ".genesisValidatorsRoot"),
+            guardian: vm.parseJsonAddress(json, ".guardian"),
+            head: vm.parseJsonUint(json, ".head"),
+            header: vm.parseJsonBytes32(json, ".header"),
+            lightClientVkey: vm.parseJsonBytes32(json, ".lightClientVkey"),
+            storageSlotVkey: vm.parseJsonBytes32(json, ".storageSlotVkey"),
+            secondsPerSlot: vm.parseJsonUint(json, ".secondsPerSlot"),
+            slotsPerEpoch: vm.parseJsonUint(json, ".slotsPerEpoch"),
+            slotsPerPeriod: vm.parseJsonUint(json, ".slotsPerPeriod"),
+            sourceChainId: vm.parseJsonUint(json, ".sourceChainId"),
+            syncCommitteeHash: vm.parseJsonBytes32(json, ".syncCommitteeHash"),
+            verifier: vm.parseJsonAddress(json, ".verifier")
+        });
 
-        // Build the genesis binary. Use the quiet flag to suppress build output.
-        string[] memory inputs = new string[](6);
-        inputs[0] = "cargo";
-        inputs[1] = "build";
-        inputs[2] = "--bin";
-        inputs[3] = "genesis";
-        inputs[4] = "--release";
-        inputs[5] = "--quiet";
-        vm.ffi(inputs);
-
-        // Run the genesis binary which updates the genesis config.
-        // Use the quiet flag to suppress build output.
-        string[] memory inputs2 = new string[](9);
-        inputs2[0] = "cargo";
-        inputs2[1] = "run";
-        inputs2[2] = "--bin";
-        inputs2[3] = "genesis";
-        inputs2[4] = "--release";
-        inputs2[5] = "--quiet";
-        inputs2[6] = "--";
-        inputs2[7] = "--env-file";
-        inputs2[8] = envFile;
-
-        vm.ffi(inputs2);
+        return params;
     }
 }

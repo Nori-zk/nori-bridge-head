@@ -6,13 +6,14 @@ use crate::{
 };
 use alloy::{
     eips::BlockId,
+    network::Ethereum,
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::{EIP1186AccountProofResponse, Filter},
-    sol_types::{SolEvent},
+    sol_types::SolEvent,
     transports::http::Http,
 };
 use alloy_primitives::{Address, FixedBytes, Log, B256};
-use anyhow::{anyhow, Context, Result, Error};
+use anyhow::{anyhow, Context, Error, Result};
 use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, warn};
@@ -30,8 +31,8 @@ const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const EXECUTION_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct ExecutionHttpProxy<S: ConsensusSpec> {
-    principal_provider: RootProvider<Http<Client>>,
-    backup_providers: Vec<RootProvider<Http<Client>>>,
+    principal_provider: RootProvider<Ethereum>,
+    backup_providers: Vec<RootProvider<Ethereum>>,
     source_state_bridge_contract_address: Address,
     _marker: PhantomData<S>,
     validation_timeout: Duration,
@@ -44,7 +45,14 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         // Parsing the proof validation timeout
         let validation_timeout_sec = std::env::var("NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT")
             .ok()
-            .map(|v| v.parse::<u64>().map_err(|e| Error::msg(format!("Failed to parse NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT as u64: {}", e))))
+            .map(|v| {
+                v.parse::<u64>().map_err(|e| {
+                    Error::msg(format!(
+                        "Failed to parse NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT as u64: {}",
+                        e
+                    ))
+                })
+            })
             .transpose()?
             .unwrap_or(300);
 
@@ -53,7 +61,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         let source_execution_http_urls = env::var("NORI_SOURCE_EXECUTION_HTTP_RPCS")
             .context("Missing NORI_SOURCE_EXECUTION_HTTP_RPCS in environment")?;
 
-        let mut providers: Vec<RootProvider<Http<Client>>> = source_execution_http_urls
+        let mut providers: Vec<RootProvider<Ethereum>> = source_execution_http_urls
             .split(',')
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
@@ -64,7 +72,13 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                     None
                 }
             })
-            .map(|rpc_url| ProviderBuilder::new().on_http(rpc_url))
+            .map(|rpc_url| {
+                ProviderBuilder::new()
+                    .network::<Ethereum>()
+                    .connect_http(rpc_url)
+                    .root()
+                    .clone()
+            })
             .collect();
 
         if providers.is_empty() {
@@ -82,7 +96,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             principal_provider,
             backup_providers: providers,
             _marker: PhantomData,
-            validation_timeout
+            validation_timeout,
         })
     }
 
@@ -91,7 +105,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
     }
 
     async fn _get_source_contract_event_chunk<T>(
-        provider: &RootProvider<Http<Client>>,
+        provider: &RootProvider<Ethereum>,
         source_state_bridge_contract_address: &Address,
         start: u64,
         end: u64,
@@ -111,14 +125,14 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
         let events: Vec<Log<T>> = logs
             .into_iter()
-            .filter_map(|log| T::decode_log(&log.inner, true).ok())
+            .filter_map(|log| T::decode_log(&log.inner).ok())
             .collect();
 
         Ok(events)
     }
 
     async fn _get_source_contract_events<T>(
-        provider: &RootProvider<Http<Client>>,
+        provider: &RootProvider<Ethereum>,
         source_state_bridge_contract_address: &Address,
         start_block: u64,
         end_block: u64,
@@ -173,7 +187,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
     }
 
     async fn _get_proof(
-        provider: &RootProvider<Http<Client>>,
+        provider: &RootProvider<Ethereum>,
         source_state_bridge_contract_address: &Address,
         storage_keys: Vec<B256>,
         block_id: BlockId,
@@ -191,7 +205,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
     // TODO Doc string
     async fn _prepare_consensus_mpt_proof_inputs(
-        provider: &RootProvider<Http<Client>>,
+        provider: &RootProvider<Ethereum>,
         source_state_bridge_contract_address: &Address,
         input_block_number: u64,
         output_block_number: u64,
@@ -288,7 +302,8 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         // Dry run this proof
         let _ = tokio::task::spawn_blocking(move || {
             // Run program logic
-            consensus_mpt_program(consensus_mpt_proof_input_clone, enable_debug) // enable_debug
+            consensus_mpt_program(consensus_mpt_proof_input_clone, enable_debug)
+            // enable_debug
         })
         .await??;
 
@@ -303,7 +318,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         input_block_number: u64,
         output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
-        expected_output_store_hash: FixedBytes<32>
+        expected_output_store_hash: FixedBytes<32>,
     ) -> Result<ProofInputsWithWindow<S>> {
         let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
         let output = query_with_fallback(
@@ -334,7 +349,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             input_block_number,
             expected_output_block_number: output_block_number,
             proof_inputs: output,
-            expected_output_store_hash
+            expected_output_store_hash,
         };
 
         Ok(output_with_blocks)

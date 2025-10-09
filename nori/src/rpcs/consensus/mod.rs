@@ -8,10 +8,10 @@ use helios_consensus_core::{
     types::{BeaconBlock, FinalityUpdate, Forks, LightClientHeader, LightClientStore, Update},
     verify_update,
 };
-use helios_ethereum::rpc::ConsensusRpc;
 use helios_ethereum::{
     config::{checkpoints, networks::Network, Config},
     consensus::Inner,
+    rpc::{http_rpc::HttpRpc, ConsensusRpc}
 };
 use log::{debug, info, warn};
 use nori_hash::sha256_hash::sha256_hash_helios_store;
@@ -50,7 +50,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
 
         // Configuring client
         let config = Config {
-            consensus_rpc: consensus_rpc.to_string(),
+            consensus_rpc: consensus_rpc.clone(),
             execution_rpc: None,
             chain: base_config.chain,
             forks: base_config.forks,

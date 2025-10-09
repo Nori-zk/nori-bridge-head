@@ -6,7 +6,10 @@ use alloy_sol_types::SolValue;
 use helios_consensus_core::{
     apply_finality_update, apply_update, verify_finality_update, verify_update,
 };
-use sp1_helios_primitives::types::{ProofInputs, ProofOutputs};
+use sp1_helios_primitives::{
+    types::{ProofInputs, ProofOutputs},
+    verify_storage_slot_proofs,
+};
 use tree_hash::TreeHash;
 
 /// Program flow:
@@ -28,6 +31,7 @@ pub fn main() {
         mut store,
         genesis_root,
         forks,
+        contract_storage,
     } = serde_cbor::from_slice(&encoded_inputs).unwrap();
 
     // Get the initial sync committee hash. When verifying the proof, this is secured by the
@@ -64,7 +68,7 @@ pub fn main() {
         "New head is not greater than previous head."
     );
     assert!(
-        store.finalized_header.beacon().slot % 32 == 0,
+        store.finalized_header.beacon().slot.is_multiple_of(32),
         "New head is not a checkpoint slot."
     );
 
@@ -76,20 +80,31 @@ pub fn main() {
         None => B256::ZERO,
     };
     let head = store.finalized_header.beacon().slot;
+    let execution = store
+        .finalized_header
+        .execution()
+        .expect("Execution payload doesn't exist.");
+
+    let storage_slots = contract_storage
+        .iter()
+        .flat_map(|contract_storage| {
+            verify_storage_slot_proofs(*execution.state_root(), contract_storage)
+                .expect("Storage slot proofs failed to verify.")
+        })
+        .collect();
 
     let proof_outputs = ProofOutputs {
-        executionStateRoot: *store
-            .finalized_header
-            .execution()
-            .expect("Execution payload doesn't exist.")
-            .state_root(),
+        executionStateRoot: *execution.state_root(),
         newHeader: header,
+        executionBlockNumber: U256::from(*execution.block_number()),
         nextSyncCommitteeHash: next_sync_committee_hash,
         newHead: U256::from(head),
         prevHeader: prev_header,
         prevHead: U256::from(prev_head),
         syncCommitteeHash: sync_committee_hash,
         prevSyncCommitteeHash: prev_sync_committee_hash,
+        storageSlots: storage_slots,
     };
+
     sp1_zkvm::io::commit_slice(&proof_outputs.abi_encode());
 }

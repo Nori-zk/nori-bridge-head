@@ -1,5 +1,8 @@
-use alloy_primitives::B256;
+#![allow(clippy::too_many_arguments)]
+
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_sol_types::sol;
+use alloy_trie::TrieAccount;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_consensus_core::types::Forks;
 use helios_consensus_core::types::{FinalityUpdate, LightClientStore, Update};
@@ -13,15 +16,25 @@ pub struct ProofInputs {
     pub store: LightClientStore<MainnetConsensusSpec>,
     pub genesis_root: B256,
     pub forks: Forks,
+    pub contract_storage: Vec<ContractStorage>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct ExecutionStateProof {
-    #[serde(rename = "executionStateRoot")]
-    pub execution_state_root: B256,
-    #[serde(rename = "executionStateBranch")]
-    pub execution_state_branch: Vec<B256>,
-    pub gindex: String,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ContractStorage {
+    pub address: Address,
+    pub value: TrieAccount,
+    /// The proof that this contracts storage root is correct
+    pub mpt_proof: Vec<Bytes>,
+    /// The storage slots that we want to prove
+    pub storage_slots: Vec<StorageSlotWithProof>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct StorageSlotWithProof {
+    pub key: B256,
+    pub value: U256,
+    /// The proof that this storage slot is correct
+    pub mpt_proof: Vec<Bytes>,
 }
 
 sol! {
@@ -38,9 +51,61 @@ sol! {
         bytes32 newHeader;
         /// The execution state root from the execution payload of the new beacon block.
         bytes32 executionStateRoot;
+        /// The execution block number.
+        uint256 executionBlockNumber;
         /// The sync committee hash of the current period.
         bytes32 syncCommitteeHash;
         /// The sync committee hash of the next period.
         bytes32 nextSyncCommitteeHash;
+        /// Attested storage slots for the given block.
+        StorageSlot[] storageSlots;
+    }
+
+    struct StorageProofOutputs {
+        bytes32 stateRoot;
+        StorageSlot[] storageSlots;
+    }
+
+    struct StorageSlot {
+        bytes32 key;
+        bytes32 value;
+        address contractAddress;
+    }
+
+    #[allow(missing_docs)]
+    #[sol(rpc)]
+    contract SP1Helios {
+        bytes32 public immutable GENESIS_VALIDATORS_ROOT;
+        uint256 public immutable GENESIS_TIME;
+        uint256 public immutable SECONDS_PER_SLOT;
+        uint256 public immutable SLOTS_PER_PERIOD;
+        uint32 public immutable SOURCE_CHAIN_ID;
+        uint256 public head;
+        /// @notice The latest execution block number the light client has a finalized execution state root for.
+        uint256 public executionBlockNumber;
+        mapping(uint256 => bytes32) public syncCommittees;
+        mapping(uint256 => bytes32) public executionStateRoots;
+        mapping(uint256 => bytes32) public headers;
+        bytes32 public lightClientVkey;
+        bytes32 public storageSlotVkey;
+
+        address public verifier;
+
+        event HeadUpdate(uint256 indexed slot, bytes32 indexed root);
+        event SyncCommitteeUpdate(uint256 indexed period, bytes32 indexed root);
+
+        function update(
+            bytes calldata proof,
+            uint256 newHead,
+            bytes32 newHeader,
+            bytes32 executionStateRoot,
+            uint256 _executionBlockNumber,
+            bytes32 syncCommitteeHash,
+            bytes32 nextSyncCommitteeHash,
+            StorageSlot[] memory _storageSlots
+        ) external;
+
+        function getSyncCommitteePeriod(uint256 slot) internal view returns (uint256);
+        function getCurrentEpoch() internal view returns (uint256);
     }
 }
