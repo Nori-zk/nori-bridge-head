@@ -57,8 +57,15 @@ NORI_LOG=info
 
 ## Build Nori-Sp1-Helios-ZK
 
-1. Remove target directory in root `sudo rm -rf target && cargo clean` (to ensure a clean build)
-2. Build the ZK `cd scripts/ && cargo run --bin make && cd ..`
+Ensure you are using nightly if not:
+
+```sh
+rustup override set nightly
+cargo clean
+cargo build
+```
+
+1. ./nori/rebuild-zk.sh
 
 ## Execution
 
