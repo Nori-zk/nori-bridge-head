@@ -15,7 +15,7 @@ sol!(
     #[allow(missing_docs)]
     #[sol(rpc)]
     NoriStateBridge,
-    "src/contracts/node_modules/@nori-zk/nori-bridge-sdk/contracts/ethereum/artifacts/contracts/NoriTokenBridge.sol/NoriTokenBridge.json"
+    "src/contracts/node_modules/@nori-zk/ethereum-token-bridge/build/artifacts/contracts/NoriTokenBridge.sol/NoriTokenBridge.json"
 );
 
 pub fn get_source_contract_address() -> Result<Address> {

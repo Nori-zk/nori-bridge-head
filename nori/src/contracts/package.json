@@ -10,6 +10,6 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@nori-zk/nori-bridge-sdk": "https://github.com/Nori-zk/nori-bridge-sdk.git#FEATURES/token-bridge"
+    "@nori-zk/ethereum-token-bridge": "0.0.8"
   }
 }
