@@ -10,7 +10,7 @@ cd "$SCRIPT_DIR"
 cd ..
 
 # Step 4: Clear cache forcefully (due to files created with root permissions in target, because docker is used to compute the zk elf [impacts CI])
-sudo rm -rf target
+#sudo rm -rf target
 
 # Step 5: Build zk
 cd script

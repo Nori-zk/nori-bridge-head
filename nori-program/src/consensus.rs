@@ -346,6 +346,15 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         contract_storage,
     } = proof_inputs;
 
+    // 0. REMOVEME this is just here to modify the ZK program
+    if debug_print {
+        println!("Doing a dummy operation to make the zk program change");
+    }
+    let mut i = 0;
+    i += 1;
+    i += 1;
+    assert!(i == 2, "i is not 2");
+
     // 1. Calculate old store hash and assert equality
     if debug_print {
         println!("Hashing old store state and comparing with proof inputs store hash.");
