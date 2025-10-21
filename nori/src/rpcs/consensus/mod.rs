@@ -621,7 +621,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         // but leaving this for now.
         query_with_fallback(
             &self.principal_provider_url,
-            &Vec::new(),
+            &self.backup_providers_urls,
             |url| {
                 async move { Client::<S, R>::get_latest_finality_slot_and_store_hash(&url).await }
                     .boxed()
