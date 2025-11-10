@@ -6,10 +6,13 @@ use sp1_sdk::{HashableKey, ProverClient};
 fn main() {
     // Determine the current project directory (where Cargo.toml is located)
     let project_dir = env::current_dir().expect("Failed to get current directory");
+    println!("env::current_dir() = {:?}", std::env::current_dir());
     let cargo_dir = project_dir.parent().expect("Failed to find project root directory");
+    println!("cargo_dir = {:?}", cargo_dir);
 
     // Use the correct relative paths based on the project root
     let nori_program_path = cargo_dir.join("nori-program");
+    println!("nori_program_path = {:?}", nori_program_path);
     let nori_elf_dir = cargo_dir.join("nori-elf");
     let elf_path = nori_elf_dir.join("nori-sp1-helios-program");
 
