@@ -1,0 +1,438 @@
+name: Quality Gate (Rust)
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches:
+      - develop
+
+jobs:
+  quality-check:
+    name: quality-check
+    runs-on: [self-hosted, nori, standard]
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      # Enable/disable checks
+      CHECK_BUILD: true
+      CHECK_SCRIPTS: true
+      CHECK_AUDIT: true
+      CHECK_PRETTIER: true
+      CHECK_LINT: true
+      CHECK_TEST_UNIT: true
+
+      # Required vs optional (true = blocks merge)
+      REQUIRE_BUILD: true
+      REQUIRE_SCRIPTS: false
+      REQUIRE_AUDIT: true
+      REQUIRE_PRETTIER: false
+      REQUIRE_LINT: false
+      REQUIRE_TEST_UNIT: false
+
+      # Tool dependencies
+      PRETTIER_DEP: "rustfmt"
+      LINT_DEP: "clippy"
+
+      # Expected scripts (test types for Rust)
+      EXPECT_SCRIPTS: "unit,doc"
+
+    steps:
+      - name: Fix workspace permissions
+        run: sudo chown -R runner:runner $GITHUB_WORKSPACE
+
+      - name: Clean workspace
+        run: rm -rf $GITHUB_WORKSPACE/*
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libssl-dev
+
+      - name: Install cargo-audit
+        run: |
+          if ! command -v cargo-audit &> /dev/null; then
+            cargo install cargo-audit --locked
+          fi
+
+      - name: Run Quality Gate and Post to PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+
+            // Configuration
+            const config = {
+              checks: {
+                build: {
+                  enabled: process.env.CHECK_BUILD === 'true',
+                  required: process.env.REQUIRE_BUILD === 'true'
+                },
+                scripts: {
+                  enabled: process.env.CHECK_SCRIPTS === 'true',
+                  required: process.env.REQUIRE_SCRIPTS === 'true'
+                },
+                audit: {
+                  enabled: process.env.CHECK_AUDIT === 'true',
+                  required: process.env.REQUIRE_AUDIT === 'true'
+                },
+                prettier: {
+                  enabled: process.env.CHECK_PRETTIER === 'true',
+                  required: process.env.REQUIRE_PRETTIER === 'true'
+                },
+                lint: {
+                  enabled: process.env.CHECK_LINT === 'true',
+                  required: process.env.REQUIRE_LINT === 'true'
+                },
+                testUnit: {
+                  enabled: process.env.CHECK_TEST_UNIT === 'true',
+                  required: process.env.REQUIRE_TEST_UNIT === 'true'
+                }
+              },
+              prettierDep: process.env.PRETTIER_DEP || 'rustfmt',
+              lintDep: process.env.LINT_DEP || 'clippy',
+              expectScripts: (process.env.EXPECT_SCRIPTS || '').split(',').filter(Boolean)
+            };
+
+            // Results tracking
+            const results = {
+              timestamp: new Date().toISOString(),
+              passed: 0,
+              failed: 0,
+              skipped: 0,
+              hardFailures: [],
+              sections: []
+            };
+
+            // Helper functions
+            function addPass(name, message, required) {
+              results.passed++;
+              results.sections.push({
+                name,
+                status: 'PASS',
+                type: required ? 'REQUIRED' : 'Optional',
+                message
+              });
+              console.log(`✓ ${name}: PASS`);
+            }
+
+            function addFail(name, message, required, hint = '', details = '') {
+              results.failed++;
+              if (required) results.hardFailures.push(name);
+              results.sections.push({
+                name,
+                status: 'FAIL',
+                type: required ? 'REQUIRED' : 'Optional',
+                message,
+                hint,
+                details
+              });
+              console.log(`✗ ${name}: FAIL - ${message}`);
+            }
+
+            function addSkip(name, reason) {
+              results.skipped++;
+              results.sections.push({
+                name,
+                status: 'SKIPPED',
+                type: 'Info',
+                message: reason
+              });
+              console.log(`○ ${name}: SKIPPED - ${reason}`);
+            }
+
+            function run(cmd) {
+              try {
+                return {
+                  success: true,
+                  output: execSync(cmd, { encoding: 'utf8', stdio: 'pipe' })
+                };
+              } catch (error) {
+                return {
+                  success: false,
+                  output: error.stdout || error.stderr || error.message
+                };
+              }
+            }
+
+            function hasCargoToml() {
+              return fs.existsSync('Cargo.toml');
+            }
+
+            console.log('========================================');
+            console.log('Quality Gate Starting (Rust)');
+            console.log('========================================\n');
+
+            // Check scripts (test types)
+            if (config.checks.scripts.enabled) {
+              if (!hasCargoToml()) {
+                addSkip('Scripts Check', 'Cargo.toml not found');
+              } else {
+                const found = [];
+                const missing = [];
+                
+                config.expectScripts.forEach(script => {
+                  let exists = false;
+                  
+                  if (script === 'unit') {
+                    // Check for #[cfg(test)] or #[test] in src files
+                    const result = run('grep -r "#\\[cfg(test)\\]" src/ 2>/dev/null || grep -r "#\\[test\\]" src/ 2>/dev/null');
+                    exists = result.success && result.output.trim().length > 0;
+                  } else if (script === 'doc') {
+                    // Check for /// or //! doc comments with code examples
+                    const result = run('grep -r "```" src/ 2>/dev/null');
+                    exists = result.success && result.output.trim().length > 0;
+                  }
+                  
+                  (exists ? found : missing).push(script);
+                });
+
+                if (missing.length === 0) {
+                  addPass('Scripts Check', `All expected scripts present: ${found.join(', ')}`, config.checks.scripts.required);
+                } else {
+                  addFail(
+                    'Scripts Check',
+                    `Missing scripts: ${missing.join(', ')}`,
+                    config.checks.scripts.required,
+                    '',
+                    `Expected: ${config.expectScripts.join(', ')}\nFound: ${found.join(', ')}\nMissing: ${missing.join(', ')}`
+                  );
+                }
+              }
+            } else {
+              addSkip('Scripts Check', 'Disabled via CHECK_SCRIPTS=false');
+            }
+
+            // Check cargo audit
+            if (config.checks.audit.enabled) {
+              if (!hasCargoToml()) {
+                addSkip('cargo audit', 'Cargo.toml not found');
+              } else {
+                const result = run('cargo audit');
+                if (result.success) {
+                  addPass('cargo audit', 'No vulnerabilities found', config.checks.audit.required);
+                } else {
+                  addFail(
+                    'cargo audit',
+                    'Vulnerabilities found',
+                    config.checks.audit.required,
+                    'cargo audit fix',
+                    result.output
+                  );
+                }
+              }
+            } else {
+              addSkip('cargo audit', 'Disabled via CHECK_AUDIT=false');
+            }
+
+            // Check build
+            if (config.checks.build.enabled) {
+              if (!hasCargoToml()) {
+                addSkip('Build', 'Cargo.toml not found');
+              } else {
+                const result = run('cargo build --release');
+                if (result.success) {
+                  addPass('Build', 'Build completed successfully', config.checks.build.required);
+                } else {
+                  addFail(
+                    'Build',
+                    'Build failed',
+                    config.checks.build.required,
+                    'Check build errors',
+                    result.output.substring(0, 1000)
+                  );
+                }
+              }
+            } else {
+              addSkip('Build', 'Disabled via CHECK_BUILD=false');
+            }
+
+            // Check prettier (rustfmt)
+            if (config.checks.prettier.enabled) {
+              if (!hasCargoToml()) {
+                addSkip('Prettier', 'Cargo.toml not found');
+              } else {
+                const result = run('cargo fmt -- --check');
+                if (result.success) {
+                  addPass('Prettier', 'All files properly formatted', config.checks.prettier.required);
+                } else {
+                  const fileCount = result.output.split('\n').filter(l => l.includes('Diff in')).length;
+                  if (fileCount === 0) {
+                    addPass('Prettier', 'All files properly formatted', config.checks.prettier.required);
+                  } else {
+                    addFail(
+                      'Prettier',
+                      `${fileCount} file(s) need formatting`,
+                      config.checks.prettier.required,
+                      'cargo fmt'
+                    );
+                  }
+                }
+              }
+            } else {
+              addSkip('Prettier', 'Disabled via CHECK_PRETTIER=false');
+            }
+
+            // Check linter (clippy)
+            if (config.checks.lint.enabled) {
+              if (!hasCargoToml()) {
+                addSkip('Linter', 'Cargo.toml not found');
+              } else {
+                const result = run('cargo clippy -- -D warnings');
+                if (result.success) {
+                  addPass('Linter', 'No linting errors', config.checks.lint.required);
+                } else {
+                  const errorMatch = result.output.match(/error:.*\n/g);
+                  const warningMatch = result.output.match(/warning:.*\n/g);
+                  const errors = errorMatch ? errorMatch.length : 0;
+                  const warnings = warningMatch ? warningMatch.length : 0;
+                  
+                  if (errors === 0 && warnings === 0) {
+                    addPass('Linter', 'No linting errors', config.checks.lint.required);
+                  } else {
+                    addFail(
+                      'Linter',
+                      `${errors} error(s), ${warnings} warning(s)`,
+                      config.checks.lint.required,
+                      'cargo clippy --fix',
+                      result.output.substring(0, 1000)
+                    );
+                  }
+                }
+              }
+            } else {
+              addSkip('Linter', 'Disabled via CHECK_LINT=false');
+            }
+
+            // Check unit tests
+            if (config.checks.testUnit.enabled) {
+              if (!hasCargoToml()) {
+                addSkip('Unit Tests', 'Cargo.toml not found');
+              } else {
+                const result = run('cargo test --lib');
+                if (result.success) {
+                  addPass('Unit Tests', 'All unit tests passed', config.checks.testUnit.required);
+                } else {
+                  addFail(
+                    'Unit Tests',
+                    'Unit tests failed',
+                    config.checks.testUnit.required,
+                    'Check test output',
+                    result.output.substring(0, 1000)
+                  );
+                }
+              }
+            } else {
+              addSkip('Unit Tests', 'Disabled via CHECK_TEST_UNIT=false');
+            }
+
+            // Generate summary
+            console.log('\n========================================');
+            console.log('Quality Gate Complete');
+            console.log('========================================');
+            console.log(`Passed: ${results.passed}`);
+            console.log(`Failed: ${results.failed}`);
+            console.log(`Skipped: ${results.skipped}`);
+
+            // Build markdown report
+            let report = `# Quality Gate Report (Rust)\n\n**Generated:** ${new Date(results.timestamp).toLocaleString()}\n\n`;
+
+            if (results.hardFailures.length === 0) {
+              report += '## Overall Status: PASS\n\n';
+              if (results.failed > 0) {
+                report += `**Warnings:** ${results.failed} optional check(s) failed\n\n`;
+              }
+            } else {
+              report += '## Overall Status: FAIL\n\n**Required checks failed:**\n';
+              results.hardFailures.forEach(f => report += `- ${f}\n`);
+              report += '\n';
+            }
+
+            report += `---\n\n## Summary\n\n- **Passed:** ${results.passed}\n- **Failed:** ${results.failed}\n- **Skipped:** ${results.skipped}\n\n---\n\n## Detailed Results\n\n`;
+
+            results.sections.forEach(section => {
+              report += `### ${section.name} - ${section.status}\n\n**Type:** ${section.type}\n\n**Message:** ${section.message}\n\n`;
+              if (section.hint) report += `**Hint:** \`${section.hint}\`\n\n`;
+              if (section.details) report += `<details>\n<summary>Details</summary>\n\n\`\`\`\n${section.details}\n\`\`\`\n\n</details>\n\n`;
+            });
+
+            // Generate actionable insights
+            const insights = [];
+            results.sections.forEach(section => {
+              if (section.status === 'FAIL') {
+                if (section.name === 'Prettier' && section.message.includes('need formatting')) {
+                  insights.push(`Auto-fix formatting: \`cargo fmt\``);
+                } else if (section.name === 'cargo audit' && section.message.includes('Vulnerabilities')) {
+                  insights.push(`Fix vulnerabilities: \`cargo audit fix\` (manual review required)`);
+                } else if (section.name === 'Linter') {
+                  insights.push(`Auto-fix some lints: \`cargo clippy --fix\``);
+                } else if (section.name === 'Scripts Check' && section.message.includes('Missing')) {
+                  const missing = section.details?.match(/Missing: (.+)/)?.[1];
+                  if (missing?.includes('unit')) {
+                    insights.push(`Add unit tests: Create \`#[cfg(test)]\` modules in your source files`);
+                  }
+                  if (missing?.includes('doc')) {
+                    insights.push(`Add doc tests: Include code examples in \`///\` doc comments with \`\`\`rust\` blocks`);
+                  }
+                }
+              }
+            });
+
+            if (insights.length > 0) {
+              report += `---\n\n## Actionable Insights\n\n`;
+              insights.forEach(insight => report += `- ${insight}\n`);
+              report += '\n';
+            }
+
+            report += `---\n\n## Configuration\n\nQuality gate configured via environment variables.\n\n`;
+            report += `| Check | Enabled | Required |\n|-------|---------|----------|\n`;
+            report += `| Build | ${config.checks.build.enabled} | ${config.checks.build.required} |\n`;
+            report += `| Scripts | ${config.checks.scripts.enabled} | ${config.checks.scripts.required} |\n`;
+            report += `| cargo audit | ${config.checks.audit.enabled} | ${config.checks.audit.required} |\n`;
+            report += `| Prettier | ${config.checks.prettier.enabled} | ${config.checks.prettier.required} (dep: ${config.prettierDep}) |\n`;
+            report += `| Linter | ${config.checks.lint.enabled} | ${config.checks.lint.required} (dep: ${config.lintDep}) |\n`;
+            report += `| Unit Tests | ${config.checks.testUnit.enabled} | ${config.checks.testUnit.required} |\n\n`;
+
+            // Post comment only if this is a PR
+            if (context.issue.number) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report
+              });
+              console.log('Posted quality gate comment to PR');
+            } else {
+              // Write to GitHub Actions Job Summary for push events
+              const fs = require('fs');
+              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, report);
+              console.log('Quality gate report written to job summary');
+            }
+
+            // Fail if required checks failed
+            if (results.hardFailures.length > 0) {
+              console.log('\nOVERALL: FAIL');
+              console.log('Required checks failed:', results.hardFailures.join(', '));
+              process.exit(1);
+            } else {
+              console.log('\nOVERALL: PASS');
+            }
