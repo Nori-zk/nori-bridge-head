@@ -1,2 +1,3 @@
-# Global owners - applies to everything in the repo unless overridden
+# Code owners for Nori infrastructure
+# These users have full access and can approve/merge PRs
 * @jk89 @Kirol54
