@@ -412,20 +412,23 @@ jobs:
             report += `| Linter | ${config.checks.lint.enabled} | ${config.checks.lint.required} (dep: ${config.lintDep}) |\n`;
             report += `| Unit Tests | ${config.checks.testUnit.enabled} | ${config.checks.testUnit.required} |\n\n`;
 
-            // Post comment only if this is a PR
+            // Always write to GitHub Actions Job Summary (visible in the Actions tab)
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, report);
+            console.log('Quality gate report written to job summary');
+            
+            // Additionally, try to post as PR comment if this is a PR
             if (context.issue.number) {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: report
-              });
-              console.log('Posted quality gate comment to PR');
-            } else {
-              // Write to GitHub Actions Job Summary for push events
-              const fs = require('fs');
-              fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, report);
-              console.log('Quality gate report written to job summary');
+              try {
+                await github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: report
+                });
+                console.log('Posted quality gate comment to PR');
+              } catch (error) {
+                console.log('Failed to post PR comment (likely fork PR with read-only token):', error.message);
+              }
             }
 
             // Fail if required checks failed
