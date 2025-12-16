@@ -1,5 +1,5 @@
 [package]
-version = "9.0.2"
+version = "9.0.3"
 name = "nori"
 edition.workspace = true
 license.workspace = true
