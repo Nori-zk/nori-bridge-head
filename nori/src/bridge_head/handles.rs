@@ -30,6 +30,7 @@ impl CommandHandle {
         Self { command_tx }
     }
 
+    // TODO this should probably panic_more and not just supress this
     pub async fn stage_transition_proof(&self, proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>) {
         let _ = self.command_tx.send(Command::StageTransitionProof(Box::new(proof_inputs_with_window))).await;
     }
