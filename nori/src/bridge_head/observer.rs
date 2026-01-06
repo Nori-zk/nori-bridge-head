@@ -3,7 +3,7 @@ use super::{
     handles::CommandHandle,
     notice_messages::TransitionNoticeBridgeHeadMessage,
 };
-use crate::utils::{handle_nori_proof, handle_nori_proof_message};
+use crate::{bridge_head::checkpoint::save_nb_checkpoint, utils::{handle_nori_proof, handle_nori_proof_message}};
 use alloy_primitives::FixedBytes;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -103,6 +103,9 @@ impl ExampleBridgeHeadEventObserver {
         // Update our state and the bridge heads state
         self.current_slot = slot;
         self.store_hash = store_hash;
+        // Save the checkpoint
+        save_nb_checkpoint(self.current_slot, self.store_hash);
+
         // Advance the bridge head
         let _ = self.bridge_head_handle.advance(slot, store_hash).await;
     }

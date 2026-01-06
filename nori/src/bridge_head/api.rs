@@ -1,7 +1,5 @@
 use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
-use super::finality_change_detector::{
-    start_validated_consensus_finality_change_detector,
-};
+use super::finality_change_detector::start_validated_consensus_finality_change_detector;
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension,
@@ -14,6 +12,7 @@ use super::validate::validate_env;
 use crate::bridge_head::finality_change_detector::FinalityChangeDetectorUpdate;
 use crate::rpcs::consensus::ConsensusHttpProxy;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
+use alloy::signers::k256::elliptic_curve::bigint::Zero;
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
@@ -21,7 +20,7 @@ use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
 use log::{debug, error, info};
 use nori_sp1_helios_primitives::types::{
-    DualProofInputsWithWindow, ProofInputsWithWindow, ProofOutputs, VerifiedContractStorageSlot
+    DualProofInputsWithWindow, ProofInputsWithWindow, ProofOutputs, VerifiedContractStorageSlot,
 };
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
@@ -100,7 +99,7 @@ pub struct BridgeHead {
     /// Current finalized slot head
     current_slot: u64,
     /// Latest beacon slot when bridge head inited
-    init_latest_beacon_slot: u64,
+    // init_latest_beacon_slot: u64,
     /// Target slot to advance to
     next_slot: u64,
     /// Unique identifier for prover jobs
@@ -109,11 +108,11 @@ pub struct BridgeHead {
     prover_jobs: HashMap<u64, ProverJob>,
     /// Channel for receiving bridge head commands
     command_rx: Option<mpsc::Receiver<Command>>,
-    /// Chanel for receiving consensus finality transition events
-    finality_output_rx: Option<mpsc::Receiver<DualProofInputsWithWindow<MainnetConsensusSpec>>>,
-    /// Chanel for informing consensus finality change detector above bridge head advances
-    finality_advance_input_tx: Option<mpsc::Sender<FinalityChangeDetectorUpdate>>,
-    /// Chanel for informing consensus finality change detector above bridge head stage event
+    /// Channel for receiving consensus finality transition events
+    // finality_output_rx: Option<mpsc::Receiver<DualProofInputsWithWindow<MainnetConsensusSpec>>>,
+    /// Channel for informing consensus finality change detector above bridge head advances
+    // finality_advance_input_tx: Option<mpsc::Sender<FinalityChangeDetectorUpdate>>,
+    /// Channel for informing consensus finality change detector above bridge head stage event
     finality_stage_input_tx: Option<mpsc::Sender<FinalityChangeDetectorUpdate>>,
     /// Channel for receiving job results
     job_rx: Option<mpsc::UnboundedReceiver<Result<ProverJobOutput, ProverJobError>>>,
@@ -134,28 +133,10 @@ impl BridgeHead {
             "NORI_TOKEN_BRIDGE_ADDRESS",
         ]);
 
-        // Initialise slot head / commitee vars
-        let current_slot;
-        let store_hash;
-
-        // Start procedure
-        if nb_checkpoint_exists() {
-            // Warm start procedure
-            info!("Loading nori slot checkpoint from file.");
-            debug!("Debug printing is enabled.");
-            let nb_checkpoint = load_nb_checkpoint().unwrap();
-            current_slot = nb_checkpoint.slot;
-            store_hash = nb_checkpoint.store_hash;
-        } else {
-            // Cold start procedure
-            // FIXME we should be going from a trusted checkpoint TODO
-            info!("Resorting to cold start procedure.");
-            (current_slot, store_hash) =
-                ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env()
-                    .get_latest_finality_slot_and_store_hash()
-                    .await
-                    .unwrap();
-        }
+        // Initialise slot head to dummy values (will be set to real values after run is invoked)
+        let current_slot = 0u64;
+        // let init_latest_beacon_slot = 0u64;
+        let store_hash = FixedBytes::<32>::ZERO;
 
         // Setup command mpsc
         let (command_tx, command_rx) = mpsc::channel(2); // FIXME this isnt the best choice of buffer size. It makes assumptions that the sender knows what they are doing.
@@ -169,28 +150,18 @@ impl BridgeHead {
         // Create events broadcast chanel
         let (event_tx, _) = broadcast::channel(16);
 
-        // Setup polling client for finality change detection
-        info!("Starting helios polling client.");
-        let (init_latest_beacon_slot, finality_output_rx, finality_advance_input_tx, finality_stage_input_tx) =
-            start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(
-                current_slot,
-                store_hash,
-                None, // FIXME this needs to come from persistant state aka from the checkpoint file
-            )
-            .await;
-
         (
             input_command_handle,
             BridgeHead {
                 current_slot,
-                init_latest_beacon_slot,
-                next_slot: init_latest_beacon_slot,
+                // init_latest_beacon_slot,
+                next_slot: 0, // init_latest_beacon_slot,
                 job_id: 0,
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
-                finality_output_rx: Some(finality_output_rx),
-                finality_advance_input_tx: Some(finality_advance_input_tx),
-                finality_stage_input_tx: Some(finality_stage_input_tx),
+                //finality_output_rx: None,        // Some(finality_output_rx),
+                //finality_advance_input_tx: None, // Some(finality_advance_input_tx),
+                finality_stage_input_tx: None,   //Some(finality_stage_input_tx),
                 job_rx: Some(job_rx),
                 job_tx,
                 event_tx,
@@ -415,10 +386,15 @@ impl BridgeHead {
         });
 
         // Here we should tell the finality_change_detector that we have a job inflight and its expected_output_slot
-        // So it can begin preparing proof inputs from this input slot as well.. 
+        // So it can begin preparing proof inputs from this input slot as well..
         // Borrow the transmitter
         if let Some(finality_stage_input_tx) = &self.finality_stage_input_tx {
-            let _ = finality_stage_input_tx.send(FinalityChangeDetectorUpdate {slot: expected_output_slot, store_hash: expected_output_store_hash}).await;
+            let _ = finality_stage_input_tx
+                .send(FinalityChangeDetectorUpdate {
+                    slot: expected_output_slot,
+                    store_hash: expected_output_store_hash,
+                })
+                .await;
         }
 
         // Notify of a job created
@@ -444,11 +420,8 @@ impl BridgeHead {
         // Update current head
         self.current_slot = slot;
 
-        // Update the store has
+        // Update the store hash
         self.store_hash = store_hash;
-
-        // Save the checkpoint
-        save_nb_checkpoint(self.current_slot, self.store_hash);
 
         // Notify of head advanced
         let _ = self
@@ -466,7 +439,8 @@ impl BridgeHead {
         // FIXME we should do something with next here!
         // Notify of transition
 
-        let next_window_proof_inputs_with_window = event.next_window.as_ref().map(|b| Box::new(b.clone()));
+        let next_window_proof_inputs_with_window =
+            event.next_window.as_ref().map(|b| Box::new(b.clone()));
 
         let _ = self
             .trigger_listener_with_notice(
@@ -475,8 +449,10 @@ impl BridgeHead {
                         block_number: event.current_window.expected_output_block_number,
                         slot: event.current_window.expected_output_slot,
                         input_slot: event.current_window.input_slot,
-                        current_window_proof_inputs_with_window: Box::new(event.current_window.clone()),
-                        next_window_proof_inputs_with_window
+                        current_window_proof_inputs_with_window: Box::new(
+                            event.current_window.clone(),
+                        ),
+                        next_window_proof_inputs_with_window,
                     },
                 ),
             )
@@ -491,11 +467,29 @@ impl BridgeHead {
 
     /// Event loop
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self, current_slot: u64, store_hash: FixedBytes<32>, pipeline_inflight_next_expected_output: Option<FinalityChangeDetectorUpdate>) {
+        // Setup polling client for finality change detection
+        info!("Starting helios polling client.");
+        let (
+            init_latest_beacon_slot,
+            mut finality_output_rx,
+            finality_advance_input_tx,
+            finality_stage_input_tx,
+        ) = start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(
+            current_slot,
+            store_hash,
+            pipeline_inflight_next_expected_output, // FIXME this needs to come from persistant state aka from the checkpoint file (note it can do now because its given from the outside)
+        )
+        .await;
+        // Move finality_stage_input_tx to self
+        self.finality_stage_input_tx = Some(finality_stage_input_tx);
+        // Copy init_latest_beacon_slot onto self
+        self.next_slot = init_latest_beacon_slot;
+
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::Started(
                 TransitionNoticeExtensionBridgeHeadStarted {
-                    latest_beacon_slot: self.init_latest_beacon_slot,
+                    latest_beacon_slot: init_latest_beacon_slot,
                     current_slot: self.current_slot,
                     store_hash: self.store_hash,
                 },
@@ -504,8 +498,8 @@ impl BridgeHead {
 
         info!("Event loop started.");
 
-        let mut finality_output_rx = self.finality_output_rx.take().unwrap();
-        let finality_advance_input_tx = self.finality_advance_input_tx.take().unwrap();
+        // let mut finality_output_rx = self.finality_output_rx.take().unwrap();
+        //let finality_advance_input_tx = self.finality_advance_input_tx.take().unwrap();
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
 
