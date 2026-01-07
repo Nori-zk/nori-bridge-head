@@ -68,6 +68,7 @@ pub struct ExampleBridgeHeadEventObserver {
     /// Handle to trigger bridge head advancement
     bridge_head_handle: CommandHandle,
     /// Tracks the current slot for beacon finality.
+    #[deprecated(note = "This field is not used in any decision logic - only tracking metadata. May be redundant.")]
     latest_beacon_finality_slot: u64,
     /// Indicates whether the bridge head has fired its started event.
     started: bool,
