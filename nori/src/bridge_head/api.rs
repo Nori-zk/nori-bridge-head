@@ -486,6 +486,12 @@ impl BridgeHead {
         // Copy init_latest_beacon_slot onto self
         self.next_slot = init_latest_beacon_slot;
 
+        // let mut finality_output_rx = self.finality_output_rx.take().unwrap();
+        //let finality_advance_input_tx = self.finality_advance_input_tx.take().unwrap();
+        // This is kinda pointless why are we initing them in the constructor polluting it if we just take ownership of them here why not just define them here!
+        let mut command_rx = self.command_rx.take().unwrap();
+        let mut job_rx = self.job_rx.take().unwrap();
+
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::Started(
                 TransitionNoticeExtensionBridgeHeadStarted {
@@ -497,11 +503,6 @@ impl BridgeHead {
             .await;
 
         info!("Event loop started.");
-
-        // let mut finality_output_rx = self.finality_output_rx.take().unwrap();
-        //let finality_advance_input_tx = self.finality_advance_input_tx.take().unwrap();
-        let mut command_rx = self.command_rx.take().unwrap();
-        let mut job_rx = self.job_rx.take().unwrap();
 
         loop {
             tokio::select! {
