@@ -31,11 +31,13 @@ impl CommandHandle {
     }
 
     // TODO this should probably panic_more and not just supress this
+    // FIXME this REALLY NEEDS TO BE A PROPER RESULT
     pub async fn stage_transition_proof(&self, proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>) {
         // FIXME let _ panic?
         let _ = self.command_tx.send(Command::StageTransitionProof(Box::new(proof_inputs_with_window))).await;
     }
 
+    // FIXME this REALLY NEEDS TO BE A PROPER RESULT
     pub async fn advance(&self, slot: u64, store_hash: FixedBytes<32>) {
         // FIXME let _ panic?
         let _ = self
