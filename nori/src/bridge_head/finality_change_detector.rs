@@ -162,6 +162,7 @@ where
                     }
                     Err(e) => {
                         debug!("Dual window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
+                        // FIXME let _ panic_more?
                         let _ = result_tx.send(Err(e)).await;
                         continue;
                     }
@@ -174,6 +175,7 @@ where
                     }
                     Err(e) => {
                         debug!("Dual window proof input calculation. Error in NEXT window proof input validation:\n{}", e);
+                        // FIXME let _ panic_more?
                         let _ = result_tx.send(Err(e)).await;
                         continue;
                     }
@@ -195,6 +197,7 @@ where
                     }
                     Err(e) => {
                         debug!("Solo current window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
+                        // FIXME let _ panic_more?
                         let _ = result_tx.send(Err(e)).await;
                         continue;
                     }
@@ -530,6 +533,7 @@ where
             }
         }
         // Finality change detector broke
+        // FIXME use panic_more utility
         error!("Finality change detector broke.");
         process::exit(1);
     });

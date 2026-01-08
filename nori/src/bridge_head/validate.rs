@@ -5,6 +5,7 @@ use log::error;
 pub fn validate_env(env_vars: &[&str]) {
     for var_name in env_vars {
         if std::env::var(var_name).is_err() {
+            // FIXME panic_more
             error!(
                 "Critical boot error: Missing {} environment variable",
                 var_name

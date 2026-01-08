@@ -179,6 +179,7 @@ impl BridgeHead {
 
     //  Emit proofs
     async fn trigger_listener_with_proof(&mut self, payload: ProofMessage) -> Result<()> {
+        // FIXME let _
         let _ = self.event_tx.send(BridgeHeadEvent::ProofMessage(payload));
         Ok(())
     }
@@ -191,6 +192,7 @@ impl BridgeHead {
         let now = Utc::now();
         let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
         let notice_message = extension.into_message(iso_string);
+        // FIXME let _
         let _ = self
             .event_tx
             .send(BridgeHeadEvent::NoticeMessage(notice_message));
@@ -260,6 +262,7 @@ impl BridgeHead {
             .collect();
 
         // Notify of a successful job
+        // FIXME let _ If we want to panic we should do it now to ensure rabbit doesn't miss a message??
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobSucceeded(
                 TransitionNoticeExtensionBridgeHeadJobSucceeded {
@@ -277,7 +280,7 @@ impl BridgeHead {
             ))
             .await;
 
-        // Emit proof
+        // FIXME let _ Emit proof
         let _ = self
             .trigger_listener_with_proof(ProofMessage {
                 input_slot,
@@ -317,6 +320,7 @@ impl BridgeHead {
         error!("{}", message);
 
         // Notify of a job failure
+        // FIXME let _
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobFailed(
                 TransitionNoticeExtensionBridgeHeadJobFailed {
@@ -389,6 +393,7 @@ impl BridgeHead {
         // So it can begin preparing proof inputs from this input slot as well..
         // Borrow the transmitter
         if let Some(finality_stage_input_tx) = &self.finality_stage_input_tx {
+            // FIXME let _
             let _ = finality_stage_input_tx
                 .send(FinalityChangeDetectorUpdate {
                     slot: expected_output_slot,
@@ -398,6 +403,7 @@ impl BridgeHead {
         }
 
         // Notify of a job created
+        // FIXME let _
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobCreated(
                 TransitionNoticeExtensionBridgeHeadJobCreated {
@@ -424,6 +430,7 @@ impl BridgeHead {
         self.store_hash = store_hash;
 
         // Notify of head advanced
+        // FIXME let _
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::HeadAdvanced(
                 TransitionNoticeExtensionBridgeHeadAdvanced { slot, store_hash },
@@ -442,6 +449,7 @@ impl BridgeHead {
         let next_window_proof_inputs_with_window =
             event.next_window.as_ref().map(|b| Box::new(b.clone()));
 
+        // FIXME let _
         let _ = self
             .trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
@@ -480,7 +488,7 @@ impl BridgeHead {
             store_hash,
             pipeline_inflight_next_expected_output, // FIXME this needs to come from persistant state aka from the checkpoint file (note it can do now because its given from the outside)
         )
-        .await;
+        .await; // FIXME check panic_more status of this! Its not a result.
         // Move finality_stage_input_tx to self
         self.finality_stage_input_tx = Some(finality_stage_input_tx);
         // Copy init_latest_beacon_slot onto self
@@ -492,6 +500,7 @@ impl BridgeHead {
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
 
+        // FIXME let _
         let _ = self
             .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::Started(
                 TransitionNoticeExtensionBridgeHeadStarted {
@@ -508,19 +517,23 @@ impl BridgeHead {
             tokio::select! {
                 // Read the finality reciever for finality change events
                 Some(event) = finality_output_rx.recv() => {
+                    // FIXME let _ (is this critical if we miss one event?)
                     let _ = self.on_beacon_finality_change(event).await;
                 }
                 // Read the command receiver for input commands
                 Some(cmd) = command_rx.recv() => {
                     match cmd {
                         Command::StageTransitionProof(message) => {
+                            // FIXME let _ probably panic_more here
                             let _ = self.stage_transition_proof(*message).await;
                         }
                         Command::Advance(message) => {
                             // Notify finality change detector of a change to the head position
                             // message.slot is the output slot which was finalised
+                            // FIXME let _
                             let _ = finality_advance_input_tx.send(FinalityChangeDetectorUpdate {slot: message.slot, store_hash: message.store_hash}).await;
                             // Deal with advance invocation
+                            // FIXME let _
                             let _ = self.advance(message.slot, message.store_hash).await;
                         }
                     }
@@ -534,11 +547,13 @@ impl BridgeHead {
                                 result_data.proof(),
                             ).await;
                             if let Err(err) = handle_prover_success_result {
+                                // FIXME panic_more should be used as we are in a thread
                                 error!("Error handlng prover success: {:?}", err);
                                 process::exit(1);
                             }
                         }
                         Err(err) => {
+                            // FIXME let _
                             let _ = self.handle_prover_failure(&err).await; // Perhaps kill the program
                         }
                     }

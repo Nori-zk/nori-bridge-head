@@ -108,6 +108,7 @@ impl ExampleBridgeHeadEventObserver {
         save_nb_checkpoint(self.current_slot, self.store_hash);
 
         // Advance the bridge head
+        // FIXME let _ panic_more?
         let _ = self.bridge_head_handle.advance(slot, store_hash).await;
     }
 }
@@ -118,6 +119,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         println!("PROOF| {}", proof_data.input_slot);
 
         info!("Saving Nori sp1 proof.");
+        // FIXME let _ panic_more?
         let _ = handle_nori_proof(&proof_data.proof, proof_data.input_slot).await;
         let _ = handle_nori_proof_message(&proof_data).await;
 
@@ -141,6 +143,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             if next_window.input_slot == proof_data.output_slot {
                 info!("VIABLE: Next window proof inputs ARE contiguous, proof data output slot '{}', next window input slot: '{}', staging the next proof immediately.", proof_data.output_slot, next_window.input_slot);
                 // The windows are contiguous so we can immediately start on the next proof
+                // FIXME let _ panic_more?
                 let _ = self
                     .bridge_head_handle
                     .stage_transition_proof(next_window.clone())
@@ -213,11 +216,13 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     if let Some(proof_input_with_window) =
                         self.latest_current_window_validated_proof_input.clone()
                     {
+                        // FIXME let _ panic_more?
                         let _ = self
                             .bridge_head_handle
                             .stage_transition_proof(proof_input_with_window)
                             .await;
                     } else {
+                        // FIXME panic_more
                         error!("Tried to redo a job but latest_validated_proof_input_with_window was not defined");
                         process::exit(1);
                     }
@@ -243,6 +248,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     .cloned();
 
                 if self.stage_transition_proof {
+                    // FIXME let _ panic_more?
                     let _ = self
                         .bridge_head_handle
                         .stage_transition_proof(
