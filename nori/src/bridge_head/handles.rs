@@ -1,7 +1,7 @@
 use alloy_primitives::FixedBytes;
-use helios_consensus_core::{consensus_spec::MainnetConsensusSpec};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use nori_sp1_helios_primitives::types::ProofInputsWithWindow;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{error::SendError, Sender};
 
 /// Event loop commands
 
@@ -9,11 +9,6 @@ pub struct AdvanceMessage {
     pub slot: u64,
     pub store_hash: FixedBytes<32>,
 }
-
-/*pub struct StageTransitionProofMessage {
-    pub slot: u64,
-    pub proof_inputs_with_window: Box<ProofInputsWithWindow<MainnetConsensusSpec>>,
-}*/
 
 pub enum Command {
     StageTransitionProof(Box<ProofInputsWithWindow<MainnetConsensusSpec>>),
@@ -30,22 +25,26 @@ impl CommandHandle {
         Self { command_tx }
     }
 
-    // TODO this should probably panic_more and not just supress this
-    // FIXME this REALLY NEEDS TO BE A PROPER RESULT
-    pub async fn stage_transition_proof(&self, proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>) {
-        // FIXME let _ panic?
-        let _ = self.command_tx.send(Command::StageTransitionProof(Box::new(proof_inputs_with_window))).await;
+    pub async fn stage_transition_proof(
+        &self,
+        proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>,
+    ) -> Result<(), SendError<Command>> {
+        return self
+            .command_tx
+            .send(Command::StageTransitionProof(Box::new(
+                proof_inputs_with_window,
+            )))
+            .await;
     }
 
-    // FIXME this REALLY NEEDS TO BE A PROPER RESULT
-    pub async fn advance(&self, slot: u64, store_hash: FixedBytes<32>) {
-        // FIXME let _ panic?
-        let _ = self
+    pub async fn advance(
+        &self,
+        slot: u64,
+        store_hash: FixedBytes<32>,
+    ) -> Result<(), SendError<Command>> {
+        return self
             .command_tx
-            .send(Command::Advance(AdvanceMessage {
-                slot,
-                store_hash
-            }))
+            .send(Command::Advance(AdvanceMessage { slot, store_hash }))
             .await;
     }
 }
