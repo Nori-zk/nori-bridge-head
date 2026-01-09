@@ -1,4 +1,3 @@
-use super::checkpoint::{load_nb_checkpoint, nb_checkpoint_exists, save_nb_checkpoint};
 use super::finality_change_detector::start_validated_consensus_finality_change_detector;
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
@@ -10,7 +9,6 @@ use super::notice_messages::{
 };
 use super::validate::validate_env;
 use crate::bridge_head::finality_change_detector::FinalityChangeDetectorUpdate;
-use crate::rpcs::consensus::ConsensusHttpProxy;
 use crate::sp1_prover::{finality_update_job, ProverJobOutput};
 use alloy::signers::k256::elliptic_curve::bigint::Zero;
 use alloy_primitives::FixedBytes;
@@ -18,7 +16,7 @@ use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
-use log::{debug, error, info};
+use log::{error, info};
 use nori_sp1_helios_primitives::types::{
     DualProofInputsWithWindow, ProofInputsWithWindow, ProofOutputs, VerifiedContractStorageSlot,
 };
@@ -26,8 +24,7 @@ use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
 use std::error::Error as StdError;
-use std::{fmt, process};
-use tokio::sync::broadcast;
+use std::fmt;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -119,13 +116,13 @@ pub struct BridgeHead {
     /// Channel for sending job results
     job_tx: mpsc::UnboundedSender<Result<ProverJobOutput, ProverJobError>>,
     /// Channel for emitting proof and notice events
-    event_tx: broadcast::Sender<BridgeHeadEvent>,
+    event_tx: mpsc::Sender<BridgeHeadEvent>,
     /// FixedBytes representing the store hash
     store_hash: FixedBytes<32>,
 }
 
 impl BridgeHead {
-    pub async fn new() -> (CommandHandle, Self) {
+    pub async fn new() -> (CommandHandle, mpsc::Receiver<BridgeHeadEvent>, Self) {
         validate_env(&[
             "NORI_SOURCE_EXECUTION_HTTP_RPCS",
             "NORI_SOURCE_CONSENSUS_HTTP_RPCS",
@@ -147,11 +144,12 @@ impl BridgeHead {
         // Create job mpsc
         let (job_tx, job_rx) = mpsc::unbounded_channel();
 
-        // Create events broadcast chanel
-        let (event_tx, _) = broadcast::channel(16);
+        // Create bounded mpsc channel for emitting events to observer/strategy with backpressure
+        let (event_tx, event_rx) = mpsc::channel(16);
 
         (
             input_command_handle,
+            event_rx,
             BridgeHead {
                 current_slot,
                 // init_latest_beacon_slot,
@@ -172,31 +170,23 @@ impl BridgeHead {
 
     /// Event dispatchers
 
-    // Create event job receiver
-    pub fn event_receiver(&self) -> broadcast::Receiver<BridgeHeadEvent> {
-        self.event_tx.subscribe()
-    }
-
     //  Emit proofs
-    async fn trigger_listener_with_proof(&mut self, payload: ProofMessage) -> Result<()> {
-        // FIXME let _
-        let _ = self.event_tx.send(BridgeHeadEvent::ProofMessage(payload));
-        Ok(())
+    async fn trigger_listener_with_proof(
+        &mut self,
+        payload: ProofMessage,
+    ) -> Result<(), mpsc::error::SendError<BridgeHeadEvent>> {
+        self.event_tx.send(BridgeHeadEvent::ProofMessage(payload)).await
     }
 
     // Emit notices
     async fn trigger_listener_with_notice(
         &mut self,
         extension: TransitionNoticeBridgeHeadMessageExtension,
-    ) -> Result<()> {
+    ) -> Result<(), mpsc::error::SendError<BridgeHeadEvent>> {
         let now = Utc::now();
         let iso_string = now.to_rfc3339_opts(SecondsFormat::Millis, true);
         let notice_message = extension.into_message(iso_string);
-        // FIXME let _
-        let _ = self
-            .event_tx
-            .send(BridgeHeadEvent::NoticeMessage(notice_message));
-        Ok(())
+        self.event_tx.send(BridgeHeadEvent::NoticeMessage(notice_message)).await
     }
 
     /// Jobs Handlers
@@ -262,9 +252,7 @@ impl BridgeHead {
             .collect();
 
         // Notify of a successful job
-        // FIXME let _ If we want to panic we should do it now to ensure rabbit doesn't miss a message??
-        let _ = self
-            .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobSucceeded(
+        self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobSucceeded(
                 TransitionNoticeExtensionBridgeHeadJobSucceeded {
                     input_slot,
                     input_block_number: inputs_with_window.input_block_number,
@@ -278,11 +266,10 @@ impl BridgeHead {
                     contract_storage_slots: contract_storage_slots.clone(),
                 },
             ))
-            .await;
+            .await?;
 
-        // FIXME let _ Emit proof
-        let _ = self
-            .trigger_listener_with_proof(ProofMessage {
+        // Emit proof
+        self.trigger_listener_with_proof(ProofMessage {
                 input_slot,
                 input_block_number: inputs_with_window.input_block_number,
                 input_store_hash,
@@ -294,13 +281,16 @@ impl BridgeHead {
                 contract_storage_slots,
                 elapsed_sec,
             })
-            .await;
+            .await?;
 
         Ok(())
     }
 
     // Handle prover job failures
-    async fn handle_prover_failure(&mut self, err: &ProverJobError) {
+    async fn handle_prover_failure(
+        &mut self,
+        err: &ProverJobError,
+    ) -> Result<(), mpsc::error::SendError<BridgeHeadEvent>> {
         // Extract job details and remove job
         let (inputs_with_window, n_jobs, elapsed_sec) = {
             let job = self.prover_jobs.get(&err.job_id).unwrap();
@@ -320,9 +310,7 @@ impl BridgeHead {
         error!("{}", message);
 
         // Notify of a job failure
-        // FIXME let _
-        let _ = self
-            .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobFailed(
+        self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobFailed(
                 TransitionNoticeExtensionBridgeHeadJobFailed {
                     input_slot: inputs_with_window.input_slot,
                     input_block_number: inputs_with_window.input_block_number,
@@ -335,14 +323,14 @@ impl BridgeHead {
                     n_job_in_buffer: n_jobs as u64,
                 },
             ))
-            .await;
+            .await
     }
 
     // Create prover job
     async fn stage_transition_proof(
         &mut self,
         proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>,
-    ) {
+    ) -> Result<()> {
         // Get job id
         self.job_id += 1;
         let job_id: u64 = self.job_id;
@@ -391,21 +379,17 @@ impl BridgeHead {
 
         // Here we should tell the finality_change_detector that we have a job inflight and its expected_output_slot
         // So it can begin preparing proof inputs from this input slot as well..
-        // Borrow the transmitter
-        if let Some(finality_stage_input_tx) = &self.finality_stage_input_tx {
-            // FIXME let _
-            let _ = finality_stage_input_tx
-                .send(FinalityChangeDetectorUpdate {
-                    slot: expected_output_slot,
-                    store_hash: expected_output_store_hash,
-                })
-                .await;
-        }
+        self.finality_stage_input_tx
+            .as_ref()
+            .unwrap()
+            .send(FinalityChangeDetectorUpdate {
+                slot: expected_output_slot,
+                store_hash: expected_output_store_hash,
+            })
+            .await?;
 
         // Notify of a job created
-        // FIXME let _
-        let _ = self
-            .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobCreated(
+        self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobCreated(
                 TransitionNoticeExtensionBridgeHeadJobCreated {
                     input_slot: self.current_slot,
                     input_block_number: proof_inputs_with_window.input_block_number,
@@ -416,13 +400,19 @@ impl BridgeHead {
                     input_store_hash: store_hash,
                 },
             ))
-            .await;
+            .await?;
+
+        Ok(())
     }
 
     /// Commands
 
     // Advance the bridge head
-    async fn advance(&mut self, slot: u64, store_hash: FixedBytes<32>) {
+    async fn advance(
+        &mut self,
+        slot: u64,
+        store_hash: FixedBytes<32>,
+    ) -> Result<(), mpsc::error::SendError<BridgeHeadEvent>> {
         // Update current head
         self.current_slot = slot;
 
@@ -430,28 +420,26 @@ impl BridgeHead {
         self.store_hash = store_hash;
 
         // Notify of head advanced
-        // FIXME let _
-        let _ = self
-            .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::HeadAdvanced(
+        self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::HeadAdvanced(
                 TransitionNoticeExtensionBridgeHeadAdvanced { slot, store_hash },
             ))
-            .await;
+            .await?;
+
+        Ok(())
     }
 
     // Update next slot logic
     async fn on_beacon_finality_change(
         &mut self,
         event: DualProofInputsWithWindow<MainnetConsensusSpec>,
-    ) {
+    ) -> Result<(), mpsc::error::SendError<BridgeHeadEvent>> {
         // FIXME we should do something with next here!
         // Notify of transition
 
         let next_window_proof_inputs_with_window =
             event.next_window.as_ref().map(|b| Box::new(b.clone()));
 
-        // FIXME let _
-        let _ = self
-            .trigger_listener_with_notice(
+        self.trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
                     TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
                         block_number: event.current_window.expected_output_block_number,
@@ -464,20 +452,22 @@ impl BridgeHead {
                     },
                 ),
             )
-            .await;
+            .await?;
 
         // Update next head
         self.next_slot = event.current_window.expected_output_slot;
 
         // Print the head change detection
         info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
+
+        Ok(())
     }
 
     /// Event loop
 
     pub async fn run(mut self, current_slot: u64, store_hash: FixedBytes<32>, pipeline_inflight_next_expected_output: Option<FinalityChangeDetectorUpdate>) {
         // Setup polling client for finality change detection
-        info!("Starting helios polling client.");
+        info!("Starting finality change detector.");
         let (
             init_latest_beacon_slot,
             mut finality_output_rx,
@@ -486,79 +476,109 @@ impl BridgeHead {
         ) = start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(
             current_slot,
             store_hash,
-            pipeline_inflight_next_expected_output, // FIXME this needs to come from persistant state aka from the checkpoint file (note it can do now because its given from the outside)
+            pipeline_inflight_next_expected_output,
         )
-        .await; // FIXME check panic_more status of this! Its not a result.
+        .await;
+
         // Move finality_stage_input_tx to self
         self.finality_stage_input_tx = Some(finality_stage_input_tx);
+
         // Copy init_latest_beacon_slot onto self
         self.next_slot = init_latest_beacon_slot;
 
-        // let mut finality_output_rx = self.finality_output_rx.take().unwrap();
-        //let finality_advance_input_tx = self.finality_advance_input_tx.take().unwrap();
-        // This is kinda pointless why are we initing them in the constructor polluting it if we just take ownership of them here why not just define them here!
+        // Take the command and job rx from self
         let mut command_rx = self.command_rx.take().unwrap();
         let mut job_rx = self.job_rx.take().unwrap();
 
-        // FIXME let _
-        let _ = self
-            .trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::Started(
+        self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::Started(
                 TransitionNoticeExtensionBridgeHeadStarted {
                     latest_beacon_slot: init_latest_beacon_slot,
                     current_slot: self.current_slot,
                     store_hash: self.store_hash,
                 },
             ))
-            .await;
+            .await
+            .expect("Failed to send Started event - observer receiver dropped");
 
         info!("Event loop started.");
 
         loop {
             tokio::select! {
                 // Read the finality reciever for finality change events
-                Some(event) = finality_output_rx.recv() => {
-                    // FIXME let _ (is this critical if we miss one event?)
-                    let _ = self.on_beacon_finality_change(event).await;
-                }
-                // Read the command receiver for input commands
-                Some(cmd) = command_rx.recv() => {
-                    match cmd {
-                        Command::StageTransitionProof(message) => {
-                            // FIXME let _ probably panic_more here
-                            let _ = self.stage_transition_proof(*message).await;
-                        }
-                        Command::Advance(message) => {
-                            // Notify finality change detector of a change to the head position
-                            // message.slot is the output slot which was finalised
-                            // FIXME let _
-                            let _ = finality_advance_input_tx.send(FinalityChangeDetectorUpdate {slot: message.slot, store_hash: message.store_hash}).await;
-                            // Deal with advance invocation
-                            // FIXME let _
-                            let _ = self.advance(message.slot, message.store_hash).await;
+                msg = finality_output_rx.recv() => match msg {
+                    Some(event) => {
+                        if let Err(err) = self.on_beacon_finality_change(event).await {
+                            error!("Bridge Head API Error: Failed to send finality change event: {:?}", err);
+                            break;
                         }
                     }
-                }
-                // Read the job receiver for returned jobs
-                Some(job_result) = job_rx.recv() => {
-                    match job_result {
-                        Ok(result_data) => {
-                            let handle_prover_success_result = self.handle_prover_success(
-                                result_data.job_id(),
-                                result_data.proof(),
-                            ).await;
-                            if let Err(err) = handle_prover_success_result {
-                                // FIXME panic_more should be used as we are in a thread
-                                error!("Error handlng prover success: {:?}", err);
-                                process::exit(1);
+                    None => {
+                        error!("Bridge Head API Error: Finality change detector has dropped the output channel.");
+                        break;
+                    }
+                },
+                // Read the command receiver for input commands
+                msg = command_rx.recv() => match msg {
+                    Some(cmd) => {
+                        match cmd {
+                            Command::StageTransitionProof(message) => {
+                                if let Err(err) = self.stage_transition_proof(*message).await {
+                                    error!("Bridge Head API Error: Failed to stage transition proof: {:?}", err);
+                                    break;
+                                }
+                            }
+                            Command::Advance(message) => {
+                                // Notify finality change detector of a change to the head position
+                                // message.slot is the output slot which was finalised
+                                if let Err(err) = finality_advance_input_tx.send(FinalityChangeDetectorUpdate {slot: message.slot, store_hash: message.store_hash}).await {
+                                    error!("Bridge Head API Error: Failed to notify finality detector of head advancement: {:?}", err);
+                                    break;
+                                }
+                                // Deal with advance invocation
+                                if let Err(err) = self.advance(message.slot, message.store_hash).await {
+                                    error!("Bridge Head API Error: Failed to send head advanced event: {:?}", err);
+                                    break;
+                                }
                             }
                         }
-                        Err(err) => {
-                            // FIXME let _
-                            let _ = self.handle_prover_failure(&err).await; // Perhaps kill the program
+                    }
+                    None => {
+                        error!("Bridge Head API Error: Command channel has been closed by handle holder.");
+                        break;
+                    }
+                },
+                // Read the job receiver for returned jobs
+                msg = job_rx.recv() => match msg {
+                    Some(job_result) => {
+                        match job_result {
+                            Ok(result_data) => {
+                                let handle_prover_success_result = self.handle_prover_success(
+                                    result_data.job_id(),
+                                    result_data.proof(),
+                                ).await;
+                                if let Err(err) = handle_prover_success_result {
+                                    error!("Bridge Head API Error: Error handling prover success: {:?}", err);
+                                    break;
+                                }
+                            }
+                            Err(err) => {
+                                if let Err(send_err) = self.handle_prover_failure(&err).await {
+                                    error!("Bridge Head API Error: Failed to send job failure event: {:?}", send_err);
+                                    break;
+                                }
+                            }
                         }
                     }
-                }
+                    None => {
+                        error!("Bridge Head API Error: Job result channel has been closed by worker.");
+                        break;
+                    }
+                },
             }
         }
+        error!(
+            "Bridge Head API event loop terminated. \
+             Communication with finality detector, command sender, or prover workers has been lost."
+        );
     }
 }

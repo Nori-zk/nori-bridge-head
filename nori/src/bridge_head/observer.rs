@@ -8,12 +8,11 @@ use crate::{
     utils::{handle_nori_proof, handle_nori_proof_message, panic_more},
 };
 use alloy_primitives::FixedBytes;
-use anyhow::{Context, Result};
+use anyhow::Context;
 use async_trait::async_trait;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use log::{error, info, warn};
+use log::{info, warn};
 use nori_sp1_helios_primitives::types::ProofInputsWithWindow;
-use std::process;
 
 /// Event observer trait for handling bridge head events
 #[async_trait]
@@ -30,13 +29,13 @@ pub trait EventObserver: Send + Sync {
     /// Run method default for handling event messages
     async fn run(
         &mut self,
-        mut bridge_head_event_receiver: tokio::sync::broadcast::Receiver<BridgeHeadEvent>,
+        mut bridge_head_event_receiver: tokio::sync::mpsc::Receiver<BridgeHeadEvent>,
     ) {
         loop {
             tokio::select! {
-                result = bridge_head_event_receiver.recv() => {
-                    match result {
-                        Ok(event) => {
+                msg = bridge_head_event_receiver.recv() => {
+                    match msg {
+                        Some(event) => {
                             // Process the event by matching its variant.
                             match event {
                                 BridgeHeadEvent::ProofMessage(proof_msg) => {
@@ -49,9 +48,8 @@ pub trait EventObserver: Send + Sync {
                                 },
                             }
                         },
-                        Err(err) => {
-                            error!("Event receiver for BridgeHead dropped: {}", err);
-                            process::exit(1);
+                        None => {
+                            panic_more("Event receiver for BridgeHead dropped")
                         },
                     }
                 },
@@ -107,8 +105,14 @@ impl ExampleBridgeHeadEventObserver {
         save_nb_checkpoint(self.current_slot, self.store_hash);
 
         // Advance the bridge head
-        // FIXME let _ panic_more?
-        let _ = self.bridge_head_handle.advance(slot, store_hash).await;
+        if self
+            .bridge_head_handle
+            .advance(slot, store_hash)
+            .await
+            .is_err()
+        {
+            panic_more("Bridge head command channel closed");
+        }
     }
 }
 
@@ -148,11 +152,14 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             if next_window.input_slot == proof_data.output_slot {
                 info!("VIABLE: Next window proof inputs ARE contiguous, proof data output slot '{}', next window input slot: '{}', staging the next proof immediately.", proof_data.output_slot, next_window.input_slot);
                 // The windows are contiguous so we can immediately start on the next proof
-                // FIXME let _ panic_more?
-                let _ = self
+                if self
                     .bridge_head_handle
                     .stage_transition_proof(next_window.clone())
-                    .await;
+                    .await
+                    .is_err()
+                {
+                    panic_more("Bridge head command channel closed");
+                };
                 return;
             } else {
                 info!("NOT VIABLE: Next window proof inputs are NOT contiguous, proof data output slot '{}', next window input slot: '{}'", proof_data.output_slot, next_window.input_slot);
@@ -219,15 +226,16 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     if let Some(proof_input_with_window) =
                         self.latest_current_window_validated_proof_input.clone()
                     {
-                        // FIXME let _ panic_more?
-                        let _ = self
+                        if self
                             .bridge_head_handle
                             .stage_transition_proof(proof_input_with_window)
-                            .await;
+                            .await
+                            .is_err()
+                        {
+                            panic_more("Bridge head command channel closed");
+                        };
                     } else {
-                        // FIXME panic_more
-                        error!("Tried to redo a job but latest_validated_proof_input_with_window was not defined");
-                        process::exit(1);
+                        panic_more("Tried to redo a job but latest_validated_proof_input_with_window was not defined");
                     }
                 }
             }
@@ -251,8 +259,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     .cloned();
 
                 if self.stage_transition_proof {
-                    // FIXME let _ panic_more?
-                    let _ = self
+                    if self
                         .bridge_head_handle
                         .stage_transition_proof(
                             *data
@@ -260,7 +267,11 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                                 .current_window_proof_inputs_with_window
                                 .clone(),
                         )
-                        .await;
+                        .await
+                        .is_err()
+                    {
+                        panic_more("Bridge head command channel closed");
+                    };
                     self.stage_transition_proof = false;
                 }
             }
