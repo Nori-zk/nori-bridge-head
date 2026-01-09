@@ -38,12 +38,11 @@ async fn main() -> Result<()> {
                 .unwrap();
     }
 
-    // Create bridge head and fetch event reciever
+    // Create bridge head and get event receiver
     info!("Initing bridge head");
-    let (bridge_head_cmd_handle, bridge_head) = BridgeHead::new().await;
-    let bridge_head_event_receiver = bridge_head.event_receiver();
+    let (bridge_head_cmd_handle, bridge_head_event_receiver, bridge_head) = BridgeHead::new().await;
 
-    // Start the bridge head receiver
+    // Start the bridge head observer
     info!("Starting nori event observer.");
     tokio::spawn(async move {
         let mut bridge_head_observer = ExampleBridgeHeadEventObserver::new(bridge_head_cmd_handle);
