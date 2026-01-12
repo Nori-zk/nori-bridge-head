@@ -62,11 +62,6 @@ pub trait EventObserver: Send + Sync {
 pub struct ExampleBridgeHeadEventObserver {
     /// Handle to trigger bridge head advancement
     bridge_head_handle: CommandHandle,
-    /// Tracks the current slot for beacon finality.
-    #[deprecated(
-        note = "This field is not used in any decision logic - only tracking metadata. May be redundant."
-    )]
-    latest_beacon_finality_slot: u64,
     /// Indicates whether the bridge head has fired its started event.
     started: bool,
     /// Current bridge slot head
@@ -86,7 +81,6 @@ impl ExampleBridgeHeadEventObserver {
     pub fn new(bridge_head_handle: CommandHandle) -> Self {
         Self {
             bridge_head_handle,
-            latest_beacon_finality_slot: 0,
             started: false,
             current_slot: 0,
             store_hash: FixedBytes::default(),
@@ -195,9 +189,6 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 self.current_slot = data.extension.current_slot;
                 self.store_hash = data.extension.store_hash;
 
-                if data.extension.latest_beacon_slot > self.latest_beacon_finality_slot {
-                    self.latest_beacon_finality_slot = data.extension.latest_beacon_slot;
-                }
 
                 self.stage_transition_proof = true;
             }
@@ -245,7 +236,6 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     data.extension.slot, data.extension.block_number
                 );
 
-                self.latest_beacon_finality_slot = data.extension.slot;
                 self.latest_current_window_validated_proof_input = Some(
                     *data
                         .extension
