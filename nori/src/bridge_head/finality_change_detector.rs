@@ -455,17 +455,15 @@ where
                         // Cache the update
                         slot = update.slot;
                         store_hash = update.store_hash;
-                        // we should probably just override the slot here FIXME
-                        // our last computed proof input was from a different input slot and thus is not really valid
+                
+                        // Our last computed proof input was from a different input slot and thus is not really valid
                         // when the observer calls advance -> api advance gets called this is with the output slot of that proof
                         // which is our new input slot. We need to check finality changes from this point!
                         // so we should reset our latest_slot because we need a new proof input from this slot to finality.
                         // so we need to mark the latest_slot as our slot. This may mean we emit multiple finality change
                         // detections for the same beacon finality... but currently we need to do that as otherwise we would be
                         // re proving from an input slot we have already emitted a proof from.
-                        //if latest_slot < slot {
                         latest_slot = slot;
-                        //}
 
                         // Not sure if the below is needed
                         if in_flight {
