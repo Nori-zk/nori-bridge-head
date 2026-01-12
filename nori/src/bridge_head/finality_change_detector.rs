@@ -166,14 +166,8 @@ where
                     }
                     Err(e) => {
                         debug!("Dual window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
-                        if let Err(send_err) = result_tx.send(Err(e)).await {
-                            error!(
-                                "Validation Actor: Critical during transmission of dual window proof input calculation error. \
-                                Consensus Finality Change Detector dropped the result receiver. \
-                                Attempted to send: {:?}\nChannel Error: {:?}",
-                                send_err.0,
-                                send_err
-                            );
+                        if result_tx.send(Err(e)).await.is_err() {
+                            error!("Validation Actor: Error during transmission of dual window CURRENT proof input calculation error. Finality Transition Detector Actor dropped result receiver");
                             break;
                         }
                         continue;
@@ -191,14 +185,8 @@ where
                     }
                     Err(e) => {
                         debug!("Dual window proof input calculation. Error in NEXT window proof input validation:\n{}", e);
-                        if let Err(send_err) = result_tx.send(Err(e)).await {
-                            error!(
-                                "Validation Actor: Critical during transmission of dual window proof input calculation error. \
-                                Consensus Finality Change Detector dropped the result receiver. \
-                                Attempted to send: {:?}\nChannel Error: {:?}",
-                                send_err.0,
-                                send_err
-                            );
+                        if result_tx.send(Err(e)).await.is_err() {
+                            error!("Validation Actor: Error during transmission of dual window NEXT proof input calculation error. Finality Transition Detector Actor dropped result receiver");
                             break;
                         }
                         continue;
@@ -225,14 +213,8 @@ where
                     }
                     Err(e) => {
                         debug!("Solo current window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
-                        if let Err(send_err) = result_tx.send(Err(e)).await {
-                            error!(
-                                "Validation Actor: Critical during transmission of solo window proof input calculation error. \
-                                Consensus Finality Change Detector dropped the result receiver. \
-                                Attempted to send: {:?}\nChannel Error: {:?}",
-                                send_err.0,
-                                send_err
-                            );
+                        if result_tx.send(Err(e)).await.is_err() {
+                            error!("Validation Actor: Error during transmission of solo window proof input calculation error. Finality Transition Detector Actor dropped result receiver");
                             break;
                         }
                         continue;
@@ -246,15 +228,11 @@ where
             };
 
             if result_tx.send(Ok(res)).await.is_err() {
-                error!(
-          "Validation Actor: Consensus Finality Change Detector receiver dropped while sending success result. Expiring."
-        );
+                error!("Validation Actor: Finality Transition Detector Actor dropped result receiver while sending success result. Expiring");
                 break;
             }
         }
-        error!(
-      "Validation Actor: Task loop has expired. The job channel was closed or the Consensus Finality Change Detector has disconnected."
-    );
+        error!("Validation Actor: Task loop has expired. The job channel was closed or the Finality Transition Detector Actor has disconnected");
     });
 
     (job_tx, result_rx)
@@ -466,7 +444,7 @@ where
                                 Next window expected proof input slot: '{}'", next_expected_output_slot);
                     }
                     None => {
-                        error!("Finality Detector Error: The bridge head (staged proof provider) has \
+                        error!("Finality Transition Detector Actor: The bridge head (staged proof provider) has \
                                 dropped the sender channel. Cannot receive staging updates.");
                         break;
                     }
@@ -505,7 +483,7 @@ where
                         info!("Finality transition detector notified of bridge advance. Current input slot: '{}'", slot);
                     },
                     None => {
-                        error!("Finality Detector Error: The bridge head (advance provider) has \
+                        error!("Finality Transition Detector Actor: The bridge head (advance provider) has \
                                 dropped the sender channel. Cannot receive advancement updates.");
                         break;
                     }
@@ -534,7 +512,7 @@ where
                             stale = false;
                             // Immediately start an new proof validation job validation_job_tx.send(job)
                             if try_start_validation_job(&validation_job_tx, slot, store_hash, &next_expected_output, &mut in_flight).await.is_err() {
-                                error!("Finality Detector Error: Failed to start validation job for stale result retry.");
+                                error!("Finality Transition Detector Actor: Failed to start validation job for stale result retry.");
                                 break;
                             }
                             continue;
@@ -576,7 +554,7 @@ where
                             // Is the next window's output slot greater than the current slot
                             if next_window.expected_output_slot > latest_slot {
                                 if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {
-                                    error!("Finality Detector Error: The consumer of the validated proof inputs \
+                                    error!("Finality Transition Detector Actor: The consumer of the validated proof inputs \
                                             has dropped the receiver during dual emission.");
                                     break;
                                 }
@@ -586,14 +564,14 @@ where
                             }
                         }
                         else if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {
-                            error!("Finality Detector Error: The consumer of the validated proof inputs \
+                            error!("Finality Transition Detector Actor: The consumer of the validated proof inputs \
                                     has dropped the receiver during solo emission.");
                             break;
                         }
                         latest_slot = output_slot;
                     },
                     None => {
-                        error!("Finality Detector Error: The validation worker actor has died or \
+                        error!("Finality Transition Detector Actor: The validation worker actor has died or \
                                 dropped the result channel. Check worker logs for panics.");
                         break;
                     }
@@ -602,7 +580,7 @@ where
                 // Tick event - try to start validation if none in-flight
                 _ = tick_interval.tick() => {
                     if !in_flight && try_start_validation_job(&validation_job_tx, slot, store_hash, &next_expected_output, &mut in_flight).await.is_err() {
-                        error!("Finality Detector Error: Failed to start validation job during polling tick.");
+                        error!("Finality Transition Detector Actor: Failed to start validation job during polling tick.");
                         break;
                     }
                 }
@@ -612,7 +590,7 @@ where
         // communication channels (upstream bridge or downstream validation worker)
         // has closed. This detector can no longer function.
         error!(
-            "Consensus finality change detector task terminated. \
+            "Finality Transition Detector Actor: Task terminated. \
              Communication with the validation worker or bridge head has been lost. \
              Last active slot: {}",
             latest_slot
