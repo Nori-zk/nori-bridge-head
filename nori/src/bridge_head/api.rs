@@ -95,8 +95,6 @@ pub enum BridgeHeadEvent {
 pub struct BridgeHead {
     /// Current finalized slot head
     current_slot: u64,
-    /// Latest beacon slot when bridge head inited
-    // init_latest_beacon_slot: u64,
     /// Target slot to advance to
     next_slot: u64,
     /// Unique identifier for prover jobs
@@ -105,16 +103,12 @@ pub struct BridgeHead {
     prover_jobs: HashMap<u64, ProverJob>,
     /// Channel for receiving bridge head commands
     command_rx: Option<mpsc::Receiver<Command>>,
-    /// Channel for receiving consensus finality transition events
-    // finality_output_rx: Option<mpsc::Receiver<DualProofInputsWithWindow<MainnetConsensusSpec>>>,
-    /// Channel for informing consensus finality change detector above bridge head advances
-    // finality_advance_input_tx: Option<mpsc::Sender<FinalityChangeDetectorUpdate>>,
     /// Channel for informing consensus finality change detector above bridge head stage event
     finality_stage_input_tx: Option<mpsc::Sender<FinalityChangeDetectorUpdate>>,
     /// Channel for receiving job results
-    job_rx: Option<mpsc::UnboundedReceiver<Result<ProverJobOutput, ProverJobError>>>,
+    job_rx: Option<mpsc::Receiver<Result<ProverJobOutput, ProverJobError>>>,
     /// Channel for sending job results
-    job_tx: mpsc::UnboundedSender<Result<ProverJobOutput, ProverJobError>>,
+    job_tx: mpsc::Sender<Result<ProverJobOutput, ProverJobError>>,
     /// Channel for emitting proof and notice events
     event_tx: mpsc::Sender<BridgeHeadEvent>,
     /// FixedBytes representing the store hash
@@ -136,13 +130,14 @@ impl BridgeHead {
         let store_hash = FixedBytes::<32>::ZERO;
 
         // Setup command mpsc
-        let (command_tx, command_rx) = mpsc::channel(2); // FIXME this isnt the best choice of buffer size. It makes assumptions that the sender knows what they are doing.
+        let (command_tx, command_rx) = mpsc::channel(2);
 
         // Create command handle
         let input_command_handle = CommandHandle::new(command_tx);
 
-        // Create job mpsc
-        let (job_tx, job_rx) = mpsc::unbounded_channel();
+        // Create bounded sp1 job mpsc with capacity 2, currently 1 job in serial pipeline,
+        // but sized for future optimisation where we could compute next sp1 job while current is being processed (by proof conversion / eth processor)
+        let (job_tx, job_rx) = mpsc::channel(2);
 
         // Create bounded mpsc channel for emitting events to observer/strategy with backpressure
         let (event_tx, event_rx) = mpsc::channel(16);
@@ -152,14 +147,11 @@ impl BridgeHead {
             event_rx,
             BridgeHead {
                 current_slot,
-                // init_latest_beacon_slot,
-                next_slot: 0, // init_latest_beacon_slot,
+                next_slot: 0,
                 job_id: 0,
                 prover_jobs: HashMap::new(),
                 command_rx: Some(command_rx),
-                //finality_output_rx: None,        // Some(finality_output_rx),
-                //finality_advance_input_tx: None, // Some(finality_advance_input_tx),
-                finality_stage_input_tx: None,   //Some(finality_stage_input_tx),
+                finality_stage_input_tx: None,
                 job_rx: Some(job_rx),
                 job_tx,
                 event_tx,
@@ -366,13 +358,18 @@ impl BridgeHead {
             let proof_result = finality_update_job(job_id, current_slot, inputs).await;
 
             // Send appropriate tx Ok or Err
+            // Bounded channel requires .await. If send fails, receiver dropped (system shutting down).
             match proof_result {
                 Ok(prover_job_output) => {
-                    tx.send(Ok(prover_job_output)).unwrap();
+                    if tx.send(Ok(prover_job_output)).await.is_err() {
+                        error!("Bridge Head API Error: Failed to send job success result - receiver dropped (system shutdown)");
+                    }
                 }
                 Err(error) => {
                     let job_error = ProverJobError { job_id, error };
-                    tx.send(Err(job_error)).unwrap();
+                    if tx.send(Err(job_error)).await.is_err() {
+                        error!("Bridge Head API Error: Failed to send job error result - receiver dropped (system shutdown)");
+                    }
                 }
             }
         });
@@ -433,12 +430,12 @@ impl BridgeHead {
         &mut self,
         event: DualProofInputsWithWindow<MainnetConsensusSpec>,
     ) -> Result<(), mpsc::error::SendError<BridgeHeadEvent>> {
-        // FIXME we should do something with next here!
-        // Notify of transition
-
+        
+        // Unpack next_window (could be None)
         let next_window_proof_inputs_with_window =
             event.next_window.as_ref().map(|b| Box::new(b.clone()));
 
+        // Notify of transition
         self.trigger_listener_with_notice(
                 TransitionNoticeBridgeHeadMessageExtension::FinalityTransitionDetected(
                     TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
@@ -458,7 +455,7 @@ impl BridgeHead {
         self.next_slot = event.current_window.expected_output_slot;
 
         // Print the head change detection
-        info!("Helios beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
+        info!("Beacon finality slot change detected. Current head is: '{}' Beacon finality head (next_head) is: '{}', Updating next_head.", self.current_slot, self.next_slot);
 
         Ok(())
     }
@@ -577,7 +574,7 @@ impl BridgeHead {
             }
         }
         error!(
-            "Bridge Head API event loop terminated. \
+            "Bridge Head API: event loop terminated. \
              Communication with finality detector, command sender, or prover workers has been lost."
         );
     }
