@@ -186,7 +186,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
 
         match updates_result {
             Ok(updates) => Ok(updates.clone()), // Clone the updates if the result is Ok
-            Err(e) => Err(e),                   // Propagate error if it's an Err
+            Err(e) => Err(e), // Propagate error if it's an Err
         }
     }
 
@@ -281,7 +281,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
         store_clone.next_sync_committee = store.next_sync_committee;
         store_clone.previous_max_active_participants = store.previous_max_active_participants;
         store_clone.current_max_active_participants = store.current_max_active_participants;
-        //store_clone.best_valid_update = client.store.best_valid_update; // Perhaps re introduce this
+        //store_clone.best_valid_update = client.store.best_valid_update; // FIXME Perhaps re introduce this (we need to discuss with Noah!)
 
         Ok(store_clone)
     }
@@ -369,7 +369,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
             // with its state restored back to the same condition as the terminal ("updated") store state in
             // the last zk programs invocation
             if first_update_slot < input_slot {
-                // FIXME should this be <= ?
+                // FIXME should this be <= ? (could this stop us recomputing on the sync committee update multiple times?)
+                // what about the boundary condition?
                 debug!("First update finalized header beacon slot is less than our input head.");
                 // Remove the zeroth update from the updates.
                 let first_update = updates.remove(0);
@@ -532,11 +533,12 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                             }
 
                             // The below didnt work as well as we had hoped https://github.com/Nori-zk/nori-bridge-head/issues/10
+                            // (Edit: Actually it may have worked correctly and could be that we were just experiencing issues on holesky due to bad validator behaviour)
                             // Block non-checkpoint slots (they prevent bootstrapping on restart)
+                            // We need the validate_progress guard as its used as a flag to allow
+                            // the proof anyway. And for vk building (and zk change detection) we need to be able to arbirarily bypass this 
+                            // sort of validation.
                             if validate && output_slot % 32 > 0 { 
-                                // FIXME might need the validate_progress guard as its used as a flag to allow
-                                // the proof anyway. And for vk building we need to be able to arbirarily bypass this 
-                                // sort of validation.
                                 return Err(anyhow::anyhow!(
                                     "Output slot {} was a non-checkpoint slot. Preventing this as it prevents bootstrapping if we go offline.",
                                     output_slot,
@@ -549,17 +551,13 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                                 ));
                             }
 
-                            // what about??
-                            //proof_outputs.output_store_hash;
-
                             Ok((output_slot, consensus_proof_inputs, proof_outputs.output_store_hash))
                         })
                         .await??;
 
-                        // Block non-checkpoint slots
-                        // This replaces the output_slot % 32 > 0 validation check.
-                        // Instead of checking the output_slot number % 32 lets try to bootstrap from this slot explicitly
-                        // NOTE THIS STRATEGY DID NOT WORK....
+                        // Block non-checkpoint slots (ones where we fail to actually bootstrap by trying it explicitly)
+                        // This re-enforces the output_slot % 32 > 0 validation check.
+                        // I addition to checking the output_slot number % 32 lets try to bootstrap from this slot explicitly
                         if validate {
                             Client::<S, R>::bootstrap_from_slot(&url, output_slot).await
                             .map_err(|e| anyhow::anyhow!(
@@ -618,7 +616,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     pub async fn get_latest_finality_slot_and_store_hash(&self) -> Result<(u64, FixedBytes<32>)> {
         // This is used in cold start procedure which is a trusted operation (hence the principle trusted endpoint).
         // FIXME this bootstrap needs to be more strictly defined
-        // but leaving this for now.
+        // but leaving this for now. We could always define a checkpoint file
+        // to ourselves to avoid this being invoked.
         query_with_fallback(
             &self.principal_provider_url,
             &self.backup_providers_urls,
