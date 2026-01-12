@@ -1,6 +1,3 @@
-use std::process;
-use log::error;
-
 use crate::utils::panic_more;
 
 /// Terminates the program if any required variable is missing

@@ -4,7 +4,7 @@ use helios_consensus_core::consensus_spec::{ConsensusSpec, MainnetConsensusSpec}
 use helios_ethereum::rpc::{http_rpc::HttpRpc, ConsensusRpc};
 use log::{debug, error, info};
 use nori_sp1_helios_primitives::types::DualProofInputsWithWindow;
-use std::{process, time::Duration};
+use std::{time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
 // So this needs to be aware of the input slot and store hash...
