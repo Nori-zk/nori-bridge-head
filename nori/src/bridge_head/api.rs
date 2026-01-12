@@ -477,6 +477,10 @@ impl BridgeHead {
         )
         .await;
 
+        // Update current_slot and store_hash to init values
+        self.current_slot = current_slot;
+        self.store_hash = store_hash;
+
         // Move finality_stage_input_tx to self
         self.finality_stage_input_tx = Some(finality_stage_input_tx);
 
