@@ -9,8 +9,7 @@ use super::notice_messages::{
 };
 use super::validate::validate_env;
 use crate::bridge_head::finality_change_detector::FinalityChangeDetectorUpdate;
-use crate::sp1_prover::{finality_update_job, ProverJobOutput};
-use alloy::signers::k256::elliptic_curve::bigint::Zero;
+use crate::sp1_prover::{ProverConfig, ProverJobOutput, finality_update_job};
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
@@ -25,6 +24,7 @@ use sp1_sdk::SP1ProofWithPublicValues;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
@@ -321,6 +321,7 @@ impl BridgeHead {
     // Create prover job
     async fn stage_transition_proof(
         &mut self,
+        sp1_config: Arc<ProverConfig>,
         proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>,
     ) -> Result<()> {
         // Get job id
@@ -355,7 +356,7 @@ impl BridgeHead {
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
             // Execute job
-            let proof_result = finality_update_job(job_id, current_slot, inputs).await;
+            let proof_result = finality_update_job(sp1_config, job_id, current_slot, inputs).await;
 
             // Send appropriate tx Ok or Err
             // Bounded channel requires .await. If send fails, receiver dropped (system shutting down).
@@ -477,6 +478,12 @@ impl BridgeHead {
         )
         .await;
 
+        // Extract the Sp1 config from envs and wrap it in an Arc so we can share it
+        let sp1_config = Arc::new(
+            ProverConfig::from_env()
+                .expect("Failed to load a valid Sp1 config from env")
+        );
+
         // Update current_slot and store_hash to init values
         self.current_slot = current_slot;
         self.store_hash = store_hash;
@@ -523,7 +530,7 @@ impl BridgeHead {
                     Some(cmd) => {
                         match cmd {
                             Command::StageTransitionProof(message) => {
-                                if let Err(err) = self.stage_transition_proof(*message).await {
+                                if let Err(err) = self.stage_transition_proof(Arc::clone(&sp1_config), *message).await {
                                     error!("Bridge Head API Error: Failed to stage transition proof: {:?}", err);
                                     break;
                                 }

@@ -7,7 +7,7 @@ use sp1_sdk::{
     network::{proto::types::FulfillmentStrategy, NetworkMode},
     Prover, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
 };
-use std::{env, str::FromStr, sync::OnceLock, time::Duration};
+use std::{env, str::FromStr, sync::{Arc, OnceLock}, time::Duration};
 
 // Import nori sp1 helios program
 pub const ELF: &[u8] = include_bytes!("../../nori-elf/nori-sp1-helios-program");
@@ -72,14 +72,9 @@ enum LocalProverMode {
     Cuda,
 }
 
-enum ProofType {
+pub enum ProofType {
     Plonk,
     Groth16,
-}
-
-struct ProverConfig {
-    mode: ProverMode,
-    proof_type: ProofType,
 }
 
 pub enum FulfillmentConfig {
@@ -100,10 +95,33 @@ pub struct NetworkConfig {
     pub whitelist: Option<Vec<Address>>,
 }
 
+pub struct ProverConfig {
+    mode: ProverMode,
+    proof_type: ProofType,
+}
+
 /// Configuration for SP1 prover
 impl ProverConfig {
+    /// Mock prover with a caller-chosen proof type.
+    pub fn mock(proof_type: ProofType) -> Self {
+        ProverConfig {
+            mode: ProverMode::Local(LocalProverMode::Mock),
+            proof_type,
+        }
+    }
+
+    /// Mock + Groth16
+    pub fn mock_groth16() -> Self {
+        Self::mock(ProofType::Groth16)
+    }
+
+    /// Mock + Plonk
+    pub fn mock_plonk() -> Self {
+        Self::mock(ProofType::Plonk)
+    }
+
     /// Load and validate configuration from environment
-    fn from_env() -> Result<Self> {
+    pub fn from_env() -> Result<Self> {
         let sp1_prover = env::var(ENV_SP1_PROVER).unwrap_or_else(|_| "cpu".to_string());
 
         // Get proof type from environment, defaults to groth16, error on invalid value
@@ -365,6 +383,7 @@ impl ProverJobOutput {
 /// * `input_head` - Target slot number to prove from up until current finality head
 /// * `inputs` - Input to the zk program for the finality transition job
 pub async fn finality_update_job(
+    config: Arc<ProverConfig>,
     job_id: u64,
     input_head: u64,
     inputs: ProofInputs<MainnetConsensusSpec>,
@@ -382,8 +401,8 @@ pub async fn finality_update_job(
     // Get proving key
     let pk = get_proving_key().await;
 
-    // Extract config from env
-    let config = ProverConfig::from_env()?;
+    // Clone the config and bump ref count
+    let config = Arc::clone(&config);
 
     let proof: SP1ProofWithPublicValues =
         tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {

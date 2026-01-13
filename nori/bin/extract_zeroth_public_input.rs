@@ -1,8 +1,8 @@
 use anyhow::Result;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
-use nori::{rpcs::consensus::ConsensusHttpProxy, sp1_prover::finality_update_job};
-use std::{env, fs};
+use nori::{rpcs::consensus::ConsensusHttpProxy, sp1_prover::{ProverConfig, finality_update_job}};
+use std::{env, fs, sync::Arc};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -18,9 +18,12 @@ async fn main() -> Result<()> {
         .await
         .unwrap();
 
+    // Get the mock config
+    let config = Arc::new(ProverConfig::mock_plonk());
+    
     // Run mock program.
     println!("Running SP1 prover");
-    let proof_outputs = finality_update_job(0, current_slot, proof_inputs_with_window.proof_inputs)
+    let proof_outputs = finality_update_job(config, 0, current_slot, proof_inputs_with_window.proof_inputs)
         .await
         .unwrap();
 
