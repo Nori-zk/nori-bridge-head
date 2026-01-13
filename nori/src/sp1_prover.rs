@@ -7,7 +7,12 @@ use sp1_sdk::{
     network::{proto::types::FulfillmentStrategy, NetworkMode},
     Prover, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
 };
-use std::{env, str::FromStr, sync::{Arc, OnceLock}, time::Duration};
+use std::{
+    env,
+    str::FromStr,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 // Import nori sp1 helios program
 pub const ELF: &[u8] = include_bytes!("../../nori-elf/nori-sp1-helios-program");
@@ -16,6 +21,7 @@ pub const ELF: &[u8] = include_bytes!("../../nori-elf/nori-sp1-helios-program");
 // SDK-defined environment variables:
 // Reference: sp1-sdk-5.2.2/src/env/mod.rs:39-42,45 (EnvProver::new)
 const ENV_SP1_PROVER: &str = "SP1_PROVER"; // Required: validated in nori/src/bridge_head/api.rs:123
+
 // Reference: sp1-sdk-5.2.2/src/network/builder.rs:32,50,166,178 (NetworkProverBuilder)
 const ENV_NETWORK_PRIVATE_KEY: &str = "NETWORK_PRIVATE_KEY"; // Required when SP1_PROVER=network (line 166)
 const ENV_NETWORK_RPC_URL: &str = "NETWORK_RPC_URL"; // Optional with SDK defaults (line 178-179)
@@ -27,21 +33,28 @@ const ENV_SP1_FULFILLMENT_STRATEGY: &str = "SP1_FULFILLMENT_STRATEGY"; // Maps t
 const ENV_SP1_PROOF_TYPE: &str = "SP1_PROOF_TYPE"; // Maps to .groth16() or .plonk()
 const ENV_SP1_CYCLE_LIMIT: &str = "SP1_CYCLE_LIMIT"; // Maps to ProveRequest.cycle_limit()
 const ENV_SP1_GAS_LIMIT: &str = "SP1_GAS_LIMIT"; // Maps to ProveRequest.gas_limit()
+
 // Reference: sp1-sdk-5.2.2/src/network/prove.rs:655-659 (deprecated SDK env var, warns to use method)
 const ENV_SKIP_SIMULATION: &str = "SKIP_SIMULATION"; // Deprecated SDK var, maps to ProveRequest.skip_simulation()
 const ENV_SP1_TIMEOUT_SECS: &str = "SP1_TIMEOUT_SECS"; // Maps to ProveRequest.timeout()
+const ENV_SP1_MAX_PRICE_PER_PGU: &str = "SP1_MAX_PRICE_PER_PGU";
 const ENV_SP1_AUCTION_TIMEOUT_SECS: &str = "SP1_AUCTION_TIMEOUT_SECS"; // Maps to auction timeout
 const ENV_SP1_WHITELIST: &str = "SP1_WHITELIST"; // Maps to ProveRequest.whitelist()
 
 // Default values from sp1-sdk-5.2.2
+
+// 1 PROVE (18 decimals). from 5.2.2/src/network/prove.rs Line 508 wrong value TODO
+const SDK_DEFAULT_PRICE_PER_PGU: u64 = 500_000_000_000_000; // Max price per bPGU: 1001882102603448320 (1.0018 $PROVE)
+
 // Reference: sp1-sdk-5.2.2/src/network/mod.rs
 const SDK_MAINNET_RPC_URL: &str = "https://rpc.mainnet.succinct.xyz"; // Line 67
 const SDK_RESERVED_RPC_URL: &str = "https://rpc.production.succinct.xyz"; // Line 69
-const SDK_DEFAULT_AUCTION_TIMEOUT_SECS: u64 = 30; // Line 76: Duration::from_secs(30)
+const SDK_DEFAULT_AUCTION_TIMEOUT_SECS: u64 = 30; // Line 76: Duration::from_secs(30) / or 1sec TODO?
+
 const SDK_MAINNET_DEFAULT_CYCLE_LIMIT: u64 = 1_000_000_000_000; // Line 77
 const SDK_RESERVED_DEFAULT_CYCLE_LIMIT: u64 = 100_000_000; // Line 78
 const SDK_DEFAULT_GAS_LIMIT: u64 = 1_000_000_000; // Line 79
-const SDK_DEFAULT_TIMEOUT_SECS: u64 = 14400; // Line 80
+const SDK_DEFAULT_TIMEOUT_SECS: u64 = 14400; // Line 80 //actual default is 500 ? TODO
 // Reference: sp1-sdk-5.2.2/src/network/prover.rs:174
 const SDK_DEFAULT_SKIP_SIMULATION: bool = false;
 
@@ -88,6 +101,7 @@ pub struct NetworkConfig {
     pub private_key: String,
     pub rpc_url: String,
     pub fulfillment: FulfillmentConfig,
+    pub max_price_per_pgu: u64,
     pub cycle_limit: u64,
     pub gas_limit: u64,
     pub skip_simulation: bool,
@@ -144,31 +158,35 @@ impl ProverConfig {
                     .and_then(|s| s.parse::<NetworkMode>().ok()) // Uses FromStr impl at mod.rs:54-63
                     .unwrap_or(NetworkMode::Mainnet); // Default when reserved-capacity feature not enabled
 
-                let private_key = env::var(ENV_NETWORK_PRIVATE_KEY)
-                    .map_err(|_| anyhow::anyhow!("{} required for network mode", ENV_NETWORK_PRIVATE_KEY))?;
+                let private_key = env::var(ENV_NETWORK_PRIVATE_KEY).map_err(|_| {
+                    anyhow::anyhow!("{} required for network mode", ENV_NETWORK_PRIVATE_KEY)
+                })?;
 
                 // Get RPC URL from environment or use default based on network mode
                 // Reference: sp1-sdk-5.2.2/src/network/mod.rs:67,69
-                let rpc_url = env::var(ENV_NETWORK_RPC_URL).ok().unwrap_or_else(|| {
-                    match network_mode {
-                        NetworkMode::Mainnet => SDK_MAINNET_RPC_URL.to_string(),
-                        NetworkMode::Reserved => SDK_RESERVED_RPC_URL.to_string(),
-                    }
-                });
+                let rpc_url =
+                    env::var(ENV_NETWORK_RPC_URL)
+                        .ok()
+                        .unwrap_or_else(|| match network_mode {
+                            NetworkMode::Mainnet => SDK_MAINNET_RPC_URL.to_string(),
+                            NetworkMode::Reserved => SDK_RESERVED_RPC_URL.to_string(),
+                        });
 
                 // Get fulfillment strategy from environment
                 // Defaults based on network mode: Auction for Mainnet, Hosted for Reserved
                 // Reference: sp1-sdk-5.2.2/src/network/prover.rs:98-102 (default_fulfillment_strategy)
                 let fulfillment = {
                     let strategy_str = env::var(ENV_SP1_FULFILLMENT_STRATEGY).ok();
-                    
+
                     match strategy_str.as_deref() {
                         Some("auction") => {
                             let secs = env::var(ENV_SP1_AUCTION_TIMEOUT_SECS)
                                 .ok()
                                 .and_then(|s| s.parse::<u64>().ok())
                                 .unwrap_or(SDK_DEFAULT_AUCTION_TIMEOUT_SECS);
-                            FulfillmentConfig::Auction { timeout: Duration::from_secs(secs) }
+                            FulfillmentConfig::Auction {
+                                timeout: Duration::from_secs(secs),
+                            }
                         }
                         Some("hosted") => FulfillmentConfig::Hosted,
                         Some("reserved") => FulfillmentConfig::Reserved,
@@ -177,7 +195,9 @@ impl ProverConfig {
                             match network_mode {
                                 NetworkMode::Mainnet => {
                                     let secs = SDK_DEFAULT_AUCTION_TIMEOUT_SECS;
-                                    FulfillmentConfig::Auction { timeout: Duration::from_secs(secs) }
+                                    FulfillmentConfig::Auction {
+                                        timeout: Duration::from_secs(secs),
+                                    }
                                 }
                                 NetworkMode::Reserved => FulfillmentConfig::Hosted,
                             }
@@ -185,6 +205,12 @@ impl ProverConfig {
                         Some(other) => return Err(anyhow::anyhow!("Invalid strategy: {}", other)),
                     }
                 };
+
+                // 5.2.2/src/network/prove.rs Line 508
+                let max_price_per_pgu = env::var(ENV_SP1_MAX_PRICE_PER_PGU)
+                    .ok()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(SDK_DEFAULT_PRICE_PER_PGU);
 
                 // Get cycle limit from environment, defaults based on network mode
                 // Reference: sp1-sdk-5.2.2/src/network/mod.rs:77-78
@@ -235,6 +261,7 @@ impl ProverConfig {
                     private_key,
                     rpc_url,
                     fulfillment,
+                    max_price_per_pgu,
                     cycle_limit,
                     gas_limit,
                     skip_simulation,
@@ -242,7 +269,12 @@ impl ProverConfig {
                     whitelist,
                 })
             }
-            _ => return Err(anyhow::anyhow!("Invalid SP1_PROVER value: '{}'. Expected one of: mock, cpu, cuda, network", sp1_prover)),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Invalid SP1_PROVER value: '{}'. Expected one of: mock, cpu, cuda, network",
+                    sp1_prover
+                ))
+            }
         };
 
         Ok(ProverConfig { mode, proof_type })
@@ -265,6 +297,7 @@ impl LocalProver {
         proof_type: &ProofType,
     ) -> Result<SP1ProofWithPublicValues> {
         match self {
+            //TODO why ?
             LocalProver::Mock(p) | LocalProver::Cpu(p) => {
                 let req = p.prove(pk, stdin);
                 match proof_type {
@@ -276,7 +309,7 @@ impl LocalProver {
                 let request = p.prove(pk, stdin);
                 match proof_type {
                     ProofType::Plonk => request.plonk().run(),
-                    ProofType::Groth16 => request.groth16().run()
+                    ProofType::Groth16 => request.groth16().run(),
                 }
             }
         }
@@ -307,18 +340,18 @@ fn generate_proof(
 
             // Get the SP1 strategy native type
             let strategy = get_fulfillment_strategy(&net.fulfillment);
-    
+
             // Build the proof request
             let mut proof_request = prover.prove(pk, stdin);
 
             // Pick the proof type
             proof_request = match config.proof_type {
                 ProofType::Plonk => proof_request.plonk(),
-                ProofType::Groth16 => proof_request.groth16()
+                ProofType::Groth16 => proof_request.groth16(),
             };
 
             // Apply the strategy
-            proof_request  = proof_request.strategy(strategy);
+            proof_request = proof_request.strategy(strategy);
 
             // Apply the auction timeout if and only if we are in Auction mode
             if let FulfillmentConfig::Auction { timeout } = net.fulfillment {
@@ -326,22 +359,33 @@ fn generate_proof(
             }
 
             // Chain the remaining defaults and run
-            let proof_complete_request = proof_request.cycle_limit(net.cycle_limit)
-                .gas_limit(net.gas_limit)
+            let proof_complete_request = proof_request
+                // .max_price_per_pgu(net.max_price_per_pgu)
+                // .max_price_per_pgu(2) // Max price per bPGU: 2000000000 (0.0000 $PROVE)
+                //                       // Max price per bPGU: 2000000000000000000 (2.0000 $PROVE)
+                // .cycle_limit(net.cycle_limit)
+                // .gas_limit(net.gas_limit)
+                //├─ Cycle limit: 1000000000000 cycles
+                //└─ Gas limit: 1000000000 PGUs
+                //^that only should be set with simulation off? TODO
+                //without cycle_limit and gas_limit
+                //├─ Cycle limit: 63528590 cycles
+                //└─ Gas limit: 136583071 PGUs
                 .skip_simulation(net.skip_simulation)
-                .timeout(net.timeout)
+                .timeout(net.timeout) //Timeout: 14400 seconds
+                //without timeout(default)//Timeout: 500 seconds
                 .whitelist(net.whitelist.clone());
             info!("Prover client setup complete.");
-            
+
             info!("Running sp1 proof.");
             let proof = proof_complete_request.run();
             info!("Finished sp1 proof.");
 
             proof
-        },
+        }
         ProverMode::Local(local_mode) => {
             info!("Setting up prover client");
-            let prover = match local_mode  {
+            let prover = match local_mode {
                 LocalProverMode::Mock => LocalProver::Mock(ProverClient::builder().mock().build()),
                 LocalProverMode::Cpu => LocalProver::Cpu(ProverClient::builder().cpu().build()),
                 LocalProverMode::Cuda => LocalProver::Cuda(ProverClient::builder().cuda().build()),
@@ -414,7 +458,7 @@ pub async fn finality_update_job(
             stdin.write_slice(&encoded_proof_inputs);
 
             // Generate proof with configured prover
-            generate_proof(&config ,pk, &stdin)
+            generate_proof(&config, pk, &stdin)
         })
         .await??; // Await the blocking task and propagate errors properly
 
