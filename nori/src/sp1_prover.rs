@@ -235,12 +235,10 @@ impl ProverConfig {
                     private_key,
                     rpc_url,
                     fulfillment,
-                    //fulfillment_strategy,
                     cycle_limit,
                     gas_limit,
                     skip_simulation,
                     timeout,
-                    //auction_timeout,
                     whitelist,
                 })
             }
@@ -300,6 +298,7 @@ fn generate_proof(
 ) -> Result<SP1ProofWithPublicValues> {
     match &config.mode {
         ProverMode::Network(net) => {
+            info!("Setting up prover client");
             let prover = ProverClient::builder()
                 .network_for(net.network_mode)
                 .rpc_url(&net.rpc_url)
@@ -327,23 +326,27 @@ fn generate_proof(
             }
 
             // Chain the remaining defaults and run
-            info!("Running sp1 proof.");
-            let proof = proof_request.cycle_limit(net.cycle_limit)
+            let proof_complete_request = proof_request.cycle_limit(net.cycle_limit)
                 .gas_limit(net.gas_limit)
                 .skip_simulation(net.skip_simulation)
                 .timeout(net.timeout)
-                .whitelist(net.whitelist.clone())
-                .run();
+                .whitelist(net.whitelist.clone());
+            info!("Prover client setup complete.");
+            
+            info!("Running sp1 proof.");
+            let proof = proof_complete_request.run();
             info!("Finished sp1 proof.");
 
             proof
         },
         ProverMode::Local(local_mode) => {
+            info!("Setting up prover client");
             let prover = match local_mode  {
                 LocalProverMode::Mock => LocalProver::Mock(ProverClient::builder().mock().build()),
                 LocalProverMode::Cpu => LocalProver::Cpu(ProverClient::builder().cpu().build()),
                 LocalProverMode::Cuda => LocalProver::Cuda(ProverClient::builder().cuda().build()),
             };
+            info!("Prover client setup complete.");
 
             // Generate proof with the configured proof type
             info!("Running sp1 proof.");
