@@ -1,6 +1,6 @@
 use alloy_primitives::Address;
 use anyhow::Result;
-use sp1_sdk::network::{NetworkMode, proto::types::FulfillmentStrategy};
+use sp1_sdk::network::{proto::types::FulfillmentStrategy, NetworkMode};
 use std::{env, str::FromStr, time::Duration};
 
 // Environment variable names for SP1 prover configuration
@@ -30,9 +30,9 @@ const ENV_SP1_WHITELIST: &str = "SP1_WHITELIST"; // Maps to ProveRequest.whiteli
 // Default values from sp1-sdk-5.2.2
 
 // 1 PROVE (18 decimals). from 5.2.2/src/network/prove.rs Line 508 wrong value TODO
-const SDK_DEFAULT_PRICE_PER_PGU: u64 = 500_000_000_000_000; // Max price per bPGU: 1001882102603448320 (1.0018 $PROVE)
-
-// Reference: sp1-sdk-5.2.2/src/network/mod.rs
+// const SDK_DEFAULT_PRICE_PER_PGU: u64 = 500_000_000_000_000; // Max price per bPGU: 1001882102603448320 (1.0018 $PROVE)
+const SDK_DEFAULT_PRICE_PER_PGU: u64 = 1_000_000_000; //Max price per bPGU: 1000000000000000000 (1.0000 $PROVE)
+                                                      // Reference: sp1-sdk-5.2.2/src/network/mod.rs
 const SDK_MAINNET_RPC_URL: &str = "https://rpc.mainnet.succinct.xyz"; // Line 67
 const SDK_RESERVED_RPC_URL: &str = "https://rpc.production.succinct.xyz"; // Line 69
 const SDK_DEFAULT_AUCTION_TIMEOUT_SECS: u64 = 30; // Line 76: Duration::from_secs(30) / or 1sec TODO?
@@ -40,8 +40,9 @@ const SDK_DEFAULT_AUCTION_TIMEOUT_SECS: u64 = 30; // Line 76: Duration::from_sec
 const SDK_MAINNET_DEFAULT_CYCLE_LIMIT: u64 = 1_000_000_000_000; // Line 77
 const SDK_RESERVED_DEFAULT_CYCLE_LIMIT: u64 = 100_000_000; // Line 78
 const SDK_DEFAULT_GAS_LIMIT: u64 = 1_000_000_000; // Line 79
-const SDK_DEFAULT_TIMEOUT_SECS: u64 = 14400; // Line 80 //actual default is 500 ? TODO
-                                             // Reference: sp1-sdk-5.2.2/src/network/prover.rs:174
+const SDK_DEFAULT_TIMEOUT_SECS: u64 = 600; // Line 80
+
+// Reference: sp1-sdk-5.2.2/src/network/prover.rs:174
 const SDK_DEFAULT_SKIP_SIMULATION: bool = false;
 
 // Configuration for SP1 prover types
@@ -210,7 +211,7 @@ impl ProverConfig {
                                         timeout: Duration::from_secs(secs),
                                     }
                                 }
-                                NetworkMode::Reserved => FulfillmentConfig::Hosted,
+                                NetworkMode::Reserved => FulfillmentConfig::Reserved,
                             }
                         }
                         Some(other) => return Err(anyhow::anyhow!("Invalid strategy: {}", other)),

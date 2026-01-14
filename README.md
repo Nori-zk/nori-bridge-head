@@ -67,10 +67,10 @@ NORI_LOG=info
 - **NETWORK_PRIVATE_KEY**: Private key for network prover authentication (required)
 - **NETWORK_RPC_URL**: Network RPC endpoint
 - **SP1_NETWORK_MODE**: Network type - `Mainnet` or `Reserved` (default: Mainnet)
-- **SP1_FULFILLMENT_STRATEGY**: Fulfillment method - `auction`, `hosted`, or `reserved` (defaults: Mainnet=auction, Reserved=hosted)
+- **SP1_FULFILLMENT_STRATEGY**: Fulfillment method - `auction`, `hosted`, or `reserved` (defaults: Mainnet=auction, Reserved=reserved)
 - **SP1_CYCLE_LIMIT**: Max cycles (defaults: Mainnet=1T, Reserved=100M)
 - **SP1_GAS_LIMIT**: Gas limit (default: 1B)
-- **SP1_TIMEOUT_SECS**: Overall timeout in seconds (default: 14400 / 4 hours)
+- **SP1_TIMEOUT_SECS**: Overall timeout in seconds (default: 600 / 10 minutes)
 
 See `.env.example`
 

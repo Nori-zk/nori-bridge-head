@@ -1,5 +1,6 @@
 use super::sp1_prover_config::{
-    FulfillmentConfig, LocalProverMode, ProofType, ProverConfig, ProverMode, get_fulfillment_strategy
+    get_fulfillment_strategy, FulfillmentConfig, LocalProverMode, ProofType, ProverConfig,
+    ProverMode,
 };
 use anyhow::Result;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
@@ -104,9 +105,10 @@ fn generate_proof(
 
             // Chain the remaining defaults and run
             let proof_complete_request = proof_request
-                // .max_price_per_pgu(net.max_price_per_pgu)
-                // .max_price_per_pgu(2) // Max price per bPGU: 2000000000 (0.0000 $PROVE)
-                //                       // Max price per bPGU: 2000000000000000000 (2.0000 $PROVE)
+                // our default is Max price per bPGU: 1000000000000000000 (1.0000 $PROVE)
+                // default = 1_000_000_000u64
+                .max_price_per_pgu(net.max_price_per_pgu)
+                //if no value set // Max price per bPGU: 2000000000000000000 (2.0000 $PROVE)
                 // .cycle_limit(net.cycle_limit)
                 // .gas_limit(net.gas_limit)
                 //├─ Cycle limit: 1000000000000 cycles
@@ -116,7 +118,7 @@ fn generate_proof(
                 //├─ Cycle limit: 63528590 cycles
                 //└─ Gas limit: 136583071 PGUs
                 .skip_simulation(net.skip_simulation)
-                .timeout(net.timeout) //Timeout: 14400 seconds
+                .timeout(net.timeout) //Timeout: 600 seconds
                 //without timeout(default)//Timeout: 500 seconds
                 .whitelist(net.whitelist.clone());
             info!("Prover client setup complete.");
