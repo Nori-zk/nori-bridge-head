@@ -102,28 +102,53 @@ fn generate_proof(
                 proof_request = proof_request.auction_timeout(timeout);
             }
 
-            // Chain the remaining defaults and run
-            let proof_complete_request = proof_request
-                // our default is Max price per bPGU: 1000000000000000000 (1.0000 $PROVE)
-                // default = 1_000_000_000u64
+            // Chain the remaining defaults
+            proof_request = proof_request
+                // The user can either provide a value (error if invalid) for this via ENV_SP1_MAX_PRICE_PER_PGU
+                // OR we will default to (if not set):
+                // SDK_DEFAULT_PRICE_PER_PGU: u64 = 1_000_000_000u64 (note this is 1e9 scaling compared to $PROVE)
+                // Max price per bPGU: 1000000000000000000 (1.0000 $PROVE)
                 .max_price_per_pgu(net.max_price_per_pgu)
-                //if no value set // Max price per bPGU: 2000000000000000000 (2.0000 $PROVE)
-                // .cycle_limit(net.cycle_limit)
-                // .gas_limit(net.gas_limit)
-                //├─ Cycle limit: 1000000000000 cycles
-                //└─ Gas limit: 1000000000 PGUs
-                //^that only should be set with simulation off? TODO
-                //without cycle_limit and gas_limit
-                //├─ Cycle limit: 63528590 cycles
-                //└─ Gas limit: 136583071 PGUs
+                // The user can provide a value (error if invalid) for this via ENV_SKIP_SIMULATION
+                // OR we will default to false (if not set)
                 .skip_simulation(net.skip_simulation)
-                .timeout(net.timeout) //Timeout: 600 seconds
-                //without timeout(default)//Timeout: 500 seconds
+                // The user can provide a value (error if invalid) for this via ENV_SP1_TIMEOUT_SECS
+                // OR we will default to (if not set):
+                // SDK_DEFAULT_TIMEOUT_SECS: u64 = 600
+                .timeout(net.timeout)
                 .whitelist(net.whitelist.clone());
+
+            // cycle_limit and gas_limit are only required when skip_simulation = true.
+
+            // When simulation runs (skip_simulation = false), SP1 calculates these for us:
+            //   ├─ Cycle limit: 63_528_590 cycles (example from simulation)
+            //   └─ Gas limit: 136_583_071 PGUs (example from simulation)
+            // The user can choose to provide values (error if invalid) to constrain them via ENV_SP1_GAS_LIMIT and ENV_SP1_CYCLE_LIMIT
+            // or the simulation calculated values will be used (effectively use whatever is nessesary).
+
+            // When skip_simulation = true, we must provide them
+            // Either the user provides values (error if invalid) via ENV_SP1_GAS_LIMIT and ENV_SP1_CYCLE_LIMIT
+            // OR we default to certain values (if not set):
+            // For gas_limit we always default to SDK_DEFAULT_GAS_LIMIT:
+            //   └─ Gas limit: SDK_DEFAULT_GAS_LIMIT: u64 = 1_000_000_000 PGUs
+            // For cycle_limit what we default to depends on the choice of ENV_SP1_NETWORK_MODE:
+            // If ENV_SP1_NETWORK_MODE is 'mainnet':
+            //   └─ Cycle limit: SDK_MAINNET_DEFAULT_CYCLE_LIMIT: u64 = 1_000_000_000_000 cycles
+            // Else if ENV_SP1_NETWORK_MODE is 'reserved':
+            //   └─ Cycle limit: SDK_RESERVED_DEFAULT_CYCLE_LIMIT: u64 = 100_000_000 cycles
+
+
+            if let Some(cycle_limit) = net.cycle_limit {
+                proof_request = proof_request.cycle_limit(cycle_limit);
+            }
+            if let Some(gas_limit) = net.gas_limit {
+                proof_request = proof_request.gas_limit(gas_limit);
+            }
+
             info!("Prover client setup complete.");
 
             info!("Running sp1 proof.");
-            let proof = proof_complete_request.run();
+            let proof = proof_request.run();
             info!("Finished sp1 proof.");
 
             proof

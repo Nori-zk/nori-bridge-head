@@ -1,5 +1,6 @@
 use alloy_primitives::Address;
-use anyhow::Result;
+use anyhow::{Context, Result};
+use reqwest::Url;
 use sp1_sdk::network::{proto::types::FulfillmentStrategy, NetworkMode};
 use std::{env, str::FromStr, time::Duration};
 
@@ -76,8 +77,8 @@ pub struct NetworkConfig {
     pub rpc_url: String,
     pub fulfillment: FulfillmentConfig,
     pub max_price_per_pgu: u64,
-    pub cycle_limit: u64,
-    pub gas_limit: u64,
+    pub cycle_limit: Option<u64>,
+    pub gas_limit: Option<u64>,
     pub skip_simulation: bool,
     pub timeout: Duration,
     pub whitelist: Option<Vec<Address>>,
@@ -139,7 +140,7 @@ impl ProverConfig {
     pub fn from_env() -> Result<Self> {
         let sp1_prover = env::var(ENV_SP1_PROVER).unwrap_or_else(|_| "cpu".to_string());
 
-        // Get proof type from environment, defaults to groth16, error on invalid value
+        // Behaviour: Get proof type from environment, defaults to groth16, error on invalid value
         let proof_type = match env::var(ENV_SP1_PROOF_TYPE).ok().as_deref() {
             Some("plonk") => ProofType::Plonk,
             Some("groth16") => ProofType::Groth16,
@@ -164,6 +165,7 @@ impl ProverConfig {
             "cuda" => ProverMode::Local(LocalProverMode::Cuda),
             "network" => {
                 // Get network private key from environment if set
+                // Behaviour: Pick either 'mainnet' or 'reserved', default to 'mainnet' if not provided and error on invalid value.
                 // Reference: sp1-sdk-5.2.2/src/network/builder.rs:32,166
                 let network_mode = match env::var(ENV_SP1_NETWORK_MODE).ok().as_deref() {
                     Some("mainnet") => NetworkMode::Mainnet,
@@ -178,103 +180,165 @@ impl ProverConfig {
                     None => NetworkMode::Mainnet
                 };
 
+                // Behaviour: provide a private key or error
                 let private_key = env::var(ENV_NETWORK_PRIVATE_KEY).map_err(|_| {
                     anyhow::anyhow!("{} required for network mode", ENV_NETWORK_PRIVATE_KEY)
                 })?;
 
                 // Get RPC URL from environment or use default based on network mode
                 // Reference: sp1-sdk-5.2.2/src/network/mod.rs:67,69
-                let rpc_url =
-                    env::var(ENV_NETWORK_RPC_URL)
-                        .ok()
-                        .unwrap_or_else(|| match network_mode {
-                            NetworkMode::Mainnet => SDK_MAINNET_RPC_URL.to_string(),
-                            NetworkMode::Reserved => SDK_RESERVED_RPC_URL.to_string(),
-                        });
-
-                // Get fulfillment strategy from environment
-                // Defaults based on network mode: Auction for Mainnet, Hosted for Reserved
-                // Reference: sp1-sdk-5.2.2/src/network/prover.rs:98-102 (default_fulfillment_strategy)
-                let fulfillment = {
-                    let strategy_str = env::var(ENV_SP1_FULFILLMENT_STRATEGY).ok();
-
-                    match strategy_str.as_deref() {
-                        Some("auction") => {
-                            let secs = env::var(ENV_SP1_AUCTION_TIMEOUT_SECS)
-                                .ok()
-                                .and_then(|s| s.parse::<u64>().ok())
-                                .unwrap_or(SDK_DEFAULT_AUCTION_TIMEOUT_SECS);
-                            FulfillmentConfig::Auction {
-                                timeout: Duration::from_secs(secs),
-                            }
-                        }
-                        Some("hosted") => FulfillmentConfig::Hosted,
-                        Some("reserved") => FulfillmentConfig::Reserved,
-                        None => {
-                            // Default based on network_mode
-                            match network_mode {
-                                NetworkMode::Mainnet => {
-                                    let secs = SDK_DEFAULT_AUCTION_TIMEOUT_SECS;
-                                    FulfillmentConfig::Auction {
-                                        timeout: Duration::from_secs(secs),
-                                    }
-                                }
-                                NetworkMode::Reserved => FulfillmentConfig::Reserved,
-                            }
-                        }
-                        Some(other) => return Err(anyhow::anyhow!("Invalid strategy: {}", other)),
+                // Behaviour: provide a valid url or error. If not provided use the correct default based on the network mode.
+                let rpc_url = match env::var(ENV_NETWORK_RPC_URL) {
+                    Ok(val) => {
+                        Url::parse(&val)
+                            .with_context(|| format!("Environment variable {} contains invalid URL: '{}'", ENV_NETWORK_RPC_URL, val))?;
+                        val
+                    }
+                    Err(_) => match network_mode {
+                        NetworkMode::Mainnet => SDK_MAINNET_RPC_URL.to_string(),
+                        NetworkMode::Reserved => SDK_RESERVED_RPC_URL.to_string(),
                     }
                 };
 
+                // Get fulfillment strategy from environment
+                // Reference: sp1-sdk-5.2.2/src/network/prover.rs:98-102 (default_fulfillment_strategy)
+                // Behaviour: Pick from 'auction', 'hosted', or 'reserved'. Default based on network mode
+                // if not provided (Auction for Mainnet, Reserved for Reserved). Error on invalid value.
+                // For auction timeout: parse as u64 or error on invalid, use default if missing.
+                let fulfillment = match env::var(ENV_SP1_FULFILLMENT_STRATEGY).ok().as_deref() {
+                    Some("auction") => {
+                        let secs = match env::var(ENV_SP1_AUCTION_TIMEOUT_SECS) {
+                            Ok(val) => val.parse::<u64>().with_context(|| {
+                                format!(
+                                    "Failed to parse {} as u64. Got: '{}'",
+                                    ENV_SP1_AUCTION_TIMEOUT_SECS, val
+                                )
+                            })?,
+                            Err(_) => SDK_DEFAULT_AUCTION_TIMEOUT_SECS,
+                        };
+                        FulfillmentConfig::Auction {
+                            timeout: Duration::from_secs(secs),
+                        }
+                    }
+                    Some("hosted") => FulfillmentConfig::Hosted,
+                    Some("reserved") => FulfillmentConfig::Reserved,
+                    Some(other) => {
+                        return Err(anyhow::anyhow!(
+                            "Invalid {} value: '{}'. Expected 'auction', 'hosted', or 'reserved'",
+                            ENV_SP1_FULFILLMENT_STRATEGY,
+                            other
+                        ))
+                    }
+                    None => match network_mode {
+                        NetworkMode::Mainnet => FulfillmentConfig::Auction {
+                            timeout: Duration::from_secs(SDK_DEFAULT_AUCTION_TIMEOUT_SECS),
+                        },
+                        NetworkMode::Reserved => FulfillmentConfig::Reserved,
+                    },
+                };
+
                 // 5.2.2/src/network/prove.rs Line 508
-                let max_price_per_pgu = env::var(ENV_SP1_MAX_PRICE_PER_PGU)
-                    .ok()
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(SDK_DEFAULT_PRICE_PER_PGU);
-
-                // Get cycle limit from environment, defaults based on network mode
-                // Reference: sp1-sdk-5.2.2/src/network/mod.rs:77-78
-                let cycle_limit = env::var(ENV_SP1_CYCLE_LIMIT)
-                    .ok()
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(match network_mode {
-                        NetworkMode::Mainnet => SDK_MAINNET_DEFAULT_CYCLE_LIMIT,
-                        NetworkMode::Reserved => SDK_RESERVED_DEFAULT_CYCLE_LIMIT,
-                    });
-
-                // Get gas limit from environment, defaults to SDK_DEFAULT_GAS_LIMIT
-                // Reference: sp1-sdk-5.2.2/src/network/prover.rs:770-803 (get_execution_limits)
-                let gas_limit = env::var(ENV_SP1_GAS_LIMIT)
-                    .ok()
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(SDK_DEFAULT_GAS_LIMIT);
+                // Behaviour: provide a valid value or error on invalid, if missing use the default.
+                let max_price_per_pgu = match env::var(ENV_SP1_MAX_PRICE_PER_PGU) {
+                    Ok(val) => val.parse::<u64>().with_context(|| {
+                        format!(
+                            "Failed to parse {} as u64. Got: '{}'",
+                            ENV_SP1_MAX_PRICE_PER_PGU, val
+                        )
+                    })?,
+                    Err(_) => SDK_DEFAULT_PRICE_PER_PGU,
+                };
 
                 // Get skip simulation flag from environment, defaults to SDK_DEFAULT_SKIP_SIMULATION (false)
                 // Reference: sp1-sdk-5.2.2/src/network/prover.rs:174 (default)
                 // Reference: sp1-sdk-5.2.2/src/network/prove.rs:655-659 (deprecated SKIP_SIMULATION env var)
-                let skip_simulation = env::var(ENV_SKIP_SIMULATION)
+                // Behaviour: provide a valid value or error on invalid, if missing use the default.
+                let skip_simulation = match env::var(ENV_SKIP_SIMULATION) {
+                    Ok(val) => val.parse::<bool>().with_context(|| {
+                        format!(
+                            "Failed to parse {} as bool. Got: '{}'. Expected 'true' or 'false'",
+                            ENV_SKIP_SIMULATION, val
+                        )
+                    })?,
+                    Err(_) => SDK_DEFAULT_SKIP_SIMULATION,
+                };
+
+                // SP1 requires us to set gas and cycle limit if we skip the simulation but we can default thus for the user its optional
+                // If we do the simulation these are optional SP1 does not require is to set them but we could set them anyway
+
+                // These needs to be an option. We check what the skip behaviour is. And take the correct branch.
+                // We need to validate when we skip the simulation that they are provided.
+                // Unpack as options first
+
+                // Get cycle limit from environment, defaults based on network mode
+                // Reference: sp1-sdk-5.2.2/src/network/mod.rs:77-78
+                // Behaviour: parse the cycle limit if valid or error on invalid
+                let mut cycle_limit = env::var(ENV_SP1_CYCLE_LIMIT)
                     .ok()
-                    .and_then(|s| s.parse::<bool>().ok())
-                    .unwrap_or(SDK_DEFAULT_SKIP_SIMULATION);
+                    .map(|val| {
+                        val.parse::<u64>()
+                            .with_context(|| format!("Failed to parse {} as u64. Got: '{}'", ENV_SP1_CYCLE_LIMIT, val))
+                    })
+                    .transpose()?;
+
+                // Get gas limit from environment, defaults to SDK_DEFAULT_GAS_LIMIT
+                // Reference: sp1-sdk-5.2.2/src/network/prover.rs:770-803 (get_execution_limits)
+                // Behaviour: parse the cycle limit if valid or error on invalid
+                let mut gas_limit = env::var(ENV_SP1_GAS_LIMIT)
+                    .ok()
+                    .map(|val| {
+                        val.parse::<u64>()
+                            .with_context(|| format!("Failed to parse {} as u64. Got: '{}'", ENV_SP1_GAS_LIMIT, val))
+                    })
+                    .transpose()?;
+
+                // Now we have valid values for the gas and cycle limit IF they were provided
+
+                // If we are NOT in simulation mode then we require them to have values so if they dont we set them to
+                // their defaults.
+                if skip_simulation {
+                    if cycle_limit.is_none() {
+                        cycle_limit = match network_mode {
+                            NetworkMode::Mainnet => Some(SDK_MAINNET_DEFAULT_CYCLE_LIMIT),
+                            NetworkMode::Reserved => Some(SDK_RESERVED_DEFAULT_CYCLE_LIMIT),
+                        }
+                    }
+                    if gas_limit.is_none() {
+                        gas_limit = Some(SDK_DEFAULT_GAS_LIMIT);
+                    }
+                }
 
                 // Get timeout from environment, defaults to SDK_DEFAULT_TIMEOUT_SECS (14400 seconds / 4 hours)
                 // Reference: sp1-sdk-5.2.2/src/network/mod.rs:80
-                let timeout_secs = env::var(ENV_SP1_TIMEOUT_SECS)
-                    .ok()
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(SDK_DEFAULT_TIMEOUT_SECS);
+                // Parse the value if present and error if invalid, if missing use the default
+                let timeout_secs = match env::var(ENV_SP1_TIMEOUT_SECS) {
+                    Ok(val) => val.parse::<u64>().with_context(|| {
+                        format!(
+                            "Failed to parse {} as u64. Got: '{}'",
+                            ENV_SP1_TIMEOUT_SECS, val
+                        )
+                    })?,
+                    Err(_) => SDK_DEFAULT_TIMEOUT_SECS,
+                };
                 let timeout = Duration::from_secs(timeout_secs);
 
                 // Get whitelist from environment (comma-separated addresses)
                 // If None, SDK uses recently reliable provers
                 // Reference: sp1-sdk-5.2.2/src/network/prove.rs:356-383 (whitelist method docs)
-                let whitelist = env::var(ENV_SP1_WHITELIST).ok().and_then(|s| {
-                    let addresses: Result<Vec<Address>, _> = s
-                        .split(',')
-                        .map(|addr| Address::from_str(addr.trim()))
-                        .collect();
-                    addresses.ok()
-                });
+                // Collect the addresses into a vector, error if we have invalid addresses, if missing the whitelist
+                // is defined as None
+                let whitelist = env::var(ENV_SP1_WHITELIST)
+                    .ok()
+                    .map(|s| {
+                        s.split(',')
+                            .map(|addr| {
+                                let addr = addr.trim();
+                                Address::from_str(addr)
+                                    .with_context(|| format!("Invalid address in {}: '{}'", ENV_SP1_WHITELIST, addr))
+                            })
+                            .collect::<Result<Vec<Address>>>()
+                    })
+                    .transpose()?;
 
                 ProverMode::Network(NetworkConfig {
                     network_mode,
