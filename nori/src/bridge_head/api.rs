@@ -9,7 +9,8 @@ use super::notice_messages::{
 };
 use super::validate::validate_env;
 use crate::bridge_head::finality_change_detector::FinalityChangeDetectorUpdate;
-use crate::sp1_prover::{ProverConfig, ProverJobOutput, finality_update_job};
+use crate::sp1_prover::{ProverJobOutput, finality_update_job};
+use crate::sp1_prover_config::ProverConfig;
 use alloy_primitives::FixedBytes;
 use anyhow::{Error, Result};
 use chrono::{SecondsFormat, Utc};
@@ -120,8 +121,8 @@ impl BridgeHead {
         validate_env(&[
             "NORI_SOURCE_EXECUTION_HTTP_RPCS",
             "NORI_SOURCE_CONSENSUS_HTTP_RPCS",
-            "SP1_PROVER",
             "NORI_TOKEN_BRIDGE_ADDRESS",
+            "NORI_SOURCE_CHAIN_ID"
         ]);
 
         // Initialise slot head to dummy values (will be set to real values after run is invoked)
@@ -472,6 +473,12 @@ impl BridgeHead {
     // ================================================================================================
 
     pub async fn run(mut self, current_slot: u64, store_hash: FixedBytes<32>, pipeline_inflight_next_expected_output: Option<FinalityChangeDetectorUpdate>) {
+        // Extract the Sp1 config from envs and wrap it in an Arc so we can share it
+        let sp1_config = Arc::new(
+            ProverConfig::from_env()
+                .expect("Failed to load a valid Sp1 config from env")
+        );
+
         // Setup polling client for finality change detection
         info!("Starting finality change detector.");
         let (
@@ -485,12 +492,6 @@ impl BridgeHead {
             pipeline_inflight_next_expected_output,
         )
         .await;
-
-        // Extract the Sp1 config from envs and wrap it in an Arc so we can share it
-        let sp1_config = Arc::new(
-            ProverConfig::from_env()
-                .expect("Failed to load a valid Sp1 config from env")
-        );
 
         // Update current_slot and store_hash to init values
         self.current_slot = current_slot;

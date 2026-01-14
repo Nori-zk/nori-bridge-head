@@ -1,7 +1,7 @@
 use anyhow::Result;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
-use nori::{rpcs::consensus::ConsensusHttpProxy, sp1_prover::{ProverConfig, finality_update_job}};
+use nori::{rpcs::consensus::ConsensusHttpProxy, sp1_prover::finality_update_job, sp1_prover_config::ProverConfig};
 use std::{env, fs, sync::Arc};
 
 #[tokio::main]

@@ -10,7 +10,7 @@ use crate::bridge_head::api::ProofMessage;
 /// This ensures we don't enter a zombie state where actors are dead but main process continues.
 pub fn panic_more(message: &str) -> ! {
     error!("FATAL: {}", message);
-    error!("Terminating entire process to trigger restart");
+    error!("Terminating entire process");
     process::exit(1);
 }
 

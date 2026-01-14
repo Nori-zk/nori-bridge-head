@@ -63,7 +63,6 @@ NORI_LOG=info
 - **SP1_PROOF_TYPE**: Proof system - `groth16` or `plonk`
 - **SP1_PROVER**: Prover mode - `mock`, `cpu`, `cuda`, or `network` (Succinct Prover Network)
 
-
 **SP1 Network Mode (when SP1_PROVER=network):**
 - **NETWORK_PRIVATE_KEY**: Private key for network prover authentication (required)
 - **NETWORK_RPC_URL**: Network RPC endpoint
