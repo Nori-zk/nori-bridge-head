@@ -1,10 +1,10 @@
 use std::env;
 use std::path::PathBuf;
-use std::process;
+use std::process::{self, Command};
 
 /// Check if npm is install (works for windows / mac)
 fn is_npm_installed() -> bool {
-    process::Command::new("npm")
+    Command::new("npm")
         .arg("--version")
         .output()
         .map(|output| output.status.success())
@@ -13,7 +13,7 @@ fn is_npm_installed() -> bool {
 
 /// Install @nori-zk/ethereum-token-bridge via npm
 fn install_solidity_contracts(contracts_dir: PathBuf) -> bool {
-    process::Command::new("npm")
+    Command::new("npm")
         .arg("ci")
         .current_dir(contracts_dir)
         .output()
@@ -29,12 +29,40 @@ fn install_solidity_contracts(contracts_dir: PathBuf) -> bool {
         })
 }
 
+const GENERATED_BINDINGS_HEADER: &str = "// @generated: build.rs will overwrite this with alloy::sol! bindings.";
+
+/// Configures Git to ignore local changes to the generated bindings file.
+/// This works by telling Git to only "see" the header string when staging.
+fn setup_git_ignore_filter() {
+    // Check if we are in a git repo before trying to run git commands
+    let is_git = Command::new("git")
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if is_git {
+        let clean_cmd = format!("printf '{}'", GENERATED_BINDINGS_HEADER);
+
+        let _ = Command::new("git")
+            .args(["config", "filter.ignore-bindings.clean", &clean_cmd])
+            .status();
+        
+        let _ = Command::new("git")
+            .args(["config", "filter.ignore-bindings.smudge", "cat"])
+            .status();
+    }
+}
+
 /// Pre-build hook
 fn main() {
     let contracts_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let contracts_npm_dir = contracts_dir.join("node_modules/@nori-zk/ethereum-token-bridge");
     let abi_path = contracts_dir.join("node_modules/@nori-zk/ethereum-token-bridge/build/artifacts/contracts/NoriTokenBridge.sol/NoriTokenBridge.json");
     let gen_path = contracts_dir.join("src/lib.rs");
+    
+    // Initialise the self-healing Git filter
+    setup_git_ignore_filter();
 
     if contracts_npm_dir.exists() {
         return;
