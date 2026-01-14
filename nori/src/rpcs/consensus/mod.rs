@@ -1,4 +1,7 @@
 use super::{execution::http::ExecutionHttpProxy, multiplex, query_with_fallback};
+use nori_hash::sha256_hash::sha256_hash_helios_store;
+use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputs, ProofInputsWithWindow};
+use nori_sp1_helios_program::consensus::consensus_program;
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{anyhow, Error, Result};
 use futures::FutureExt;
@@ -11,12 +14,9 @@ use helios_consensus_core::{
 use helios_ethereum::{
     config::{checkpoints, networks::Network, Config},
     consensus::Inner,
-    rpc::{http_rpc::HttpRpc, ConsensusRpc}
+    rpc::ConsensusRpc
 };
 use log::{debug, info, warn};
-use nori_hash::sha256_hash::sha256_hash_helios_store;
-use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputs, ProofInputsWithWindow};
-use nori_sp1_helios_program::consensus::consensus_program;
 use reqwest::Url;
 use std::{env, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc::channel, watch};
