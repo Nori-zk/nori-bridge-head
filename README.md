@@ -2,17 +2,13 @@
 
 Helios light client running inside SP1 zkVM generating consensus proofs used in Nori bridge.
 
-Note the relevant workspace is within the `/nori` folder. And nori specific library code have a prefix of `nori-`.
+Note the relevant workspace is within the `/nori` folder. And nori specific library code have a prefix of `nori-` or nested within folders with such a prefix.
 
 ## Installation
 
 Rust installation:
 
 `cargo build`
-
-Smart contract installation (as `NoriTokenBridge.json` is needed from [Nori Bridge SDK](https://github.com/Nori-zk/nori-bridge-sdk) ):
-
-`cd cd nori/src/contracts/ && npm install`
 
 ## Configuration
 
@@ -32,8 +28,8 @@ SP1_PROVER=mock
 SP1_PROOF_TYPE=groth16
 
 # SP1 Network prover (if using SP1_PROVER=network)
-NETWORK_PRIVATE_KEY=0x0..
-NETWORK_RPC_URL=https://rpc.mainnet.succinct.xyz
+SP1_NETWORK_PRIVATE_KEY=0x0..
+SP1_NETWORK_RPC_URL=https://rpc.mainnet.succinct.xyz
 SP1_NETWORK_MODE=Mainnet
 
 # Helios polling interval for new slots.
@@ -64,9 +60,9 @@ NORI_LOG=info
 - **SP1_PROVER**: Prover mode - `mock`, `cpu`, `cuda`, or `network` (Succinct Prover Network)
 
 **SP1 Network Mode (when SP1_PROVER=network):**
-- **NETWORK_PRIVATE_KEY**: Private key for network prover authentication (required)
-- **NETWORK_RPC_URL**: Network RPC endpoint
-- **SP1_NETWORK_MODE**: Network type - `Mainnet` or `Reserved` (default: Mainnet)
+- **SP1_NETWORK_PRIVATE_KEY**: Private key for network prover authentication (required)
+- **SP1_NETWORK_RPC_URL**: Network RPC endpoint
+- **SP1_NETWORK_MODE**: Network type - `mainnet` or `reserved` (default: Mainnet)
 - **SP1_FULFILLMENT_STRATEGY**: Fulfillment method - `auction`, `hosted`, or `reserved` (defaults: Mainnet=auction, Reserved=reserved)
 - **SP1_CYCLE_LIMIT**: Max cycles (defaults: Mainnet=1T, Reserved=100M)
 - **SP1_GAS_LIMIT**: Gas limit (default: 1B)
@@ -92,16 +88,16 @@ SP1_PROOF_TYPE=groth16
 ```bash
 SP1_PROVER=network
 SP1_PROOF_TYPE=plonk
-NETWORK_PRIVATE_KEY=0x...
-SP1_NETWORK_MODE=Mainnet
+SP1_NETWORK_PRIVATE_KEY=0x...
+SP1_NETWORK_MODE=mainnet
 ```
 
 **Network proving (Reserved capacity):**
 ```bash
 SP1_PROVER=network
 SP1_PROOF_TYPE=plonk
-NETWORK_PRIVATE_KEY=0x...
-SP1_NETWORK_MODE=Reserved
+SP1_NETWORK_PRIVATE_KEY=0x...
+SP1_NETWORK_MODE=reserved
 ```
 
 ## Build Nori-Sp1-Helios-ZK
@@ -126,4 +122,4 @@ cargo build
 
 ## Nori Contract
 
-For information on how to deploy the source contract see [here](./nori-contracts/README.md). 
+For information on how to deploy the source contract see [here](https://github.com/Nori-zk/nori-bridge-sdk/tree/main/contracts/ethereum). 

@@ -10,8 +10,8 @@ use std::{env, str::FromStr, time::Duration};
 const ENV_SP1_PROVER: &str = "SP1_PROVER"; // Required: validated in nori/src/bridge_head/api.rs:123
 
 // Reference: sp1-sdk-5.2.2/src/network/builder.rs:32,50,166,178 (NetworkProverBuilder)
-const ENV_NETWORK_PRIVATE_KEY: &str = "NETWORK_PRIVATE_KEY"; // Required when SP1_PROVER=network (line 166)
-const ENV_NETWORK_RPC_URL: &str = "NETWORK_RPC_URL"; // Optional with SDK defaults (line 178-179)
+const ENV_NETWORK_PRIVATE_KEY: &str = "SP1_NETWORK_PRIVATE_KEY"; // Required when SP1_PROVER=network (line 166)
+const ENV_NETWORK_RPC_URL: &str = "SP1_NETWORK_RPC_URL"; // Optional with SDK defaults (line 178-179)
 
 // Nori-specific environment variables (not defined in SDK, uses builder methods instead):
 // These map to SDK builder methods: .network_for(), .strategy(), .gas_limit(), etc.
