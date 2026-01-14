@@ -165,17 +165,19 @@ impl ProverConfig {
             "network" => {
                 // Get network private key from environment if set
                 // Reference: sp1-sdk-5.2.2/src/network/builder.rs:32,166
-                let network_mode = env::var(ENV_SP1_NETWORK_MODE)
-                    .ok()
-                    .and_then(|s| {
-                        match s.to_lowercase().as_str() {
-                            "mainnet" => Some(NetworkMode::Mainnet),
-                            "reserved" => Some(NetworkMode::Reserved),
-                            // Add other variants if the SDK adds them
-                            _ => None, // Explicitly reject anything else
-                        }
-                    })
-                    .unwrap_or(NetworkMode::Mainnet);
+                let network_mode = match env::var(ENV_SP1_NETWORK_MODE).ok().as_deref() {
+                    Some("mainnet") => NetworkMode::Mainnet,
+                    Some("reserved") => NetworkMode::Reserved,
+                    Some(other) => {
+                        return Err(anyhow::anyhow!(
+                            "Invalid {} value: '{}'. Expected 'mainnet' or 'reserved'",
+                            ENV_SP1_NETWORK_MODE,
+                            other
+                        ))
+                    }
+                    None => NetworkMode::Mainnet
+                };
+
                 let private_key = env::var(ENV_NETWORK_PRIVATE_KEY).map_err(|_| {
                     anyhow::anyhow!("{} required for network mode", ENV_NETWORK_PRIVATE_KEY)
                 })?;
