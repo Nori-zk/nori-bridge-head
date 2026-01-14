@@ -160,9 +160,11 @@ impl BridgeHead {
         )
     }
 
-    /// Event dispatchers
+    // ================================================================================================
+    // Event dispatchers
+    // ================================================================================================
 
-    //  Emit proofs
+    ///  Emit proofs
     async fn trigger_listener_with_proof(
         &mut self,
         payload: ProofMessage,
@@ -170,7 +172,7 @@ impl BridgeHead {
         self.event_tx.send(BridgeHeadEvent::ProofMessage(payload)).await
     }
 
-    // Emit notices
+    /// Emit notices
     async fn trigger_listener_with_notice(
         &mut self,
         extension: TransitionNoticeBridgeHeadMessageExtension,
@@ -181,9 +183,96 @@ impl BridgeHead {
         self.event_tx.send(BridgeHeadEvent::NoticeMessage(notice_message)).await
     }
 
-    /// Jobs Handlers
+    // ================================================================================================
+    // SP1 Job + Handlers
+    // ================================================================================================
 
-    // Handle prover job success
+    /// Create SP1 prover job
+    async fn stage_transition_proof(
+        &mut self,
+        sp1_config: Arc<ProverConfig>,
+        proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>,
+    ) -> Result<()> {
+        // Get job id
+        self.job_id += 1;
+        let job_id: u64 = self.job_id;
+
+        // Print received job message
+        info!(
+            "Nori bridge head updater received a new job {}. Spawning a new worker.",
+            job_id
+        );
+
+        // Insert job details into map
+        self.prover_jobs.insert(
+            job_id,
+            ProverJob {
+                inputs_with_window: proof_inputs_with_window.clone(),
+                start_instant: Instant::now(),
+            },
+        );
+
+        // Create job data tx
+        let tx = self.job_tx.clone();
+
+        // Clone job arguments
+        let current_slot = self.current_slot;
+        let store_hash = self.store_hash;
+        let inputs = proof_inputs_with_window.proof_inputs;
+        let expected_output_slot = proof_inputs_with_window.expected_output_slot;
+        let expected_output_store_hash = proof_inputs_with_window.expected_output_store_hash;
+
+        // Spawn proof job in worker thread (check for blocking)
+        tokio::spawn(async move {
+            // Execute job
+            let proof_result = finality_update_job(sp1_config, job_id, current_slot, inputs).await;
+
+            // Send appropriate tx Ok or Err
+            // Bounded channel requires .await. If send fails, receiver dropped (system shutting down).
+            match proof_result {
+                Ok(prover_job_output) => {
+                    if tx.send(Ok(prover_job_output)).await.is_err() {
+                        error!("Bridge Head API Error: Failed to send job success result - receiver dropped (system shutdown)");
+                    }
+                }
+                Err(error) => {
+                    let job_error = ProverJobError { job_id, error };
+                    if tx.send(Err(job_error)).await.is_err() {
+                        error!("Bridge Head API Error: Failed to send job error result - receiver dropped (system shutdown)");
+                    }
+                }
+            }
+        });
+
+        // Here we should tell the finality_change_detector that we have a job inflight and its expected_output_slot
+        // So it can begin preparing proof inputs from this input slot as well..
+        self.finality_stage_input_tx
+            .as_ref()
+            .unwrap()
+            .send(FinalityChangeDetectorUpdate {
+                slot: expected_output_slot,
+                store_hash: expected_output_store_hash,
+            })
+            .await?;
+
+        // Notify of a job created
+        self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobCreated(
+                TransitionNoticeExtensionBridgeHeadJobCreated {
+                    input_slot: self.current_slot,
+                    input_block_number: proof_inputs_with_window.input_block_number,
+                    job_id,
+                    expected_output_slot: self.next_slot,
+                    expected_output_block_number: proof_inputs_with_window
+                        .expected_output_block_number,
+                    input_store_hash: store_hash,
+                },
+            ))
+            .await?;
+
+        Ok(())
+    }
+
+    /// Handle prover job success
     async fn handle_prover_success(
         &mut self,
         job_id: u64,
@@ -278,7 +367,7 @@ impl BridgeHead {
         Ok(())
     }
 
-    // Handle prover job failures
+    /// Handle prover job failures
     async fn handle_prover_failure(
         &mut self,
         err: &ProverJobError,
@@ -318,92 +407,9 @@ impl BridgeHead {
             .await
     }
 
-    // Create prover job
-    async fn stage_transition_proof(
-        &mut self,
-        sp1_config: Arc<ProverConfig>,
-        proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>,
-    ) -> Result<()> {
-        // Get job id
-        self.job_id += 1;
-        let job_id: u64 = self.job_id;
-
-        // Print received job message
-        info!(
-            "Nori bridge head updater received a new job {}. Spawning a new worker.",
-            job_id
-        );
-
-        // Insert job details into map
-        self.prover_jobs.insert(
-            job_id,
-            ProverJob {
-                inputs_with_window: proof_inputs_with_window.clone(),
-                start_instant: Instant::now(),
-            },
-        );
-
-        // Create job data tx
-        let tx = self.job_tx.clone();
-
-        // Clone job arguments
-        let current_slot = self.current_slot;
-        let store_hash = self.store_hash;
-        let inputs = proof_inputs_with_window.proof_inputs;
-        let expected_output_slot = proof_inputs_with_window.expected_output_slot;
-        let expected_output_store_hash = proof_inputs_with_window.expected_output_store_hash;
-
-        // Spawn proof job in worker thread (check for blocking)
-        tokio::spawn(async move {
-            // Execute job
-            let proof_result = finality_update_job(sp1_config, job_id, current_slot, inputs).await;
-
-            // Send appropriate tx Ok or Err
-            // Bounded channel requires .await. If send fails, receiver dropped (system shutting down).
-            match proof_result {
-                Ok(prover_job_output) => {
-                    if tx.send(Ok(prover_job_output)).await.is_err() {
-                        error!("Bridge Head API Error: Failed to send job success result - receiver dropped (system shutdown)");
-                    }
-                }
-                Err(error) => {
-                    let job_error = ProverJobError { job_id, error };
-                    if tx.send(Err(job_error)).await.is_err() {
-                        error!("Bridge Head API Error: Failed to send job error result - receiver dropped (system shutdown)");
-                    }
-                }
-            }
-        });
-
-        // Here we should tell the finality_change_detector that we have a job inflight and its expected_output_slot
-        // So it can begin preparing proof inputs from this input slot as well..
-        self.finality_stage_input_tx
-            .as_ref()
-            .unwrap()
-            .send(FinalityChangeDetectorUpdate {
-                slot: expected_output_slot,
-                store_hash: expected_output_store_hash,
-            })
-            .await?;
-
-        // Notify of a job created
-        self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobCreated(
-                TransitionNoticeExtensionBridgeHeadJobCreated {
-                    input_slot: self.current_slot,
-                    input_block_number: proof_inputs_with_window.input_block_number,
-                    job_id,
-                    expected_output_slot: self.next_slot,
-                    expected_output_block_number: proof_inputs_with_window
-                        .expected_output_block_number,
-                    input_store_hash: store_hash,
-                },
-            ))
-            .await?;
-
-        Ok(())
-    }
-
-    /// Commands
+    // ================================================================================================
+    // Commands
+    // ================================================================================================
 
     // Advance the bridge head
     async fn advance(
@@ -461,7 +467,9 @@ impl BridgeHead {
         Ok(())
     }
 
-    /// Event loop
+    // ================================================================================================
+    // Event loop
+    // ================================================================================================
 
     pub async fn run(mut self, current_slot: u64, store_hash: FixedBytes<32>, pipeline_inflight_next_expected_output: Option<FinalityChangeDetectorUpdate>) {
         // Setup polling client for finality change detection

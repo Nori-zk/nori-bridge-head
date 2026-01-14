@@ -1,6 +1,6 @@
 use super::{execution::http::ExecutionHttpProxy, multiplex, query_with_fallback};
 use nori_hash::sha256_hash::sha256_hash_helios_store;
-use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputs, ProofInputsWithWindow};
+use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputsWithWindow};
 use nori_sp1_helios_program::consensus::consensus_program;
 use alloy_primitives::{FixedBytes, B256};
 use anyhow::{anyhow, Error, Result};

@@ -20,11 +20,13 @@ pub struct CommandHandle {
     command_tx: Sender<Command>,
 }
 
+/// Bridge head command handle
 impl CommandHandle {
     pub fn new(command_tx: Sender<Command>) -> Self {
         Self { command_tx }
     }
 
+    /// Send a message to the bridge head api to stage an SP1 job
     pub async fn stage_transition_proof(
         &self,
         proof_inputs_with_window: ProofInputsWithWindow<MainnetConsensusSpec>,
@@ -37,6 +39,7 @@ impl CommandHandle {
             .await;
     }
 
+    /// Send a message to the bridge head to inform it of a finality advancement after it has been settled on Mina
     pub async fn advance(
         &self,
         slot: u64,
