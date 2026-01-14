@@ -45,12 +45,11 @@ impl LocalProver {
         proof_type: &ProofType,
     ) -> Result<SP1ProofWithPublicValues> {
         match self {
-            //TODO why ?
             LocalProver::Mock(p) | LocalProver::Cpu(p) => {
-                let req = p.prove(pk, stdin);
+                let request = p.prove(pk, stdin);
                 match proof_type {
-                    ProofType::Plonk => req.plonk().run(),
-                    ProofType::Groth16 => req.groth16().run(),
+                    ProofType::Plonk => request.plonk().run(),
+                    ProofType::Groth16 => request.groth16().run(),
                 }
             }
             LocalProver::Cuda(p) => {

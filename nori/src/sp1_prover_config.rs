@@ -167,9 +167,15 @@ impl ProverConfig {
                 // Reference: sp1-sdk-5.2.2/src/network/builder.rs:32,166
                 let network_mode = env::var(ENV_SP1_NETWORK_MODE)
                     .ok()
-                    .and_then(|s| s.parse::<NetworkMode>().ok()) // Uses FromStr impl at mod.rs:54-63
-                    .unwrap_or(NetworkMode::Mainnet); // Default when reserved-capacity feature not enabled
-
+                    .and_then(|s| {
+                        match s.to_lowercase().as_str() {
+                            "mainnet" => Some(NetworkMode::Mainnet),
+                            "reserved" => Some(NetworkMode::Reserved),
+                            // Add other variants if the SDK adds them
+                            _ => None, // Explicitly reject anything else
+                        }
+                    })
+                    .unwrap_or(NetworkMode::Mainnet);
                 let private_key = env::var(ENV_NETWORK_PRIVATE_KEY).map_err(|_| {
                     anyhow::anyhow!("{} required for network mode", ENV_NETWORK_PRIVATE_KEY)
                 })?;
