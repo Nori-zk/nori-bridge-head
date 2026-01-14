@@ -120,6 +120,28 @@ impl ProverConfig {
         Self::mock(ProofType::Plonk)
     }
 
+    /// Mock prover whose proof type is read from `SP1_PROOF_TYPE` env var.
+    /// Errors if the variable is missing or contains an invalid value.
+    pub fn mock_from_env() -> Result<Self> {
+        let proof_type = match env::var(ENV_SP1_PROOF_TYPE).ok().as_deref() {
+            Some("plonk")  => ProofType::Plonk,
+            Some("groth16")=> ProofType::Groth16,
+            Some(other) => return Err(anyhow::anyhow!(
+                "Invalid {} value: '{}'. Expected 'plonk' or 'groth16'",
+                ENV_SP1_PROOF_TYPE, other
+            )),
+            None => return Err(anyhow::anyhow!(
+                "Missing {} environment variable. Expected 'plonk' or 'groth16'",
+                ENV_SP1_PROOF_TYPE
+            )),
+        };
+
+        Ok(ProverConfig {
+            mode: ProverMode::Local(LocalProverMode::Mock),
+            proof_type,
+        })
+    }
+
     /// Load and validate configuration from environment
     pub fn from_env() -> Result<Self> {
         let sp1_prover = env::var(ENV_SP1_PROVER).unwrap_or_else(|_| "cpu".to_string());

@@ -19,7 +19,10 @@ async fn main() -> Result<()> {
         .unwrap();
 
     // Get the mock config
-    let config = Arc::new(ProverConfig::mock_plonk());
+    let config = Arc::new(
+        ProverConfig::mock_from_env()
+            .expect("Should have been given a valid config for mock Sp1")
+    );
     
     // Run mock program.
     println!("Running SP1 prover");

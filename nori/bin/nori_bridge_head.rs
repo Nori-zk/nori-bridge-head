@@ -61,5 +61,5 @@ async fn main() -> Result<()> {
         .await
         .expect("Failed to listen for shutdown signal");
 
-    process::exit(1);
+    process::exit(0);
 }

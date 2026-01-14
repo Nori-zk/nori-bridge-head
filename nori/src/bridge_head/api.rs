@@ -516,7 +516,7 @@ impl BridgeHead {
                 msg = finality_output_rx.recv() => match msg {
                     Some(event) => {
                         if let Err(err) = self.on_beacon_finality_change(event).await {
-                            error!("Bridge Head API Error: Failed to send finality change event: {:?}", err); // FIXME Language should state who we are sending it to
+                            error!("Bridge Head API Error: Failed to send finality change event - observer receiver dropped: {:?}", err);
                             break;
                         }
                     }
@@ -544,7 +544,7 @@ impl BridgeHead {
                                 }
                                 // Deal with advance invocation
                                 if let Err(err) = self.advance(message.slot, message.store_hash).await {
-                                    error!("Bridge Head API Error: Failed to send head advanced event: {:?}", err); // FIXME Language should say who we are sending the event to.
+                                    error!("Bridge Head API Error: Failed to send head advanced event - observer receiver dropped: {:?}", err);
                                     break;
                                 }
                             }
@@ -571,14 +571,15 @@ impl BridgeHead {
                             }
                             Err(err) => {
                                 if let Err(send_err) = self.handle_prover_failure(&err).await {
-                                    error!("Bridge Head API Error: Failed to send job failure event: {:?}", send_err); // FIXME Language should include the observer
+                                    error!("Bridge Head API Error: Failed to send job failure event - observer receiver dropped: {:?}", send_err);
                                     break;
                                 }
                             }
                         }
                     }
                     None => {
-                        error!("Bridge Head API Error: SP1 job result channel has been closed by worker."); // FIXME are we sure this is good language by what worker? we own the channel? Could this be null if a tx ref drops? dont think so... do we have a bug here? lots of transmitter cloan the tx we should die if one of them sends a None because it dereferences check
+                        // Should never happen
+                        error!("Bridge Head API Error: SP1 prover job result channel closed - all senders dropped. This should not happen since we hold self.job_tx.");
                         break;
                     }
                 },
