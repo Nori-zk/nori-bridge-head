@@ -1,9 +1,18 @@
+use std::process;
 use anyhow::Result;
-use log::info;
+use log::{info,error};
 use sp1_sdk::SP1ProofWithPublicValues;
 use std::{env, fs, path::Path};
-
 use crate::bridge_head::api::ProofMessage;
+
+/// Panic the entire process with a message.
+/// Use this when an error is unrecoverable and the entire application should restart.
+/// This ensures we don't enter a zombie state where actors are dead but main process continues.
+pub fn panic_more(message: &str) -> ! {
+    error!("FATAL: {}", message);
+    error!("Terminating entire process");
+    process::exit(1);
+}
 
 pub async fn handle_nori_proof(proof: &SP1ProofWithPublicValues, latest_block: u64) -> Result<()> {
     // Create directory to save the proofs

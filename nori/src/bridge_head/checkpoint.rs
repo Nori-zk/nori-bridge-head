@@ -12,12 +12,12 @@ pub struct NoriBridgeCheckpoint {
     pub store_hash: FixedBytes<32>
 }
 
-// Static method to check if the checkpoint file exists
+/// Static method to check if the checkpoint file exists
 pub fn nb_checkpoint_exists() -> bool {
     Path::new(NB_CHECKPOINT_FILE).exists()
 }
 
-// Static method to load the checkpoint from file
+/// Static method to load the checkpoint from file
 pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
     // Open the checkpoint file
     let mut file = File::open(NB_CHECKPOINT_FILE).expect("Failed to open nori checkpoint file.");
@@ -34,6 +34,7 @@ pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
     Ok(nb_checkpoint)
 }
 
+/// Static method to save a checkpoint file
 pub fn save_nb_checkpoint(slot: u64, store_hash: FixedBytes<32>) {
     info!("Saving checkpoint.");
     

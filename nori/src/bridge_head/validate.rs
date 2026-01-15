@@ -1,15 +1,10 @@
-use std::process;
-use log::error;
+use crate::utils::panic_more;
 
 /// Terminates the program if any required variable is missing
 pub fn validate_env(env_vars: &[&str]) {
     for var_name in env_vars {
         if std::env::var(var_name).is_err() {
-            error!(
-                "Critical boot error: Missing {} environment variable",
-                var_name
-            );
-            process::exit(1);
+            panic_more(&format!("Critical boot error: Missing {} environment variable", var_name));
         }
     }
 }
