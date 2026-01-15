@@ -46,17 +46,17 @@ impl LocalProver {
     ) -> Result<SP1ProofWithPublicValues> {
         match self {
             LocalProver::Mock(p) | LocalProver::Cpu(p) => {
-                let request = p.prove(pk, stdin);
+                let cpu_prove_builder = p.prove(pk, stdin);
                 match proof_type {
-                    ProofType::Plonk => request.plonk().run(),
-                    ProofType::Groth16 => request.groth16().run(),
+                    ProofType::Plonk => cpu_prove_builder.plonk().run(),
+                    ProofType::Groth16 => cpu_prove_builder.groth16().run(),
                 }
             }
             LocalProver::Cuda(p) => {
-                let request = p.prove(pk, stdin);
+                let cuda_prove_builder = p.prove(pk, stdin);
                 match proof_type {
-                    ProofType::Plonk => request.plonk().run(),
-                    ProofType::Groth16 => request.groth16().run(),
+                    ProofType::Plonk => cuda_prove_builder.plonk().run(),
+                    ProofType::Groth16 => cuda_prove_builder.groth16().run(),
                 }
             }
         }
@@ -109,7 +109,7 @@ fn generate_proof(
                 // SDK_DEFAULT_PRICE_PER_PGU: u64 = 1_000_000_000u64 (note this is 1e9 scaling compared to $PROVE)
                 // Max price per bPGU: 1000000000000000000 (1.0000 $PROVE)
                 .max_price_per_pgu(net.max_price_per_pgu)
-                // The user can provide a value (error if invalid) for this via ENV_SKIP_SIMULATION
+                // The user can provide a value (error if invalid) for this via ENV_SP1_SKIP_SIMULATION
                 // OR we will default to false (if not set)
                 .skip_simulation(net.skip_simulation)
                 // The user can provide a value (error if invalid) for this via ENV_SP1_TIMEOUT_SECS

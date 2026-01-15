@@ -479,6 +479,9 @@ impl BridgeHead {
                 .expect("Failed to load a valid Sp1 config from env")
         );
 
+        // Print the loaded configuration for user visibility
+        sp1_config.print_config();
+
         // Setup polling client for finality change detection
         info!("Starting finality change detector.");
         let (

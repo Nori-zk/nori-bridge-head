@@ -30,7 +30,7 @@ SP1_PROOF_TYPE=groth16
 # SP1 Network prover (if using SP1_PROVER=network)
 SP1_NETWORK_PRIVATE_KEY=0x0..
 SP1_NETWORK_RPC_URL=https://rpc.mainnet.succinct.xyz
-SP1_NETWORK_MODE=Mainnet
+SP1_NETWORK_MODE=mainnet
 
 # Helios polling interval for new slots.
 NORI_HELIOS_POLLING_INTERVAL=
@@ -61,12 +61,16 @@ NORI_LOG=info
 
 **SP1 Network Mode (when SP1_PROVER=network):**
 - **SP1_NETWORK_PRIVATE_KEY**: Private key for network prover authentication (required)
-- **SP1_NETWORK_RPC_URL**: Network RPC endpoint
-- **SP1_NETWORK_MODE**: Network type - `mainnet` or `reserved` (default: Mainnet)
-- **SP1_FULFILLMENT_STRATEGY**: Fulfillment method - `auction`, `hosted`, or `reserved` (defaults: Mainnet=auction, Reserved=reserved)
-- **SP1_CYCLE_LIMIT**: Max cycles (defaults: Mainnet=1T, Reserved=100M)
-- **SP1_GAS_LIMIT**: Gas limit (default: 1B)
+- **SP1_NETWORK_RPC_URL**: Network RPC endpoint (defaults: Mainnet=`https://rpc.mainnet.succinct.xyz`, Reserved=`https://rpc.production.succinct.xyz`)
+- **SP1_NETWORK_MODE**: Network type - `mainnet` or `reserved` (default: `mainnet`)
+- **SP1_FULFILLMENT_STRATEGY**: Fulfillment method - `auction`, `hosted`, or `reserved` (defaults: Mainnet=`auction`, Reserved=`reserved`)
+- **SP1_AUCTION_TIMEOUT_SECS**: Auction timeout in seconds, only used when strategy is `auction` (default: 30)
+- **SP1_MAX_PRICE_PER_PGU**: Maximum price per PGU (default: 1,000,000,000 / 1.0 $PROVE)
+- **SP1_SKIP_SIMULATION**: Skip simulation step - `true` or `false`. When `true`, you must provide cycle/gas limits (default: `false`)
+- **SP1_CYCLE_LIMIT**: Max cycles. Only required when `SP1_SKIP_SIMULATION=true`; otherwise SP1 calculates from simulation (defaults when required: Mainnet=1T, Reserved=100M)
+- **SP1_GAS_LIMIT**: Gas limit. Only required when `SP1_SKIP_SIMULATION=true`; otherwise SP1 calculates from simulation (default when required: 1B)
 - **SP1_TIMEOUT_SECS**: Overall timeout in seconds (default: 600 / 10 minutes)
+- **SP1_WHITELIST**: Comma-separated list of prover addresses to whitelist. If not set, SDK uses recently reliable provers (optional)
 
 See `.env.example`
 

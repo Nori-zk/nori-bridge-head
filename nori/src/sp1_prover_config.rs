@@ -1,5 +1,6 @@
 use alloy_primitives::Address;
 use anyhow::{Context, Result};
+use log::info;
 use reqwest::Url;
 use sp1_sdk::network::{proto::types::FulfillmentStrategy, NetworkMode};
 use std::{env, str::FromStr, time::Duration};
@@ -22,7 +23,7 @@ const ENV_SP1_CYCLE_LIMIT: &str = "SP1_CYCLE_LIMIT"; // Maps to ProveRequest.cyc
 const ENV_SP1_GAS_LIMIT: &str = "SP1_GAS_LIMIT"; // Maps to ProveRequest.gas_limit()
 
 // Reference: sp1-sdk-5.2.2/src/network/prove.rs:655-659 (deprecated SDK env var, warns to use method)
-const ENV_SKIP_SIMULATION: &str = "SKIP_SIMULATION"; // Deprecated SDK var, maps to ProveRequest.skip_simulation()
+const ENV_SP1_SKIP_SIMULATION: &str = "SP1_SKIP_SIMULATION"; // Maps to ProveRequest.skip_simulation()
 const ENV_SP1_TIMEOUT_SECS: &str = "SP1_TIMEOUT_SECS"; // Maps to ProveRequest.timeout()
 const ENV_SP1_MAX_PRICE_PER_PGU: &str = "SP1_MAX_PRICE_PER_PGU";
 const ENV_SP1_AUCTION_TIMEOUT_SECS: &str = "SP1_AUCTION_TIMEOUT_SECS"; // Maps to auction timeout
@@ -115,11 +116,11 @@ impl ProverConfig {
         let proof_type = match env::var(ENV_SP1_PROOF_TYPE).ok().as_deref() {
             Some("plonk") => ProofType::Plonk,
             Some("groth16") => ProofType::Groth16,
-            Some(other) => {
+            Some(invalid) => {
                 return Err(anyhow::anyhow!(
                     "Invalid {} value: '{}'. Expected 'plonk' or 'groth16'",
                     ENV_SP1_PROOF_TYPE,
-                    other
+                    invalid
                 ))
             }
             None => {
@@ -138,43 +139,41 @@ impl ProverConfig {
 
     /// Load and validate configuration from environment
     pub fn from_env() -> Result<Self> {
-        let sp1_prover = env::var(ENV_SP1_PROVER).unwrap_or_else(|_| "cpu".to_string());
-
-        // Behaviour: Get proof type from environment, defaults to groth16, error on invalid value
+        // Behaviour: Get proof type from environment, error on missing or invalid value.
         let proof_type = match env::var(ENV_SP1_PROOF_TYPE).ok().as_deref() {
             Some("plonk") => ProofType::Plonk,
             Some("groth16") => ProofType::Groth16,
-            Some(other) => {
+            Some(invalid) => {
                 return Err(anyhow::anyhow!(
                     "Invalid {} value: '{}'. Expected 'plonk' or 'groth16'",
                     ENV_SP1_PROOF_TYPE,
-                    other
+                    invalid
                 ))
             }
             None => {
                 return Err(anyhow::anyhow!(
-                    "Invalid {} value: None. Expected 'plonk' or 'groth16'",
+                    "Missing {} environment variable. Expected 'plonk' or 'groth16'",
                     ENV_SP1_PROOF_TYPE
                 ))
             }
         };
 
-        let mode = match sp1_prover.as_str() {
-            "mock" => ProverMode::Local(LocalProverMode::Mock),
-            "cpu" => ProverMode::Local(LocalProverMode::Cpu),
-            "cuda" => ProverMode::Local(LocalProverMode::Cuda),
-            "network" => {
-                // Get network private key from environment if set
+        // Behaviour: provide a valid prover mode or error. No default - must be explicitly set.
+        let mode = match env::var(ENV_SP1_PROVER).ok().as_deref() {
+            Some("mock") => ProverMode::Local(LocalProverMode::Mock),
+            Some("cpu") => ProverMode::Local(LocalProverMode::Cpu),
+            Some("cuda") => ProverMode::Local(LocalProverMode::Cuda),
+            Some("network") => {
                 // Behaviour: Pick either 'mainnet' or 'reserved', default to 'mainnet' if not provided and error on invalid value.
                 // Reference: sp1-sdk-5.2.2/src/network/builder.rs:32,166
                 let network_mode = match env::var(ENV_SP1_NETWORK_MODE).ok().as_deref() {
                     Some("mainnet") => NetworkMode::Mainnet,
                     Some("reserved") => NetworkMode::Reserved,
-                    Some(other) => {
+                    Some(invalid) => {
                         return Err(anyhow::anyhow!(
                             "Invalid {} value: '{}'. Expected 'mainnet' or 'reserved'",
                             ENV_SP1_NETWORK_MODE,
-                            other
+                            invalid
                         ))
                     }
                     None => NetworkMode::Mainnet
@@ -253,11 +252,11 @@ impl ProverConfig {
                 // Reference: sp1-sdk-5.2.2/src/network/prover.rs:174 (default)
                 // Reference: sp1-sdk-5.2.2/src/network/prove.rs:655-659 (deprecated SKIP_SIMULATION env var)
                 // Behaviour: provide a valid value or error on invalid, if missing use the default.
-                let skip_simulation = match env::var(ENV_SKIP_SIMULATION) {
+                let skip_simulation = match env::var(ENV_SP1_SKIP_SIMULATION) {
                     Ok(val) => val.parse::<bool>().with_context(|| {
                         format!(
                             "Failed to parse {} as bool. Got: '{}'. Expected 'true' or 'false'",
-                            ENV_SKIP_SIMULATION, val
+                            ENV_SP1_SKIP_SIMULATION, val
                         )
                     })?,
                     Err(_) => SDK_DEFAULT_SKIP_SIMULATION,
@@ -353,15 +352,105 @@ impl ProverConfig {
                     whitelist,
                 })
             }
-            _ => {
+            Some(invalid) => {
                 return Err(anyhow::anyhow!(
-                    "Invalid SP1_PROVER value: '{}'. Expected one of: mock, cpu, cuda, network",
-                    sp1_prover
+                    "Invalid {} value: '{}'. Expected one of: mock, cpu, cuda, network",
+                    ENV_SP1_PROVER,
+                    invalid
+                ))
+            }
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Missing {} environment variable. Expected one of: mock, cpu, cuda, network",
+                    ENV_SP1_PROVER
                 ))
             }
         };
 
         Ok(ProverConfig { mode, proof_type })
+    }
+
+    /// Print configuration details to the log for user visibility
+    pub fn print_config(&self) {
+        info!("========================================");
+        info!("SP1 Prover Configuration");
+        info!("========================================");
+
+        // Proof type
+        let proof_type_str = match &self.proof_type {
+            ProofType::Plonk => "plonk",
+            ProofType::Groth16 => "groth16",
+        };
+        info!("Proof Type: {}", proof_type_str);
+
+        // Prover mode
+        match &self.mode {
+            ProverMode::Local(local_mode) => {
+                let mode_str = match local_mode {
+                    LocalProverMode::Mock => "mock",
+                    LocalProverMode::Cpu => "cpu",
+                    LocalProverMode::Cuda => "cuda",
+                };
+                info!("Prover Mode: {} (local)", mode_str);
+            }
+            ProverMode::Network(net) => {
+                info!("Prover Mode: network");
+                info!("----------------------------------------");
+                info!("Network Configuration:");
+
+                // Network mode
+                let network_mode_str = match net.network_mode {
+                    NetworkMode::Mainnet => "mainnet",
+                    NetworkMode::Reserved => "reserved",
+                };
+                info!("  Network Mode: {}", network_mode_str);
+                info!("  RPC URL: {}", net.rpc_url);
+
+                // Fulfillment strategy
+                match &net.fulfillment {
+                    FulfillmentConfig::Auction { timeout } => {
+                        info!("  Fulfillment Strategy: auction (timeout: {}s)", timeout.as_secs());
+                    }
+                    FulfillmentConfig::Hosted => {
+                        info!("  Fulfillment Strategy: hosted");
+                    }
+                    FulfillmentConfig::Reserved => {
+                        info!("  Fulfillment Strategy: reserved");
+                    }
+                }
+
+                // Pricing and limits
+                info!("  Max Price per PGU: {}", net.max_price_per_pgu);
+                info!("  Skip Simulation: {}", net.skip_simulation);
+
+                // Cycle and gas limits
+                match net.cycle_limit {
+                    Some(limit) => info!("  Cycle Limit: {}", limit),
+                    None => info!("  Cycle Limit: (determined by simulation)"),
+                }
+                match net.gas_limit {
+                    Some(limit) => info!("  Gas Limit: {}", limit),
+                    None => info!("  Gas Limit: (determined by simulation)"),
+                }
+
+                info!("  Timeout: {}s", net.timeout.as_secs());
+
+                // Whitelist
+                match &net.whitelist {
+                    Some(addresses) => {
+                        info!("  Whitelist:");
+                        for addr in addresses {
+                            info!("    - {}", addr);
+                        }
+                    }
+                    None => {
+                        info!("  Whitelist: (SDK default - recently reliable provers)");
+                    }
+                }
+            }
+        }
+
+        info!("========================================");
     }
 }
 
