@@ -1,22 +1,13 @@
-use alloy::sol;
-use alloy_primitives::{Address, Log, B256, U256};
-use anyhow::{Context, Result};
 use nori_sp1_helios_primitives::types::{
     get_storage_location_for_key, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
 };
+use nori_contract_bindings::NoriStateBridge::TokensLocked;
+use alloy_primitives::{Address, Log, B256, U256};
+use anyhow::{Context, Result};
 use std::{
     collections::HashMap,
     env,
 };
-use NoriStateBridge::TokensLocked;
-
-// Npm install in this folder if the below indicates its not found.
-sol!(
-    #[allow(missing_docs)]
-    #[sol(rpc)]
-    NoriStateBridge,
-    "src/contracts/node_modules/@nori-zk/ethereum-token-bridge/build/artifacts/contracts/NoriTokenBridge.sol/NoriTokenBridge.json"
-);
 
 pub fn get_source_contract_address() -> Result<Address> {
     let source_state_bridge_contract_address = env::var("NORI_TOKEN_BRIDGE_ADDRESS")

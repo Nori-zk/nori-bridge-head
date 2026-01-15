@@ -1,27 +1,27 @@
 use crate::{
-    contracts::bindings::{
-        addresses_attestation_pair_to_storage_slots, get_source_contract_address, NoriStateBridge,
+    contract::{
+        addresses_attestation_pair_to_storage_slots, get_source_contract_address,
     },
     rpcs::query_with_fallback,
 };
+use nori_contract_bindings::NoriStateBridge;
+use nori_sp1_helios_primitives::types::{
+    ConsensusProofInputs, ContractStorage, ProofInputs, ProofInputsWithWindow, StorageSlot,
+};
+use nori_sp1_helios_program::consensus::consensus_mpt_program;
 use alloy::{
     eips::BlockId,
     network::Ethereum,
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::{EIP1186AccountProofResponse, Filter},
-    sol_types::SolEvent,
-    transports::http::Http,
+    sol_types::SolEvent
 };
 use alloy_primitives::{Address, FixedBytes, Log, B256};
 use anyhow::{anyhow, Context, Error, Result};
 use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, warn};
-use nori_sp1_helios_primitives::types::{
-    ConsensusProofInputs, ContractStorage, ProofInputs, ProofInputsWithWindow, StorageSlot,
-};
-use nori_sp1_helios_program::consensus::consensus_mpt_program;
-use reqwest::{Client, Url};
+use reqwest::Url;
 use std::{env, marker::PhantomData};
 use tokio::time::{sleep, Duration};
 

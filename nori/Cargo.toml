@@ -1,5 +1,5 @@
 [package]
-version = "9.0.5"
+version = "10.0.0"
 name = "nori"
 edition.workspace = true
 license.workspace = true
@@ -26,6 +26,7 @@ path = "src/lib.rs"
 name = "nori"
 
 [dependencies]
+nori-contract-bindings = { path = "src/contract_bindings" }
 nori-hash = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }
 nori-sp1-helios-program = { workspace = true }

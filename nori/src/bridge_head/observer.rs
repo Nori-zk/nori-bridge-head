@@ -3,58 +3,53 @@ use super::{
     handles::CommandHandle,
     notice_messages::TransitionNoticeBridgeHeadMessage,
 };
-use crate::utils::{handle_nori_proof, handle_nori_proof_message};
+use crate::{
+    bridge_head::checkpoint::save_nb_checkpoint,
+    utils::{handle_nori_proof, handle_nori_proof_message, panic_more},
+};
 use alloy_primitives::FixedBytes;
-use anyhow::{Context, Result};
+use anyhow::Context;
 use async_trait::async_trait;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use log::{error, info, warn};
+use log::{info, warn};
 use nori_sp1_helios_primitives::types::ProofInputsWithWindow;
-use std::process;
 
 /// Event observer trait for handling bridge head events
 #[async_trait]
 pub trait EventObserver: Send + Sync {
     /// Called when a new proof is generated
-    async fn on_transition_proof_succeeded(
-        &mut self,
-        proof_job_data: ProofMessage,
-    ) -> anyhow::Result<()>;
+    async fn on_transition_proof_succeeded(&mut self, proof_job_data: ProofMessage);
+
     /// Called when a bridge head transition notice is generated
     async fn on_bridge_head_transition_notice(
         &mut self,
         notice_data: TransitionNoticeBridgeHeadMessage,
-    ) -> anyhow::Result<()>;
+    );
 
     /// Run method default for handling event messages
     async fn run(
         &mut self,
-        mut bridge_head_event_receiver: tokio::sync::broadcast::Receiver<BridgeHeadEvent>,
+        mut bridge_head_event_receiver: tokio::sync::mpsc::Receiver<BridgeHeadEvent>,
     ) {
         loop {
             tokio::select! {
-                result = bridge_head_event_receiver.recv() => {
-                    match result {
-                        Ok(event) => {
+                msg = bridge_head_event_receiver.recv() => {
+                    match msg {
+                        Some(event) => {
                             // Process the event by matching its variant.
                             match event {
                                 BridgeHeadEvent::ProofMessage(proof_msg) => {
                                     // Call on_proof for a Proof event.
-                                    if let Err(e) = self.on_transition_proof_succeeded(proof_msg).await {
-                                        warn!("Error handling proof event: {}", e);
-                                    }
+                                    self.on_transition_proof_succeeded(proof_msg).await;
                                 },
                                 BridgeHeadEvent::NoticeMessage(notice_msg) => {
                                     // Call on_notice for a Notice event.
-                                    if let Err(e) = self.on_bridge_head_transition_notice(notice_msg).await {
-                                        warn!("Error handling notice event: {}", e);
-                                    }
+                                    self.on_bridge_head_transition_notice(notice_msg).await;
                                 },
                             }
                         },
-                        Err(err) => {
-                            warn!("Error receiving event: {}", err);
-                            break;
+                        None => {
+                            panic_more("Event receiver for BridgeHead dropped")
                         },
                     }
                 },
@@ -67,8 +62,6 @@ pub trait EventObserver: Send + Sync {
 pub struct ExampleBridgeHeadEventObserver {
     /// Handle to trigger bridge head advancement
     bridge_head_handle: CommandHandle,
-    /// Tracks the current slot for beacon finality.
-    latest_beacon_finality_slot: u64,
     /// Indicates whether the bridge head has fired its started event.
     started: bool,
     /// Current bridge slot head
@@ -88,7 +81,6 @@ impl ExampleBridgeHeadEventObserver {
     pub fn new(bridge_head_handle: CommandHandle) -> Self {
         Self {
             bridge_head_handle,
-            latest_beacon_finality_slot: 0,
             started: false,
             current_slot: 0,
             store_hash: FixedBytes::default(),
@@ -103,19 +95,36 @@ impl ExampleBridgeHeadEventObserver {
         // Update our state and the bridge heads state
         self.current_slot = slot;
         self.store_hash = store_hash;
+        // Save the checkpoint
+        save_nb_checkpoint(self.current_slot, self.store_hash);
+
         // Advance the bridge head
-        let _ = self.bridge_head_handle.advance(slot, store_hash).await;
+        if self
+            .bridge_head_handle
+            .advance(slot, store_hash)
+            .await
+            .is_err()
+        {
+            panic_more("Bridge head command channel closed");
+        }
     }
 }
 
 #[async_trait]
 impl EventObserver for ExampleBridgeHeadEventObserver {
-    async fn on_transition_proof_succeeded(&mut self, proof_data: ProofMessage) -> Result<()> {
+    async fn on_transition_proof_succeeded(&mut self, proof_data: ProofMessage) {
         println!("PROOF| {}", proof_data.input_slot);
 
         info!("Saving Nori sp1 proof.");
-        let _ = handle_nori_proof(&proof_data.proof, proof_data.input_slot).await;
-        let _ = handle_nori_proof_message(&proof_data).await;
+        if handle_nori_proof(&proof_data.proof, proof_data.input_slot)
+            .await
+            .is_err()
+        {
+            panic_more("Could not save new Sp1 proof to disk!");
+        };
+        if handle_nori_proof_message(&proof_data).await.is_err() {
+            panic_more("Could not save new Sp1 proof message to disk!");
+        };
 
         if proof_data.output_slot > self.current_slot {
             info!("Proof advanced the bridge head.");
@@ -137,11 +146,15 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             if next_window.input_slot == proof_data.output_slot {
                 info!("VIABLE: Next window proof inputs ARE contiguous, proof data output slot '{}', next window input slot: '{}', staging the next proof immediately.", proof_data.output_slot, next_window.input_slot);
                 // The windows are contiguous so we can immediately start on the next proof
-                let _ = self
+                if self
                     .bridge_head_handle
                     .stage_transition_proof(next_window.clone())
-                    .await;
-                return Ok(());
+                    .await
+                    .is_err()
+                {
+                    panic_more("Bridge head command channel closed");
+                };
+                return;
             } else {
                 info!("NOT VIABLE: Next window proof inputs are NOT contiguous, proof data output slot '{}', next window input slot: '{}'", proof_data.output_slot, next_window.input_slot);
             }
@@ -158,14 +171,12 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             proof_data.output_slot
         );
         self.stage_transition_proof = true;
-
-        Ok(())
     }
 
     async fn on_bridge_head_transition_notice(
         &mut self,
         notice_data: TransitionNoticeBridgeHeadMessage,
-    ) -> Result<()> {
+    ) {
         // Do something specific
         match &notice_data {
             TransitionNoticeBridgeHeadMessage::Started(data) => {
@@ -178,9 +189,6 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                 self.current_slot = data.extension.current_slot;
                 self.store_hash = data.extension.store_hash;
 
-                if data.extension.latest_beacon_slot > self.latest_beacon_finality_slot {
-                    self.latest_beacon_finality_slot = data.extension.latest_beacon_slot;
-                }
 
                 self.stage_transition_proof = true;
             }
@@ -209,13 +217,16 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     if let Some(proof_input_with_window) =
                         self.latest_current_window_validated_proof_input.clone()
                     {
-                        let _ = self
+                        if self
                             .bridge_head_handle
                             .stage_transition_proof(proof_input_with_window)
-                            .await;
+                            .await
+                            .is_err()
+                        {
+                            panic_more("Bridge head command channel closed");
+                        };
                     } else {
-                        error!("Tried to redo a job but latest_validated_proof_input_with_window was not defined");
-                        process::exit(1);
+                        panic_more("Tried to redo a job but latest_validated_proof_input_with_window was not defined");
                     }
                 }
             }
@@ -225,7 +236,6 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     data.extension.slot, data.extension.block_number
                 );
 
-                self.latest_beacon_finality_slot = data.extension.slot;
                 self.latest_current_window_validated_proof_input = Some(
                     *data
                         .extension
@@ -239,7 +249,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                     .cloned();
 
                 if self.stage_transition_proof {
-                    let _ = self
+                    if self
                         .bridge_head_handle
                         .stage_transition_proof(
                             *data
@@ -247,7 +257,11 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
                                 .current_window_proof_inputs_with_window
                                 .clone(),
                         )
-                        .await;
+                        .await
+                        .is_err()
+                    {
+                        panic_more("Bridge head command channel closed");
+                    };
                     self.stage_transition_proof = false;
                 }
             }
@@ -256,11 +270,12 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
             }
         }
 
-        let json =
-            serde_json::to_string(&notice_data).context("Failed to serialize notice data")?;
+        let json_result =
+            serde_json::to_string(&notice_data).context("Failed to serialize notice data");
 
-        info!("NOTICE_DATA| {}", json);
-
-        Ok(())
+        match json_result {
+            Ok(json) => info!("NOTICE_DATA| {}", json),
+            Err(e) => warn!("Failed to serialise notice data: {}", e),
+        };
     }
 }

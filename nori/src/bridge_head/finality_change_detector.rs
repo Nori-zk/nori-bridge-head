@@ -4,7 +4,7 @@ use helios_consensus_core::consensus_spec::{ConsensusSpec, MainnetConsensusSpec}
 use helios_ethereum::rpc::{http_rpc::HttpRpc, ConsensusRpc};
 use log::{debug, error, info};
 use nori_sp1_helios_primitives::types::DualProofInputsWithWindow;
-use std::{process, time::Duration};
+use std::{time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
 // So this needs to be aware of the input slot and store hash...
@@ -28,22 +28,22 @@ use tokio::{sync::mpsc, time::interval};
 ///
 /// # Update variants
 ///
-/// - `BridgeAdvancement`  
+/// - `BridgeAdvancement`
 ///   Defines the start of the **current window** from the bridge head’s slot and store hash
 ///   after a staged proof has finalized. This advances the active head, updates the start of the
 ///   current window, and triggers recalculation of proof inputs.
 ///
-/// - `ProofStaging`  
+/// - `ProofStaging`
 ///   Defines the start of the **next window** from the expected output slot and store hash of
 ///   an in-flight staged proof. This anchors the next window and is used to prepare upcoming
 ///   proof inputs in parallel with the current window.
 ///
 /// # Fields
-/// - `slot`  
+/// - `slot`
 ///   The beacon slot that defines the start of a window:
 ///   - `ProofStaging`: expected output slot of the in-flight staged proof (start of the **next window**).
 ///   - `BridgeAdvancement`: bridge head slot (start of the **current window**).
-/// - `store_hash`  
+/// - `store_hash`
 ///   The consensus store hash at `slot`:
 ///   - `ProofStaging`: hash at the staged proof’s expected output slot.
 ///   - `BridgeAdvancement`: hash at the bridge head slot.
@@ -67,9 +67,9 @@ pub struct FinalityChangeDetectorUpdate {
 /// proof inputs for the **next window** in parallel with the **current window**.
 ///
 /// ## Modes
-/// - **Solo**  
+/// - **Solo**
 ///   Compute proof inputs only for the **current window**.
-/// - **Dual**  
+/// - **Dual**
 ///   Compute proof inputs for both the **current window** and the **next window** concurrently.
 ///
 /// ## Fields
@@ -157,24 +157,38 @@ where
 
                 let current_res = match current {
                     Ok(val) => {
-                        debug!("Dual window proof input calculation. Success in CURRENT window proof input validation. Input slot: {}, Output slot: {}", val.input_slot, val.expected_output_slot);
+                        debug!(
+                            "Dual window proof input calculation. Success in CURRENT window proof input validation. Input slot: {}, Output slot: {}",
+                            val.input_slot,
+                            val.expected_output_slot
+                        );
                         val
                     }
                     Err(e) => {
                         debug!("Dual window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
-                        let _ = result_tx.send(Err(e)).await;
+                        if result_tx.send(Err(e)).await.is_err() {
+                            error!("Validation Actor: Error during transmission of dual window CURRENT proof input calculation error. Finality Transition Detector Actor dropped result receiver");
+                            break;
+                        }
                         continue;
                     }
                 };
 
                 let next_res = match next {
                     Ok(val) => {
-                        debug!("Dual window proof input calculation. Success in NEXT window proof input validation. Input slot: {}, Output slot: {}", val.input_slot, val.expected_output_slot);
+                        debug!(
+                            "Dual window proof input calculation. Success in NEXT window proof input validation. Input slot: {}, Output slot: {}",
+                            val.input_slot,
+                            val.expected_output_slot
+                        );
                         val
                     }
                     Err(e) => {
                         debug!("Dual window proof input calculation. Error in NEXT window proof input validation:\n{}", e);
-                        let _ = result_tx.send(Err(e)).await;
+                        if result_tx.send(Err(e)).await.is_err() {
+                            error!("Validation Actor: Error during transmission of dual window NEXT proof input calculation error. Finality Transition Detector Actor dropped result receiver");
+                            break;
+                        }
                         continue;
                     }
                 };
@@ -190,12 +204,19 @@ where
 
                 let current_res = match current_res {
                     Ok(val) => {
-                        debug!("Solo current window proof input calculation. Success in CURRENT window proof input validation. Input slot: '{}', Output slot '{}'", val.input_slot, val.expected_output_slot);
+                        debug!(
+                            "Solo current window proof input calculation. Success in CURRENT window proof input validation. Input slot: '{}', Output slot '{}'",
+                            val.input_slot,
+                            val.expected_output_slot
+                        );
                         val
                     }
                     Err(e) => {
                         debug!("Solo current window proof input calculation. Error in CURRENT window proof input validation:\n{}", e);
-                        let _ = result_tx.send(Err(e)).await;
+                        if result_tx.send(Err(e)).await.is_err() {
+                            error!("Validation Actor: Error during transmission of solo window proof input calculation error. Finality Transition Detector Actor dropped result receiver");
+                            break;
+                        }
                         continue;
                     }
                 };
@@ -207,9 +228,11 @@ where
             };
 
             if result_tx.send(Ok(res)).await.is_err() {
+                error!("Validation Actor: Finality Transition Detector Actor dropped result receiver while sending success result. Expiring");
                 break;
             }
         }
+        error!("Validation Actor: Task loop has expired. The job channel was closed or the Finality Transition Detector Actor has disconnected");
     });
 
     (job_tx, result_rx)
@@ -250,9 +273,10 @@ async fn try_start_validation_job(
         Some(n) if n.slot != slot => Some(n.clone()),
         Some(n) => {
             info!(
-                "Suppressing next_expected_output because its input slot '{}' equals the current input slot '{}'",
-                n.slot, slot
-            );
+        "Suppressing next_expected_output because its input slot '{}' equals the current input slot '{}'",
+        n.slot,
+        slot
+      );
             None
         }
         None => None,
@@ -271,7 +295,8 @@ async fn try_start_validation_job(
         }
         Err(e) => {
             error!("Validation actor job channel closed unexpectedly: {:?}", e);
-            // FIXME should probably process exit
+            // Returning an error here as if the we failed to send the job it means the receiver failed.
+            // This will cause the finality change detector loop in the function to exit.
             Err(())
         }
     }
@@ -300,15 +325,15 @@ async fn try_start_validation_job(
 /// - `slot`: The initial input slot for the **current window**, from which finality change detection begins (anchored to the bridge's slot header).
 /// - `store_hash`: The hash of the store at the input slot for the **current window**.
 /// - `pipeline_inflight_next_expected_output`: Optional in-flight proof job representing the
-///   expected output slot and store hash of a staged proof currently being processed, i.e. the **next window's** input slot.  
+///   expected output slot and store hash of a staged proof currently being processed, i.e. the **next window's** input slot.
 ///
 /// Purpose:
 ///   The detector computes the **current window’s** proof inputs from the bridge head’s finality slot
 ///   to the latest consensus finality slot, while simultaneously pre-computing the **next window’s**
 ///   proof inputs. The **next window** assumes the in-flight staged job will succeed, starting from its
-///   output slot and extending to the latest consensus finality slot.  
+///   output slot and extending to the latest consensus finality slot.
 ///   This allows the bridge to advance immediately on success using the **next window’s** inputs,
-///   or fall back to the **current window’s** inputs on failure.  
+///   or fall back to the **current window’s** inputs on failure.
 ///   Both windows are validated in parallel to guarantee readiness in either case.
 ///
 /// Returns a tuple containing:
@@ -401,137 +426,173 @@ where
         loop {
             tokio::select! {
                 // Receive input updates when the bridge head stages a job.
-                Some(update) = finality_stage_input_rx.recv() => {
-                    // The staged events represent the output slot / hash of a staged job,
-                    // they represent the other half of the dual input that we need to calculate proofs from.
+                msg = finality_stage_input_rx.recv() => match msg {
+                    Some(update) => {
+                        // The staged events represent the output slot / hash of a staged job,
+                        // they represent the other half of the dual input that we need to calculate proofs from.
 
-                    // Cache the update
-                    let next_expected_output_slot = update.slot;
-                    next_expected_output = Some(update);
+                        // Cache the update
+                        let next_expected_output_slot = update.slot;
+                        next_expected_output = Some(update);
 
-                    // Mark any inflight jobs as stale
-                    if in_flight {
-                        stale = true;
+                        // Mark any inflight jobs as stale
+                        if in_flight {
+                            stale = true;
+                        }
+
+                        info!("Finality transition detector notified of new staging event. \
+                                Next window expected proof input slot: '{}'", next_expected_output_slot);
                     }
-
-                    info!("Finality transition detector notified of new staging event. Next window expected proof input slot: '{}'", next_expected_output_slot);
+                    None => {
+                        error!("Finality Transition Detector Actor: The bridge head (staged proof provider) has \
+                                dropped the sender channel. Cannot receive staging updates.");
+                        break;
+                    }
                 },
                 // Receive input updates when the bridge head advances.
-                Some(update) = finality_advance_input_rx.recv() => {
-                    // Cache the update
-                    slot = update.slot;
-                    store_hash = update.store_hash;
-                    // we should probably just override the slot here FIXME
-                    // our last computed proof input was from a different input slot and thus is not really valid
-                    // when the observer calls advance -> api advance gets called this is with the output slot of that proof
-                    // which is our new input slot. We need to check finality changes from this point!
-                    // so we should reset our latest_slot because we need a new proof input from this slot to finality.
-                    // so we need to mark the latest_slot as our slot. This may mean we emit multiple finality change
-                    // detections for the same beacon finality... but currently we need to do that as otherwise we would be
-                    // re proving from an input slot we have already emitted a proof from.
-                    //if latest_slot < slot {
-                    latest_slot = slot;
-                    //}
+                msg = finality_advance_input_rx.recv() => match msg {
+                    Some(update) => {
+                        // Cache the update
+                        slot = update.slot;
+                        store_hash = update.store_hash;
+                
+                        // Our last computed proof input was from a different input slot and thus is not really valid
+                        // when the observer calls advance -> api advance gets called this is with the output slot of that proof
+                        // which is our new input slot. We need to check finality changes from this point!
+                        // so we should reset our latest_slot because we need a new proof input from this slot to finality.
+                        // so we need to mark the latest_slot as our slot. This may mean we emit multiple finality change
+                        // detections for the same beacon finality... but currently we need to do that as otherwise we would be
+                        // re proving from an input slot we have already emitted a proof from.
+                        latest_slot = slot;
 
-                    // Not sure if the below is needed
-                    if in_flight {
-                        stale = true;
-                    }
-
-                    // Remove the next_expected_output if it represents the same window start as our current window start
-                    if let Some(ref next_expected_output_some) = next_expected_output {
-                        if next_expected_output_some.slot == slot {
-                            info!("Scrubbing next_expected_output as its the same as out slot");
-                            next_expected_output = None
+                        // Not sure if the below is needed
+                        if in_flight {
+                            stale = true;
                         }
-                    }
 
-                    info!("Finality transition detector notified of bridge advance. Current input slot: '{}'", slot);
+                        // Remove the next_expected_output if it represents the same window start as our current window start
+                        if let Some(ref next_expected_output_some) = next_expected_output {
+                            if next_expected_output_some.slot == slot {
+                                info!("Scrubbing next_expected_output as its the same as out slot");
+                                next_expected_output = None
+                            }
+                        }
+
+                        info!("Finality transition detector notified of bridge advance. Current input slot: '{}'", slot);
+                    },
+                    None => {
+                        error!("Finality Transition Detector Actor: The bridge head (advance provider) has \
+                                dropped the sender channel. Cannot receive advancement updates.");
+                        break;
+                    }
                 },
 
                 // Receive validation results
-                Some(result) = validation_result_rx.recv() => {
-                    // We received output from our actor thus we have nothing in-flight anymore.
-                    in_flight = false;
+                msg = validation_result_rx.recv() => match msg {
+                    Some(result) => {
+                        // We received output from our actor thus we have nothing in-flight anymore.
+                        in_flight = false;
 
-                    match result {
-                        Ok(dual_validated_proof_inputs) => {
-                            // If our job received here was stale drop it and try again.
-                            if stale {
-                                debug!("Received dual_validated_proof_inputs but result was stale dropping.");
-                                // Drop this result
-                                stale = false;
-                                // Immediately start an new proof validation job validation_job_tx.send(job)
-                                if try_start_validation_job(&validation_job_tx, slot, store_hash, &next_expected_output, &mut in_flight).await.is_err() {
-                                    break;
-                                }
+                        // If the Validation Actor failed during RPC retrieval or failed to produce valid proof generation,
+                        // log the error and skip this attempt.
+                        let dual_validated_proof_inputs = match result {
+                            Ok(val) => val,
+                            Err(e) => {
+                                debug!("Validation Actor failed to provide valid proof inputs: {:?}", e);
                                 continue;
                             }
+                        };
 
-                            // Update our input and output slot from the current windows proof inputs result.
-                            let input_slot = dual_validated_proof_inputs.current_window.input_slot;
-                            let output_slot = dual_validated_proof_inputs.current_window.expected_output_slot;
+                        // If our job received here was stale drop it and try again.
+                        if stale {
+                            debug!("Received dual_validated_proof_inputs but result was stale dropping.");
+                            // Drop this result
+                            stale = false;
+                            // Immediately start an new proof validation job validation_job_tx.send(job)
+                            if try_start_validation_job(&validation_job_tx, slot, store_hash, &next_expected_output, &mut in_flight).await.is_err() {
+                                error!("Finality Transition Detector Actor: Failed to start validation job for stale result retry.");
+                                break;
+                            }
+                            continue;
+                        }
 
-                            // Only emit output if the input_slot matches the current windows input 'slot' and our output is ahead 
-                            // of the latest_slot (the latest accepted consensus finality slot), thus representing progress.
-                            // We will accept this new output slot in the window beginning at 'slot'
-                            if dual_validated_proof_inputs.current_window.input_slot == slot {
-                                if dual_validated_proof_inputs.current_window.expected_output_slot > latest_slot {
+                        // Update our input and output slot from the current windows proof inputs result.
+                        let input_slot = dual_validated_proof_inputs.current_window.input_slot;
+                        let output_slot = dual_validated_proof_inputs.current_window.expected_output_slot;
 
-                                    debug!("We could have SENT an update SOLO");
+                        // Only emit output if the input_slot matches the current windows input 'slot' and our output is ahead
+                        // of the latest_slot (the latest accepted consensus finality slot), thus representing progress.
+                        // We will accept this new output slot in the window beginning at 'slot'.
 
-                                    // Do we have a next window?
-                                    if let Some(ref next_window) = dual_validated_proof_inputs.next_window {
-                                        // Is the next window's output slot greater than the current slot
-                                        if next_window.expected_output_slot > latest_slot {
-                                            if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {
-                                                // Receiver dropped, exit task, should maybe process exit?
-                                                break;
-                                            }
-                                            debug!("We SENT an update DUAL");
-                                        }  else {
-                                            debug!("No change detected for next window's result: '{}' when the latest_slot was: '{}'. Ignoring.", next_window.expected_output_slot, latest_slot);
-                                        }
-                                    }
-                                    else if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {
-                                        // Receiver dropped, exit task, should maybe process exit?
-                                        break;
-                                    }
-                                    latest_slot = output_slot;
+                        // Stale validation result received for current window, ignore.
+                        if dual_validated_proof_inputs.current_window.input_slot != slot {
+                            debug!(
+                                "Stale validation result received for current window. result input slot: '{}', current slot: '{}'. Ignoring.",
+                                input_slot,
+                                slot
+                            );
+                            continue;
+                        }
+
+                        // No change detected for current window's result, output slot hasn't advanced beyond latest_slot.
+                        if dual_validated_proof_inputs.current_window.expected_output_slot <= latest_slot {
+                            debug!(
+                                "No change detected for current window's result was output_slot: '{}' when the latest_slot was: '{}'. Ignoring.",
+                                output_slot,
+                                latest_slot
+                            );
+                            continue;
+                        }
+
+                        // Current window shows progress, emit either dual or solo result.
+                        debug!("We could have SENT an update SOLO");
+
+                        // Do we have a next window?
+                        if let Some(ref next_window) = dual_validated_proof_inputs.next_window {
+                            // Is the next window's output slot greater than the current slot
+                            if next_window.expected_output_slot > latest_slot {
+                                if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {
+                                    error!("Finality Transition Detector Actor: The consumer of the validated proof inputs \
+                                            has dropped the receiver during dual emission.");
+                                    break;
                                 }
-                                else {
-                                    debug!(
-                                        "No change detected for current window's result was output_slot: '{}' when the latest_slot was: '{}'. Ignoring.",
-                                        output_slot,
-                                        latest_slot
-                                    );
-                                }
-
-                            } else {
-                                debug!(
-                                    "Stale validation result received for current window. result input slot: '{}', current slot: '{}'. Ignoring.",
-                                    input_slot,
-                                    slot
-                                );
+                                debug!("We SENT an update DUAL");
+                            }  else {
+                                debug!("No change detected for next window's result: '{}' when the latest_slot was: '{}'. Ignoring.", next_window.expected_output_slot, latest_slot);
                             }
                         }
-                        Err(e) => {
-                            debug!("Validation error in change detector ignoring: {:?}", e);
+                        else if finality_output_tx.send(dual_validated_proof_inputs).await.is_err() {
+                            error!("Finality Transition Detector Actor: The consumer of the validated proof inputs \
+                                    has dropped the receiver during solo emission.");
+                            break;
                         }
+                        latest_slot = output_slot;
+                    },
+                    None => {
+                        error!("Finality Transition Detector Actor: The validation worker actor has died or \
+                                dropped the result channel. Check worker logs for panics.");
+                        break;
                     }
                 },
 
                 // Tick event - try to start validation if none in-flight
                 _ = tick_interval.tick() => {
                     if !in_flight && try_start_validation_job(&validation_job_tx, slot, store_hash, &next_expected_output, &mut in_flight).await.is_err() {
+                        error!("Finality Transition Detector Actor: Failed to start validation job during polling tick.");
                         break;
                     }
                 }
             }
         }
-        // Finality change detector broke
-        error!("Finality change detector broke.");
-        process::exit(1);
+        // The select! loop has terminated, meaning one of the critical
+        // communication channels (upstream bridge or downstream validation worker)
+        // has closed. This detector can no longer function.
+        error!(
+            "Finality Transition Detector Actor: Task terminated. \
+             Communication with the validation worker or bridge head has been lost. \
+             Last active slot: {}",
+            latest_slot
+        );
     });
 
     (

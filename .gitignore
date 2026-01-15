@@ -33,3 +33,6 @@ checkpoint/
 
 # Ignore node_modules
 node_modules
+
+# Ignore bindings
+nori/src/contract_bindings/src/lib.rs
