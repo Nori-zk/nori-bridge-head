@@ -19,7 +19,10 @@ fn install_solidity_contracts(contracts_dir: PathBuf) -> bool {
         .output()
         .map(|out| {
             if !out.status.success() {
-                eprintln!("cargo:error=npm error: {}", String::from_utf8_lossy(&out.stderr));
+                eprintln!(
+                    "cargo:error=npm error: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
             }
             out.status.success()
         })
@@ -29,7 +32,8 @@ fn install_solidity_contracts(contracts_dir: PathBuf) -> bool {
         })
 }
 
-const GENERATED_BINDINGS_HEADER: &str = "// @generated: build.rs will overwrite this with alloy::sol! bindings.";
+const GENERATED_BINDINGS_HEADER: &str =
+    "// @generated: build.rs will overwrite this with alloy::sol! bindings.";
 
 /// Configures Git to ignore local changes to the generated bindings file.
 /// This works by telling Git to only "see" the header string when staging.
@@ -47,7 +51,7 @@ fn setup_git_ignore_filter() {
         let _ = Command::new("git")
             .args(["config", "filter.ignore-bindings.clean", &clean_cmd])
             .status();
-        
+
         let _ = Command::new("git")
             .args(["config", "filter.ignore-bindings.smudge", "cat"])
             .status();
@@ -60,17 +64,31 @@ fn main() {
     let contracts_npm_dir = contracts_dir.join("node_modules/@nori-zk/ethereum-token-bridge");
     let abi_path = contracts_dir.join("node_modules/@nori-zk/ethereum-token-bridge/build/artifacts/contracts/NoriTokenBridge.sol/NoriTokenBridge.json");
     let gen_path = contracts_dir.join("src/lib.rs");
-    
+
     // Initialise the self-healing Git filter
     setup_git_ignore_filter();
 
-    if contracts_npm_dir.exists() {
+    // Check if the Solidity contracts are already present in node_modules
+    let contracts_installed = contracts_npm_dir.exists();
+
+    // Check if lib.rs exists AND contains actual generated code (not the placeholder)
+    let bindings_generated = std::fs::read_to_string(&gen_path)
+        .is_ok_and(|content| !content.contains(GENERATED_BINDINGS_HEADER));
+
+    // If we have both the source contracts and the generated bindings, skip the build steps.
+    if contracts_installed && bindings_generated {
         return;
     }
 
     // Tell Cargo when to re-run this script
-    println!("cargo:rerun-if-changed={}", contracts_dir.join("package.json").display());
-    println!("cargo:rerun-if-changed={}", contracts_dir.join("package-lock.json").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        contracts_dir.join("package.json").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        contracts_dir.join("package-lock.json").display()
+    );
 
     println!("cargo:info=Solidity contracts package @nori-zk/ethereum-token-bridge is not installed. Attempting to install them.");
 
