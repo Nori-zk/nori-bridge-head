@@ -13,7 +13,7 @@ alloy-primitives = { workspace = true, features = ["sha3-keccak"] }
 tree_hash = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
-sha2-v0-10-8 = { workspace = true }
+sha2-v0-10-9 = { workspace = true }
 rmp-serde = "1.2.0"
 mina-poseidon  = { workspace = true }
 mina-curves   = { workspace = true }
