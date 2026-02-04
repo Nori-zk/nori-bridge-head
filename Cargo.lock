@@ -3801,8 +3801,8 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helios-common"
-version = "0.9.3"
-source = "git+https://github.com/a16z/helios?tag=0.9.3#c32c7df8ed68d8bdcd5b7cf6258174da1dc94aaf"
+version = "0.11.0"
+source = "git+https://github.com/a16z/helios?tag=0.11.0#89ac422fdf989ac9637bfa646f258316c06fb17d"
 dependencies = [
  "alloy",
  "async-trait",
@@ -3817,8 +3817,8 @@ dependencies = [
 
 [[package]]
 name = "helios-consensus-core"
-version = "0.9.3"
-source = "git+https://github.com/a16z/helios?tag=0.9.3#c32c7df8ed68d8bdcd5b7cf6258174da1dc94aaf"
+version = "0.11.0"
+source = "git+https://github.com/a16z/helios?tag=0.11.0#89ac422fdf989ac9637bfa646f258316c06fb17d"
 dependencies = [
  "alloy",
  "alloy-rlp",
@@ -3842,8 +3842,8 @@ dependencies = [
 
 [[package]]
 name = "helios-core"
-version = "0.9.3"
-source = "git+https://github.com/a16z/helios?tag=0.9.3#c32c7df8ed68d8bdcd5b7cf6258174da1dc94aaf"
+version = "0.11.0"
+source = "git+https://github.com/a16z/helios?tag=0.11.0#89ac422fdf989ac9637bfa646f258316c06fb17d"
 dependencies = [
  "alloy",
  "alloy-trie",
@@ -3872,8 +3872,8 @@ dependencies = [
 
 [[package]]
 name = "helios-ethereum"
-version = "0.9.3"
-source = "git+https://github.com/a16z/helios?tag=0.9.3#c32c7df8ed68d8bdcd5b7cf6258174da1dc94aaf"
+version = "0.11.0"
+source = "git+https://github.com/a16z/helios?tag=0.11.0#89ac422fdf989ac9637bfa646f258316c06fb17d"
 dependencies = [
  "alloy",
  "alloy-trie",
@@ -3910,8 +3910,8 @@ dependencies = [
 
 [[package]]
 name = "helios-revm-utils"
-version = "0.9.3"
-source = "git+https://github.com/a16z/helios?tag=0.9.3#c32c7df8ed68d8bdcd5b7cf6258174da1dc94aaf"
+version = "0.11.0"
+source = "git+https://github.com/a16z/helios?tag=0.11.0#89ac422fdf989ac9637bfa646f258316c06fb17d"
 dependencies = [
  "alloy",
  "eyre",
@@ -3925,8 +3925,8 @@ dependencies = [
 
 [[package]]
 name = "helios-verifiable-api-client"
-version = "0.9.3"
-source = "git+https://github.com/a16z/helios?tag=0.9.3#c32c7df8ed68d8bdcd5b7cf6258174da1dc94aaf"
+version = "0.11.0"
+source = "git+https://github.com/a16z/helios?tag=0.11.0#89ac422fdf989ac9637bfa646f258316c06fb17d"
 dependencies = [
  "alloy",
  "async-trait",
@@ -3944,8 +3944,8 @@ dependencies = [
 
 [[package]]
 name = "helios-verifiable-api-types"
-version = "0.9.3"
-source = "git+https://github.com/a16z/helios?tag=0.9.3#c32c7df8ed68d8bdcd5b7cf6258174da1dc94aaf"
+version = "0.11.0"
+source = "git+https://github.com/a16z/helios?tag=0.11.0#89ac422fdf989ac9637bfa646f258316c06fb17d"
 dependencies = [
  "alloy",
  "helios-common",
@@ -6685,10 +6685,11 @@ checksum = "6b3789b30bd25ba102de4beabd95d21ac45b69b1be7d14522bab988c526d6799"
 
 [[package]]
 name = "retri"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6262146231c1ef2e31ad7b2a2492bc652fafd6b76568da7b63ac1d5f3674ee4"
+checksum = "c38316070fbd6504dcbb6042225f2608f2323c71155836c9b48f192113f68782"
 dependencies = [
+ "tokio",
  "zduny-wasm-timer",
 ]
 
