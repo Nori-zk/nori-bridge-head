@@ -71,6 +71,7 @@ NORI_LOG=info
 - **SP1_GAS_LIMIT**: Gas limit. Only required when `SP1_SKIP_SIMULATION=true`; otherwise SP1 calculates from simulation (default when required: 1B)
 - **SP1_TIMEOUT_SECS**: Overall timeout in seconds (default: 600 / 10 minutes)
 - **SP1_WHITELIST**: Comma-separated list of prover addresses to whitelist. If not set, SDK uses recently reliable provers (optional)
+- **SP1_WHITELIST_ADD_HIGH_AVAILABILITY**: When `true`, extends the configured whitelist with high-availability provers from the network. Only applies when `SP1_WHITELIST` is provided. Useful for ensuring backup provers are available - `true` or `false` (default: `false`, optional)
 
 See `.env.example`
 
