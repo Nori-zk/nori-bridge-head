@@ -15,7 +15,7 @@ jobs:
       contents: read
       pull-requests: write
     container:
-      image: docker.nori.it.com/stacksmith:1.0.3
+      image: docker.nori.it.com/stacksmith:1.0.5
       volumes:
         # SSH for git operations
         - /home/runner/.ssh:/root/.ssh:ro
