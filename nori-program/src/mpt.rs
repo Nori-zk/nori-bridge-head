@@ -130,6 +130,13 @@ pub fn verify_storage_slot_proofs(
     execution_state_root: FixedBytes<32>,
     contract_storage: ContractStorage,
 ) -> Result<FixedBytes<32>, MptError> {
+    let n_leaves = contract_storage.storage_slots.len();
+
+    // Optimisation, skip doing the MPT proof if we have no storage slots in this window
+    if n_leaves == 0 {
+        return Ok(FixedBytes::default())
+    }
+
     // Convert the contract address into nibbles for the global MPT proof
     // We need to keccak256 the address before converting to nibbles for the MPT proof
     let address_hash = keccak256(contract_storage.address.as_slice());
@@ -154,7 +161,6 @@ pub fn verify_storage_slot_proofs(
     })?;
 
     // Calculate tree depth which is ceil(log2(number)) and padded size (leaves to the nearest power of 2)
-    let n_leaves = contract_storage.storage_slots.len();
     let (depth, padded_size) = compute_merkle_tree_depth_and_size(n_leaves);
 
     // Validate

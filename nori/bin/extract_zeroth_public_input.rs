@@ -12,27 +12,26 @@ async fn main() -> Result<()> {
     let (current_slot, store_hash) = consensus_client
         .get_latest_finality_slot_and_store_hash()
         .await
-        .unwrap();
+        .expect("Expected to get the latest finality slot and store hash");
     let proof_inputs_with_window = consensus_client
         .prepare_consensus_mpt_proof_inputs(current_slot, store_hash, false)
         .await
-        .unwrap();
+        .expect("Expected to get proof inputs with a window");
 
     // Get the mock config
     let config = Arc::new(
-        ProverConfig::mock_from_env()
-            .expect("Should have been given a valid config for mock Sp1")
+        ProverConfig::mock_plonk()
     );
     
     // Run mock program.
     println!("Running SP1 prover");
     let proof_outputs = finality_update_job(config, 0, current_slot, proof_inputs_with_window.proof_inputs)
         .await
-        .unwrap();
+        .expect("Expected to run a finality update job");
 
     // Extract the public input we need.
     let proof_result = proof_outputs.proof();
-    let plonk_proof = proof_result.proof.try_as_plonk().unwrap();
+    let plonk_proof = proof_result.proof.try_as_plonk().expect("Expected a plonk sp1 proof");
     let zeroth_public_input = &plonk_proof.public_inputs[0];
     println!(
         "Extracted plonk sp1Proof.proof.public_inputs[0] {}",

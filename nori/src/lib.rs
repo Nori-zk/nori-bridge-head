@@ -4,3 +4,4 @@ pub mod sp1_prover_config;
 pub mod utils;
 pub mod rpcs;
 pub mod contract;
+pub mod grpc;

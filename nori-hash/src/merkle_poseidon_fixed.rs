@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, FixedBytes, U256};
+use alloy_primitives::{Address, U256};
 use anyhow::Result;
 use mina_curves::pasta::Fp;
 use mina_poseidon::{
