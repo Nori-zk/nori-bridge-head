@@ -30,15 +30,15 @@ sp1-helios-program = { path = "program" }
 sp1-helios-primitives = { path = "primitives" }
 
 # helios
-helios = { git = "https://github.com/a16z/helios", tag = "0.9.3" }
-helios-consensus-core = { git = "https://github.com/a16z/helios", tag = "0.9.3" }
-helios-ethereum = { git = "https://github.com/a16z/helios", tag = "0.9.3" }
+helios = { git = "https://github.com/a16z/helios", tag = "0.11.0" }
+helios-consensus-core = { git = "https://github.com/a16z/helios", tag = "0.11.0" }
+helios-ethereum = { git = "https://github.com/a16z/helios", tag = "0.11.0" }
 
 # general
 dotenv = "0.15.0"
 eyre = "0.6.12"
-sp1-sdk = "5.2.1"
-sp1-build = "5.2.1"
+sp1-sdk = "5.2.4"
+sp1-build = "5.2.4"
 tokio = "1.38.0"
 tracing = "0.1.37"
 serde = "1.0.203"
@@ -48,7 +48,7 @@ serde_cbor = "0.11.2"
 hex = "0.4.3"
 serde_json = "1.0.125"
 alloy-sol-types = "1.3.0"
-alloy-trie = "0.9"
+alloy-trie = "0.9.1"
 alloy-rlp = { version = "0.3.9", default-features = false, features = [
     "derive",
     "arrayvec",
@@ -57,19 +57,19 @@ clap = "4.5.9"
 log = "0.4.22"
 env_logger = "0.11.3"
 alloy-primitives = "1.3.0"
-alloy-contract = "1.0.3"
-alloy = { version = "1.0.3", features = ["full", "signer-ledger"] }
+alloy-contract = "1.0.37"
+alloy = { version = "1.0.37", features = ["full", "signer-ledger"] }
 anyhow = "1.0.86"
 reqwest = "0.12.5"
 tree_hash = "0.10.0"
 serde_with = { version = "3.4.0", features = ["hex"] }
 cargo_metadata = "0.18"
-sha2-v0-10-8 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.8-sp1-4.0.0" }
+sha2-v0-10-9 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.8-sp1-4.0.0" }
 once_cell = "=1.21.3"
 
 [patch.crates-io]
 sha3-v0-10-8 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha3", tag = "patch-sha3-0.10.8-sp1-4.0.0" }
-sha2-v0-10-9 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.9-sp1-4.0.0" }
+#sha2-v0-10-9 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.9-sp1-4.0.0" }
 tiny-keccak = { git = "https://github.com/sp1-patches/tiny-keccak", tag = "patch-2.0.2-sp1-4.0.0" }
 bls12_381 = { git = "https://github.com/sp1-patches/bls12_381", tag = "patch-0.8.0-sp1-5.0.0-v2" }
 # From upstream: https://github.com/a16z/helios/blob/master/Cargo.toml#L115

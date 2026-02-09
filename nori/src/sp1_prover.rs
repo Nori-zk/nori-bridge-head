@@ -1,12 +1,16 @@
+use crate::sp1_prover_config::try_get_fallback_whitelist;
+
 use super::sp1_prover_config::{
-    get_fulfillment_strategy, FulfillmentConfig, LocalProverMode, ProofType, ProverConfig,
-    ProverMode,
+    get_fallback_whitelist, get_fulfillment_strategy, FulfillmentConfig, LocalProverMode,
+    ProofType, ProverConfig, ProverMode,
 };
+use alloy_primitives::Address;
 use anyhow::Result;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use log::info;
 use nori_sp1_helios_primitives::types::ProofInputs;
 use sp1_sdk::{Prover, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
+use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
 
 /// Import nori sp1 helios program
@@ -72,6 +76,7 @@ fn generate_proof(
     config: &ProverConfig,
     pk: &SP1ProvingKey,
     stdin: &SP1Stdin,
+    extended_whitelist: Option<Vec<Address>>,
 ) -> Result<SP1ProofWithPublicValues> {
     match &config.mode {
         ProverMode::Network(net) => {
@@ -102,6 +107,9 @@ fn generate_proof(
                 proof_request = proof_request.auction_timeout(timeout);
             }
 
+            // Use the extended whitelist if provided, otherwise use the config's whitelist
+            let whitelist = extended_whitelist.or_else(|| net.whitelist.clone());
+
             // Chain the remaining defaults
             proof_request = proof_request
                 // The user can either provide a value (error if invalid) for this via ENV_SP1_MAX_PRICE_PER_PGU
@@ -116,7 +124,7 @@ fn generate_proof(
                 // OR we will default to (if not set):
                 // SDK_DEFAULT_TIMEOUT_SECS: u64 = 600
                 .timeout(net.timeout)
-                .whitelist(net.whitelist.clone());
+                .whitelist(whitelist);
 
             // cycle_limit and gas_limit are only required when skip_simulation = true.
 
@@ -222,6 +230,45 @@ pub async fn finality_update_job(
     // Get proving key
     let pk = get_proving_key().await;
 
+    // Fetch and extend whitelist if needed (before spawn_blocking since it's async)
+    let extended_whitelist = match &config.mode {
+        ProverMode::Network(net) if net.whitelist_add_high_availability => {
+            info!("Fetching high-availability provers to extend whitelist...");
+            match try_get_fallback_whitelist(net).await {
+                Ok(fallback) => {
+                    info!("Successfully fetched {} high-availability provers.", fallback.len());
+
+                    // Extend the existing whitelist with fallback provers (deduplicated, order preserved)
+                    let mut extended = net.whitelist.clone().unwrap_or_default();
+                    let mut seen: HashSet<Address> = extended.iter().copied().collect();
+
+                    let mut added_count = 0;
+                    for addr in fallback {
+                        if seen.insert(addr) {
+                            extended.push(addr);
+                            added_count += 1;
+                        }
+                    }
+
+                    info!(
+                        "Whitelist extended with {} new provers (total: {}):",
+                        added_count,
+                        extended.len()
+                    );
+                    for addr in &extended {
+                        info!("  - {}", addr);
+                    }
+                    Some(extended)
+                }
+                Err(e) => {
+                    info!("Failed to fetch high-availability provers: {}. Using configured whitelist only.", e);
+                    net.whitelist.clone()
+                }
+            }
+        }
+        _ => None,
+    };
+
     // Clone the config and bump ref count
     let config = Arc::clone(&config);
 
@@ -232,7 +279,7 @@ pub async fn finality_update_job(
             stdin.write_slice(&encoded_proof_inputs);
 
             // Generate proof with configured prover
-            generate_proof(&config, pk, &stdin)
+            generate_proof(&config, pk, &stdin, extended_whitelist)
         })
         .await??; // Await the blocking task and propagate errors properly
 

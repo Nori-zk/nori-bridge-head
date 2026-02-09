@@ -1,9 +1,32 @@
+use alloy::signers::local::PrivateKeySigner;
 use alloy_primitives::Address;
 use anyhow::{Context, Result};
 use log::info;
 use reqwest::Url;
-use sp1_sdk::network::{proto::types::FulfillmentStrategy, NetworkMode};
-use std::{env, str::FromStr, time::Duration};
+use sp1_sdk::network::{
+    proto::{
+        auction_network::prover_network_client::ProverNetworkClient as AuctionProverNetworkClient,
+        types::FulfillmentStrategy,
+    },
+    NetworkMode,
+};
+use std::{
+    env,
+    str::FromStr,
+    sync::Once,
+    time::Duration,
+};
+
+use crate::grpc;
+
+// Ensure crypto provider is installed exactly once
+static CRYPTO_PROVIDER_INIT: Once = Once::new();
+
+fn ensure_crypto_provider() {
+    CRYPTO_PROVIDER_INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
 
 // Environment variable names for SP1 prover configuration
 // SDK-defined environment variables:
@@ -28,6 +51,9 @@ const ENV_SP1_TIMEOUT_SECS: &str = "SP1_TIMEOUT_SECS"; // Maps to ProveRequest.t
 const ENV_SP1_MAX_PRICE_PER_PGU: &str = "SP1_MAX_PRICE_PER_PGU";
 const ENV_SP1_AUCTION_TIMEOUT_SECS: &str = "SP1_AUCTION_TIMEOUT_SECS"; // Maps to auction timeout
 const ENV_SP1_WHITELIST: &str = "SP1_WHITELIST"; // Maps to ProveRequest.whitelist()
+
+// A custom env (a boolean) to use a query to add the provers with the best uptime (high_availability_only: true) to the whitelist before starting
+const ENV_SP1_WHITELIST_ADD_HIGH_AVAILABILITY: &str = "SP1_WHITELIST_ADD_HIGH_AVAILABILITY";
 
 // Default values from sp1-sdk-5.2.2
 
@@ -83,6 +109,70 @@ pub struct NetworkConfig {
     pub skip_simulation: bool,
     pub timeout: Duration,
     pub whitelist: Option<Vec<Address>>,
+    pub whitelist_add_high_availability: bool,
+}
+
+// Get a set of high availability fallback provers
+pub async fn get_fallback_whitelist(config: &NetworkConfig) -> anyhow::Result<Vec<Address>> {
+    const MAX_RETRIES: u32 = 3;
+    const INITIAL_BACKOFF_MS: u64 = 500;
+
+    let mut attempt = 0;
+    let mut backoff_ms = INITIAL_BACKOFF_MS;
+
+    loop {
+        attempt += 1;
+
+        match try_get_fallback_whitelist(config).await {
+            Ok(whitelist) => {
+                if attempt > 1 {
+                    info!(
+                        "Successfully fetched high-availability provers on attempt {}",
+                        attempt
+                    );
+                }
+                return Ok(whitelist);
+            }
+            Err(e) if attempt >= MAX_RETRIES => {
+                return Err(anyhow::anyhow!(
+                    "Failed to fetch high-availability provers after {} attempts: {}",
+                    MAX_RETRIES,
+                    e
+                ));
+            }
+            Err(e) => {
+                info!(
+                    "Failed to fetch high-availability provers (attempt {}/{}): {}. Retrying in {}ms...",
+                    attempt, MAX_RETRIES, e, backoff_ms
+                );
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                backoff_ms *= 2; // Exponential backoff
+            }
+        }
+    }
+}
+
+pub async fn try_get_fallback_whitelist(config: &NetworkConfig) -> anyhow::Result<Vec<Address>> {
+    // Ensure crypto provider is installed (only happens once globally)
+    ensure_crypto_provider();
+
+    let channel = grpc::configure_endpoint(&config.rpc_url)?.connect().await?;
+    let mut auction_network_client = AuctionProverNetworkClient::new(channel);
+
+    let fallback_whitelist = auction_network_client
+        .get_provers_by_uptime(
+            sp1_sdk::network::proto::auction_types::GetProversByUptimeRequest {
+                high_availability_only: true,
+            },
+        )
+        .await?
+        .into_inner()
+        .provers
+        .into_iter()
+        .map(|p| Address::from_slice(&p))
+        .collect::<Vec<_>>();
+
+    Ok(fallback_whitelist)
 }
 
 pub struct ProverConfig {
@@ -176,7 +266,7 @@ impl ProverConfig {
                             invalid
                         ))
                     }
-                    None => NetworkMode::Mainnet
+                    None => NetworkMode::Mainnet,
                 };
 
                 // Behaviour: provide a private key or error
@@ -184,19 +274,30 @@ impl ProverConfig {
                     anyhow::anyhow!("{} required for network mode", ENV_NETWORK_PRIVATE_KEY)
                 })?;
 
+                private_key.parse::<PrivateKeySigner>().with_context(|| {
+                    format!(
+                        "Failed to parse {} as PrivateKeySigner.",
+                        ENV_NETWORK_PRIVATE_KEY
+                    )
+                })?;
+
                 // Get RPC URL from environment or use default based on network mode
                 // Reference: sp1-sdk-5.2.2/src/network/mod.rs:67,69
                 // Behaviour: provide a valid url or error. If not provided use the correct default based on the network mode.
                 let rpc_url = match env::var(ENV_NETWORK_RPC_URL) {
                     Ok(val) => {
-                        Url::parse(&val)
-                            .with_context(|| format!("Environment variable {} contains invalid URL: '{}'", ENV_NETWORK_RPC_URL, val))?;
+                        Url::parse(&val).with_context(|| {
+                            format!(
+                                "Environment variable {} contains invalid URL: '{}'",
+                                ENV_NETWORK_RPC_URL, val
+                            )
+                        })?;
                         val
                     }
                     Err(_) => match network_mode {
                         NetworkMode::Mainnet => SDK_MAINNET_RPC_URL.to_string(),
                         NetworkMode::Reserved => SDK_RESERVED_RPC_URL.to_string(),
-                    }
+                    },
                 };
 
                 // Get fulfillment strategy from environment
@@ -275,8 +376,12 @@ impl ProverConfig {
                 let mut cycle_limit = env::var(ENV_SP1_CYCLE_LIMIT)
                     .ok()
                     .map(|val| {
-                        val.parse::<u64>()
-                            .with_context(|| format!("Failed to parse {} as u64. Got: '{}'", ENV_SP1_CYCLE_LIMIT, val))
+                        val.parse::<u64>().with_context(|| {
+                            format!(
+                                "Failed to parse {} as u64. Got: '{}'",
+                                ENV_SP1_CYCLE_LIMIT, val
+                            )
+                        })
                     })
                     .transpose()?;
 
@@ -286,8 +391,12 @@ impl ProverConfig {
                 let mut gas_limit = env::var(ENV_SP1_GAS_LIMIT)
                     .ok()
                     .map(|val| {
-                        val.parse::<u64>()
-                            .with_context(|| format!("Failed to parse {} as u64. Got: '{}'", ENV_SP1_GAS_LIMIT, val))
+                        val.parse::<u64>().with_context(|| {
+                            format!(
+                                "Failed to parse {} as u64. Got: '{}'",
+                                ENV_SP1_GAS_LIMIT, val
+                            )
+                        })
                     })
                     .transpose()?;
 
@@ -332,12 +441,30 @@ impl ProverConfig {
                         s.split(',')
                             .map(|addr| {
                                 let addr = addr.trim();
-                                Address::from_str(addr)
-                                    .with_context(|| format!("Invalid address in {}: '{}'", ENV_SP1_WHITELIST, addr))
+                                Address::from_str(addr).with_context(|| {
+                                    format!("Invalid address in {}: '{}'", ENV_SP1_WHITELIST, addr)
+                                })
                             })
                             .collect::<Result<Vec<Address>>>()
                     })
                     .transpose()?;
+
+                // If a whitelist is provided, optionally include high-availability provers
+                // based on a network query.
+                let whitelist_add_high_availability = match &whitelist {
+                    Some(_) => env::var(ENV_SP1_WHITELIST_ADD_HIGH_AVAILABILITY).map_or(
+                        Ok(false),
+                        |val| {
+                            val.parse::<bool>().with_context(|| {
+                                format!(
+                                    "Failed to parse {} as bool. Got: '{}'",
+                                    ENV_SP1_WHITELIST_ADD_HIGH_AVAILABILITY, val
+                                )
+                            })
+                        },
+                    )?,
+                    None => false,
+                };
 
                 ProverMode::Network(NetworkConfig {
                     network_mode,
@@ -350,6 +477,7 @@ impl ProverConfig {
                     skip_simulation,
                     timeout,
                     whitelist,
+                    whitelist_add_high_availability,
                 })
             }
             Some(invalid) => {
@@ -409,7 +537,10 @@ impl ProverConfig {
                 // Fulfillment strategy
                 match &net.fulfillment {
                     FulfillmentConfig::Auction { timeout } => {
-                        info!("  Fulfillment Strategy: auction (timeout: {}s)", timeout.as_secs());
+                        info!(
+                            "  Fulfillment Strategy: auction (timeout: {}s)",
+                            timeout.as_secs()
+                        );
                     }
                     FulfillmentConfig::Hosted => {
                         info!("  Fulfillment Strategy: hosted");
@@ -441,6 +572,16 @@ impl ProverConfig {
                         info!("  Whitelist:");
                         for addr in addresses {
                             info!("    - {}", addr);
+                        }
+
+                        // Whitelist add high availablity
+                        match &net.whitelist_add_high_availability {
+                            true => {
+                                info!("  Whitelist add high availability: true");
+                            }
+                            false => {
+                                info!("  Whitelist add high availability: false");
+                            }
                         }
                     }
                     None => {

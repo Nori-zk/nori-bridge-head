@@ -73,7 +73,7 @@ fn main() {
 
     // Check if lib.rs exists AND contains actual generated code (not the placeholder)
     let bindings_generated = std::fs::read_to_string(&gen_path)
-        .is_ok_and(|content| !content.contains(GENERATED_BINDINGS_HEADER));
+        .is_ok_and(|content| !content.trim().contains(GENERATED_BINDINGS_HEADER.trim()));
 
     // If we have both the source contracts and the generated bindings, skip the build steps.
     if contracts_installed && bindings_generated {
