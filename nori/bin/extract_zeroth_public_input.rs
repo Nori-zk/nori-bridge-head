@@ -1,3 +1,4 @@
+use alloy_primitives::U256;
 use anyhow::Result;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
@@ -49,8 +50,19 @@ async fn main() -> Result<()> {
     let elf_path = nori_elf_dir.join("nori-sp1-helios-program");
     let output_path = elf_path.with_extension("pi0.json");
 
+    // In sp1-sdk 6.0.1 public_inputs[0] changed from decimal to "FFBn254Fr(0x<hex>)".
+    // Downstream needs the canonical decimal field element representation.
+    let decimal_pi0 = if let Some(hex) = zeroth_public_input
+        .strip_prefix("FFBn254Fr(0x")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        U256::from_str_radix(hex, 16).expect("invalid hex in public_input").to_string()
+    } else {
+        zeroth_public_input.clone()
+    };
+
     // Construct the json string from the public input.
-    let json_string = format!("\"{}\"", zeroth_public_input);
+    let json_string = format!("\"{}\"", decimal_pi0);
 
     // Write the file.
     println!("Attempting to write to {:?}", output_path);
