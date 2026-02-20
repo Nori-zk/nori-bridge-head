@@ -3,7 +3,7 @@ use crate::helios::serialize_helios_store_serde;
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
 use helios_consensus_core::{consensus_spec::ConsensusSpec, types::LightClientStore};
-use sha2_v0_10_9::{Digest, Sha256};
+use sha2_v0_10_8::{Digest, Sha256};
 // use crate::utils::print_helios_store;
 
 pub fn sha256_hash_helios_store<S: ConsensusSpec>(
