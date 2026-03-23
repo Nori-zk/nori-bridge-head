@@ -1,39 +1,18 @@
 use std::env;
 use std::path::PathBuf;
-use std::process::{self, Command};
-
-/// Check if npm is install (works for windows / mac)
-fn is_npm_installed() -> bool {
-    Command::new("npm")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-/// Install @nori-zk/ethereum-token-bridge via npm
-fn install_solidity_contracts(contracts_dir: PathBuf) -> bool {
-    Command::new("npm")
-        .arg("ci")
-        .current_dir(contracts_dir)
-        .output()
-        .map(|out| {
-            if !out.status.success() {
-                eprintln!(
-                    "cargo:error=npm error: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                );
-            }
-            out.status.success()
-        })
-        .unwrap_or_else(|e| {
-            eprintln!("cargo:error=Could not execute npm: {}", e);
-            false
-        })
-}
+use std::process::Command;
 
 const GENERATED_BINDINGS_HEADER: &str =
     "// @generated: build.rs will overwrite this with alloy::sol! bindings.";
+
+/// Base URL for raw GitHub content from nori-bridge-sdk
+const RAW_BASE: &str = "https://raw.githubusercontent.com/Nori-zk/nori-bridge-sdk";
+
+/// Contract names to generate bindings for.
+/// Each entry follows the repo convention: contracts/ethereum/artifacts/contracts/{NAME}.sol/{NAME}.json
+const CONTRACTS: &[&str] = &[
+    "NoriTokenBridge",
+];
 
 /// Configures Git to ignore local changes to the generated bindings file.
 /// This works by telling Git to only "see" the header string when staging.
@@ -58,61 +37,98 @@ fn setup_git_ignore_filter() {
     }
 }
 
+/// Read the git ref (branch, tag, or commit hash) from bridge-sdk.ref
+fn read_bridge_sdk_ref(manifest_dir: &PathBuf) -> String {
+    let ref_path = manifest_dir.join("bridge-sdk.ref");
+    std::fs::read_to_string(&ref_path)
+        .unwrap_or_else(|e| {
+            panic!(
+                "Failed to read {}: {}. This file must contain a git ref (branch, tag, or commit hash) for nori-bridge-sdk.",
+                ref_path.display(),
+                e
+            )
+        })
+        .trim()
+        .to_string()
+}
+
+/// Download a contract ABI JSON from GitHub at the pinned ref into abi/
+fn fetch_abi(abi_dir: &PathBuf, git_ref: &str, contract_name: &str) -> PathBuf {
+    let url = format!(
+        "{}/{}/contracts/ethereum/artifacts/contracts/{}.sol/{}.json",
+        RAW_BASE, git_ref, contract_name, contract_name
+    );
+    let abi_path = abi_dir.join(format!("{}.json", contract_name));
+
+    let body = reqwest::blocking::get(&url)
+        .unwrap_or_else(|e| panic!("Failed to fetch ABI from {}: {}", url, e))
+        .error_for_status()
+        .unwrap_or_else(|e| panic!("Failed to fetch ABI from {}: {}", url, e))
+        .bytes()
+        .unwrap_or_else(|e| panic!("Failed to read response body from {}: {}", url, e));
+
+    std::fs::write(&abi_path, &body)
+        .unwrap_or_else(|e| panic!("Failed to write {}: {}", abi_path.display(), e));
+
+    abi_path
+}
+
 /// Pre-build hook
 fn main() {
-    let contracts_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let contracts_npm_dir = contracts_dir.join("node_modules/@nori-zk/ethereum-token-bridge");
-    let abi_path = contracts_dir.join("node_modules/@nori-zk/ethereum-token-bridge/build/artifacts/contracts/NoriTokenBridge.sol/NoriTokenBridge.json");
-    let gen_path = contracts_dir.join("src/lib.rs");
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let abi_dir = manifest_dir.join("abi");
+    let gen_path = manifest_dir.join("src/lib.rs");
 
     // Initialise the self-healing Git filter
     setup_git_ignore_filter();
 
-    // Check if the Solidity contracts are already present in node_modules
-    let contracts_installed = contracts_npm_dir.exists();
+    // Re-run when the pinned ref changes
+    println!(
+        "cargo:rerun-if-changed={}",
+        manifest_dir.join("bridge-sdk.ref").display()
+    );
 
-    // Check if lib.rs exists AND contains actual generated code (not the placeholder)
+    // Re-run when the abi/ directory is missing or its contents change
+    println!(
+        "cargo:rerun-if-changed={}",
+        abi_dir.display()
+    );
+
+    // Check if lib.rs already has generated bindings
     let bindings_generated = std::fs::read_to_string(&gen_path)
         .is_ok_and(|content| !content.trim().contains(GENERATED_BINDINGS_HEADER.trim()));
 
-    // If we have both the source contracts and the generated bindings, skip the build steps.
-    if contracts_installed && bindings_generated {
+    // Check all ABI files are present in abi/
+    let all_abis_present = CONTRACTS.iter().all(|name| {
+        abi_dir.join(format!("{}.json", name)).exists()
+    });
+
+    if all_abis_present && bindings_generated {
         return;
     }
 
-    // Tell Cargo when to re-run this script
-    println!(
-        "cargo:rerun-if-changed={}",
-        contracts_dir.join("package.json").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        contracts_dir.join("package-lock.json").display()
-    );
+    // Ensure abi/ directory exists
+    std::fs::create_dir_all(&abi_dir).expect("Failed to create abi/ directory");
 
-    println!("cargo:info=Solidity contracts package @nori-zk/ethereum-token-bridge is not installed. Attempting to install them.");
+    // Read the pinned git ref and fetch all ABIs
+    let git_ref = read_bridge_sdk_ref(&manifest_dir);
+    println!("cargo:warning=Fetching contract ABIs from nori-bridge-sdk @ {}", git_ref);
 
-    if !is_npm_installed() {
-        println!("cargo:warning=This project needs npm installed, in order to install solidity contracts, which are defined in an external package: @nori-zk/ethereum-token-bridge");
-        process::exit(1);
-    }
-
-    if !install_solidity_contracts(contracts_dir) {
-        process::exit(1);
-    }
-
-    // 2. Create the bindings file ONLY after npm is done
-    // We use a raw string so the path in the macro is absolute
-    let content = format!(
-        r#"use alloy::sol;
-sol!(
+    let mut sol_blocks = Vec::new();
+    for contract_name in CONTRACTS {
+        let abi_path = fetch_abi(&abi_dir, &git_ref, contract_name);
+        sol_blocks.push(format!(
+            r#"sol!(
     #[allow(missing_docs)]
     #[sol(rpc)]
-    NoriStateBridge,
+    {},
     "{}"
 );"#,
-        abi_path.to_str().unwrap().replace("\\", "/") // Ensure cross-platform paths
-    );
+            contract_name,
+            abi_path.to_str().unwrap().replace("\\", "/")
+        ));
+    }
 
-    std::fs::write(gen_path, content).expect("Failed to write generated_bindings.rs");
+    let content = format!("use alloy::sol;\n\n{}\n", sol_blocks.join("\n\n"));
+    std::fs::write(gen_path, content).expect("Failed to write generated lib.rs");
 }
