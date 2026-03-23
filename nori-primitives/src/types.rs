@@ -12,8 +12,7 @@ pub const SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX: u8 = 1u8;
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StorageSlot {
     pub key: B256, // raw 32 byte storage slot key e.g. for slot 0: 0x000...00
-    pub slot_key_address: Address, // address associated with the slot key
-    pub slot_nested_key_attestation_hash: U256, // attestation hash associated with the slot key
+    pub slot_key_code_challenge: U256, // code challenge associated with the slot key
     pub expected_value: U256, // raw `keccak256(abi.encode(target, data));`
     pub mpt_proof: Vec<Bytes>, // contract-specific MPT proof
 }
@@ -77,8 +76,7 @@ pub struct ExecutionStateProof {
 // TODO do we need the contract address here.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VerifiedContractStorageSlot {
-    pub slot_key_address: Address,
-    pub slot_nested_key_attestation_hash: U256,
+    pub slot_key_code_challenge: U256,
     pub value: U256,
 }
 
@@ -213,38 +211,22 @@ impl ConsensusProofOutputs {
 
 // TODO FIX ME FIND A BETTER PLACE FOR THIS!
 
-/// Returns the storage slot for a given address / attestation_hash in a mapping at the specified index
-/// This follows Solidity's ABI encoding rules:
+/// Returns the storage slot for a given code_challenge in a mapping at the specified index
+/// This follows Solidity's ABI encoding rules for `mapping(uint256 => uint256)`:
 /// 1. Each value is encoded as a 32-byte (256-bit) word
-/// 2. Address is left-padded with zeros to 32 bytes (12 bytes zeros + 20 bytes address)
-/// 3. Integers (e.g., mapping index, attestation_hash) are encoded as 32-byte big-endian values
-/// 4. The encoded bytes are concatenated in order and then hashed with keccak256
+/// 2. The key (code_challenge) and mapping index are concatenated and hashed with keccak256
 pub fn get_storage_location_for_key(
-    address: Address,
-    attestation_hash: U256,
+    code_challenge: U256,
     mapping_index: u8,
 ) -> B256 {
-    // Encode the address and index as Solidity's abi.encode would
-    let mut outer_encoded = vec![0u8; 64]; // 2 × 32 bytes
+    // Encode the code_challenge and mapping index as Solidity's abi.encode would
+    let mut encoded = vec![0u8; 64]; // 2 × 32 bytes
 
-    // Place address (padded to 32 bytes) in first slot
-    // Address is already 20 bytes, so we need to place it at offset 12 (32-20)
-    outer_encoded[12..32].copy_from_slice(address.as_slice());
+    // Place code_challenge (32 bytes) in first slot
+    encoded[0..32].copy_from_slice(&code_challenge.to_be_bytes::<32>());
 
     // Place mapping_index (padded to 32 bytes) in second slot
-    outer_encoded[63] = mapping_index;
+    encoded[63] = mapping_index;
 
-    // Hash the encoded data to get the outer slot
-    let outer_hash = keccak256(&outer_encoded);
-
-    // Encode the attestation_hash and the inner_encoding
-    let mut inner_encoded: Vec<u8> = vec![0u8; 64];
-
-    // Place attestation_hash
-    inner_encoded[0..32].copy_from_slice(&attestation_hash.to_be_bytes::<32>());
-
-    // Place inner_encoded
-    inner_encoded[32..64].copy_from_slice(outer_hash.as_slice());
-
-    keccak256(inner_encoded)
+    keccak256(encoded)
 }

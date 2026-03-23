@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, Uint, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, Bytes, FixedBytes, Uint, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{proof, Nibbles};
 use anyhow::Result;
@@ -24,14 +24,13 @@ pub enum MptError {
         slot_key: B256,
         reason: String,
     },
-    InvalidStorageSlotAddressMapping {
+    InvalidStorageSlotCodeChallengeMapping {
         slot_key: B256,
-        address: Address,
-        attestation_hash: U256,
-        computed_address_slot_key: B256,
+        code_challenge: U256,
+        computed_code_challenge_slot_key: B256,
     },
     MerkleHashError {
-        address: Address,
+        code_challenge: U256,
         value: Uint<256, 4>,
         reason: String,
     },
@@ -57,18 +56,17 @@ impl fmt::Display for MptError {
                 slot_key,
                 reason
             ),
-            MptError::InvalidStorageSlotAddressMapping {slot_key, address, attestation_hash, computed_address_slot_key} => write!(
+            MptError::InvalidStorageSlotCodeChallengeMapping {slot_key, code_challenge, computed_code_challenge_slot_key} => write!(
                 f,
-                "MPT invalid storage slot address, expected {:?}, but for address '{:?}' and attestation_hash '{:?}' this slot '{:?}' was computed",
+                "MPT invalid storage slot code challenge, expected {:?}, but for code_challenge '{:?}' this slot '{:?}' was computed",
                 slot_key,
-                address,
-                attestation_hash,
-                computed_address_slot_key
+                code_challenge,
+                computed_code_challenge_slot_key
             ),
-            MptError::MerkleHashError { address, value , reason} => write!(
+            MptError::MerkleHashError { code_challenge, value , reason} => write!(
                 f,
-                "MPT error computing merkle hash of verified slots, address {:?} and value {:?}: {:?}",
-                address,
+                "MPT error computing merkle hash of verified slots, code_challenge {:?} and value {:?}: {:?}",
+                code_challenge,
                 value,
                 reason
             ),
@@ -112,7 +110,7 @@ impl fmt::Display for MptError {
 ///
 /// # Errors
 /// - `MptError::InvalidAccountProof` if the account proof verification fails
-/// - `MptError::InvalidStorageSlotAddressMapping` if address-to-slot mapping is invalid
+/// - `MptError::InvalidStorageSlotCodeChallengeMapping` if code-challenge-to-slot mapping is invalid
 /// - `MptError::InvalidStorageSlotProof` if any storage slot proof is invalid
 /// - `MptError::MerkleHashError` if hashing a storage slot leaf fails
 /// - `MptError::ExceedsMaxTreeDepth` if the number of storage slots yields a merkle tree
@@ -121,7 +119,7 @@ impl fmt::Display for MptError {
 /// # Steps
 /// 1. Verify contract account exists in global state trie
 /// 2. For each storage slot:
-///    a. Verify address-to-slot-key mapping
+///    a. Verify code-challenge-to-slot-key mapping
 ///    b. Verify slot exists in contract's storage trie
 ///    c. Hash verified slot details into Merkle leaf
 /// 3. Compute Merkle root from leaves via in-place folding
@@ -185,17 +183,15 @@ pub fn verify_storage_slot_proofs(
         let mut rlp_encoded_value = Vec::new();
         value.encode(&mut rlp_encoded_value);
 
-        // Verify slot address mapping
-        let address = slot.slot_key_address;
-        let attestation_hash = slot.slot_nested_key_attestation_hash;
-        let computed_address_attestation_slot_key =
-            get_storage_location_for_key(address, attestation_hash, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
-        if computed_address_attestation_slot_key != key {
-            return Err(MptError::InvalidStorageSlotAddressMapping {
+        // Verify slot code challenge mapping
+        let code_challenge = slot.slot_key_code_challenge;
+        let computed_code_challenge_slot_key =
+            get_storage_location_for_key(code_challenge, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
+        if computed_code_challenge_slot_key != key {
+            return Err(MptError::InvalidStorageSlotCodeChallengeMapping {
                 slot_key: key,
-                address,
-                attestation_hash,
-                computed_address_slot_key: computed_address_attestation_slot_key,
+                code_challenge,
+                computed_code_challenge_slot_key,
             });
         }
 
@@ -211,12 +207,12 @@ pub fn verify_storage_slot_proofs(
             reason: e.to_string(),
         })?;
 
-        let slot_merkle_leaf_result = hash_storage_slot(&address, &attestation_hash, &value);
+        let slot_merkle_leaf_result = hash_storage_slot(&code_challenge, &value);
         let slot_merkle_leaf = match slot_merkle_leaf_result {
             Ok(val) => val,
             Err(error) => {
                 return Err(MptError::MerkleHashError {
-                    address,
+                    code_challenge,
                     value,
                     reason: error.to_string(),
                 })
