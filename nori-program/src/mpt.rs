@@ -85,56 +85,43 @@ impl fmt::Display for MptError {
     }
 }
 
-/// Verifies the Merkle Patricia Trie (MPT) proofs for a contract's storage slots against the execution state root,
-/// then computes and returns the Merkle root of the verified storage slots.
+/// Verifies the Merkle Patricia Trie (MPT) proofs for a contract's account and storage slots
+/// against the execution state root, then computes and returns the Merkle root of the verified storage slots.
 ///
-/// This function performs two main verifications:
-/// 1. **Account Verification**: Validates that the contract's `TrieAccount` (RLP-encoded) is present in the global state trie
-///    by verifying the provided MPT proof against the `execution_state_root`. The contract's address is hashed with `keccak256`
-///    and converted to nibbles to traverse the trie.
-/// 2. **Storage Slot Verification**: For each storage slot, verifies its existence in the contract's storage trie using the
-///    `storage_root` from the verified `TrieAccount`. The slot key is hashed with `keccak256` and converted to nibbles for the proof.
-///
-/// After successful verification of each storage slots, the function:
-/// - Hashes the verified storage slot details into a Merkle leaf, collecting them into a vector.
-///
-/// After successful verification of all storage slots, the function:
-/// - Computes the Merkle root through in-place folding
+/// This function performs:
+/// 1. **Account Verification** (unconditional): Validates that the contract's `TrieAccount` (RLP-encoded) is present
+///    in the global state trie by verifying the provided MPT proof against the `execution_state_root`. The contract's
+///    address is hashed with `keccak256` and converted to nibbles to traverse the trie. This always runs, even with
+///    0 storage slots, ensuring the contract exists at the proven execution state root.
+/// 2. **Tree Depth Validation** (skipped if 0 slots): Checks that the number of storage slots does not
+///    exceed `MAX_TREE_DEPTH`.
+/// 3. **Storage Slot Verification** (skipped if 0 slots): For each storage slot:
+///    a. Verifies the code-challenge-to-slot-key mapping is correct (recomputes the storage location from the
+///       code challenge and asserts it matches the provided slot key).
+///    b. Verifies the slot exists in the contract's storage trie using the `storage_root` from the verified
+///       `TrieAccount`. The slot key is hashed with `keccak256` and converted to nibbles for the proof.
+///    c. Hashes the verified slot details (code challenge + value) into a Poseidon Merkle leaf.
+/// 4. **Merkle Root Computation**: Computes the Merkle root from leaves via in-place folding.
 ///
 /// # Parameters
 /// - `execution_state_root`: The root hash of the Ethereum global state trie.
 /// - `contract_storage`: Contains the contract's address, MPT proof for the account, storage slots, and expected values.
 ///
 /// # Returns
-/// The Merkle root of the verified storage slot details as `FixedBytes<32>`.
+/// - `FixedBytes::default()` (zero hash) if the contract exists but has 0 storage slots in this window.
+/// - The Merkle root of the verified storage slot details as `FixedBytes<32>` otherwise.
 ///
 /// # Errors
-/// - `MptError::InvalidAccountProof` if the account proof verification fails
+/// - `MptError::InvalidAccountProof` if the account proof verification fails (contract not in state trie)
 /// - `MptError::InvalidStorageSlotCodeChallengeMapping` if code-challenge-to-slot mapping is invalid
 /// - `MptError::InvalidStorageSlotProof` if any storage slot proof is invalid
 /// - `MptError::MerkleHashError` if hashing a storage slot leaf fails
 /// - `MptError::ExceedsMaxTreeDepth` if the number of storage slots yields a merkle tree
 ///   which is too large.
-///
-/// # Steps
-/// 1. Verify contract account exists in global state trie
-/// 2. For each storage slot:
-///    a. Verify code-challenge-to-slot-key mapping
-///    b. Verify slot exists in contract's storage trie
-///    c. Hash verified slot details into Merkle leaf
-/// 3. Compute Merkle root from leaves via in-place folding
-/// 4. Return computed Merkle root
 pub fn verify_storage_slot_proofs(
     execution_state_root: FixedBytes<32>,
     contract_storage: ContractStorage,
 ) -> Result<FixedBytes<32>, MptError> {
-    let n_leaves = contract_storage.storage_slots.len();
-
-    // Optimisation, skip doing the MPT proof if we have no storage slots in this window
-    if n_leaves == 0 {
-        return Ok(FixedBytes::default())
-    }
-
     // Convert the contract address into nibbles for the global MPT proof
     // We need to keccak256 the address before converting to nibbles for the MPT proof
     let address_hash = keccak256(contract_storage.address.as_slice());
@@ -157,6 +144,12 @@ pub fn verify_storage_slot_proofs(
         address: contract_storage.address,
         reason: e.to_string(),
     })?;
+
+    // Optimisation, skip doing the MPT proof if we have no storage slots in this window
+    let n_leaves = contract_storage.storage_slots.len();
+    if n_leaves == 0 {
+        return Ok(FixedBytes::default())
+    }
 
     // Calculate tree depth which is ceil(log2(number)) and padded size (leaves to the nearest power of 2)
     let (depth, padded_size) = compute_merkle_tree_depth_and_size(n_leaves);

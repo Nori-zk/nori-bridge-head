@@ -89,10 +89,11 @@ pub struct ProofOutputs {
     pub execution_state_root: B256,                 // [ 80..112] bytes32
     pub verified_contract_storage_slots_root: B256, // [112..144] bytes32
     pub next_sync_committee_hash: B256,             // [144..176] bytes32
+    pub contract_address: Address,                  // [176..196] bytes20
 }
 
 impl ProofOutputs {
-    pub const SIZE: usize = 176;
+    pub const SIZE: usize = 196;
 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut buf = [0u8; Self::SIZE];
@@ -104,6 +105,7 @@ impl ProofOutputs {
         buf[80..112].copy_from_slice(&self.execution_state_root.0);
         buf[112..144].copy_from_slice(&self.verified_contract_storage_slots_root.0);
         buf[144..176].copy_from_slice(&self.next_sync_committee_hash.0);
+        buf[176..196].copy_from_slice(self.contract_address.as_slice()); // BE
 
         buf
     }
@@ -134,6 +136,7 @@ impl ProofOutputs {
         let execution_state_root = B256::from_slice(&bytes[80..112]);
         let verified_contract_storage_slots_root = B256::from_slice(&bytes[112..144]);
         let next_sync_committee_hash = B256::from_slice(&bytes[144..176]);
+        let contract_address = Address::from_slice(&bytes[176..196]);
 
         Ok(Self {
             input_slot,
@@ -143,6 +146,7 @@ impl ProofOutputs {
             execution_state_root,
             verified_contract_storage_slots_root,
             next_sync_committee_hash,
+            contract_address,
         })
     }
 }
@@ -196,7 +200,7 @@ impl ConsensusProofOutputs {
 
         let output_store_hash = B256::from_slice(&bytes[48..80]);
         let execution_state_root = B256::from_slice(&bytes[80..112]);
-        let next_sync_committee_hash = B256::from_slice(&bytes[144..176]);
+        let next_sync_committee_hash = B256::from_slice(&bytes[112..144]);
 
         Ok(Self {
             input_slot,
