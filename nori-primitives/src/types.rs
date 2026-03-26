@@ -7,7 +7,7 @@ use helios_consensus_core::types::{FinalityUpdate, LightClientStore, Update};
 use serde::{Deserialize, Serialize};
 
 // TODO FIX ME FIND A BETTER PLACE FOR THIS!
-pub const SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX: u8 = 1u8;
+pub const SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX: u8 = 2u8;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StorageSlot {
