@@ -47,7 +47,7 @@ jobs:
             })
 
       - name: Install protobuf compiler
-        run: sudo apt-get install -y protobuf-compiler
+        run: apt-get install -y protobuf-compiler
 
       - name: Run the nori-bridge-head workflow, run integration tests and build images.
         shell: bash
