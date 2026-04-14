@@ -1,0 +1,14 @@
+[package]
+name = "nori-build-zk"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "make"
+path = "bin/make.rs"
+
+[dependencies]
+sp1-sdk = { workspace = true, features = ["blocking"] }
+sp1-build = { workspace = true }

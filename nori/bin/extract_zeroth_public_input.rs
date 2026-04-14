@@ -1,61 +1,30 @@
-use anyhow::Result;
-use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use helios_ethereum::rpc::http_rpc::HttpRpc;
-use nori::{rpcs::consensus::ConsensusHttpProxy, sp1_prover::finality_update_job, sp1_prover_config::ProverConfig};
-use std::{env, fs, sync::Arc};
+use alloy_primitives::U256;
+use sp1_sdk::{Elf, HashableKey, Prover, ProverClient, ProvingKey};
+use std::{env, fs};
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    dotenv::dotenv().ok();
-
-    let consensus_client = ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env();
-    let (current_slot, store_hash) = consensus_client
-        .get_latest_finality_slot_and_store_hash()
-        .await
-        .expect("Expected to get the latest finality slot and store hash");
-    let proof_inputs_with_window = consensus_client
-        .prepare_consensus_mpt_proof_inputs(current_slot, store_hash, false)
-        .await
-        .expect("Expected to get proof inputs with a window");
-
-    // Get the mock config
-    let config = Arc::new(
-        ProverConfig::mock_plonk()
-    );
-    
-    // Run mock program.
-    println!("Running SP1 prover");
-    let proof_outputs = finality_update_job(config, 0, current_slot, proof_inputs_with_window.proof_inputs)
-        .await
-        .expect("Expected to run a finality update job");
-
-    // Extract the public input we need.
-    let proof_result = proof_outputs.proof();
-    let plonk_proof = proof_result.proof.try_as_plonk().expect("Expected a plonk sp1 proof");
-    let zeroth_public_input = &plonk_proof.public_inputs[0];
-    println!(
-        "Extracted plonk sp1Proof.proof.public_inputs[0] {}",
-        zeroth_public_input
-    );
-
-    // Determine the current project directory (where Cargo.toml is located).
+async fn main() {
+    // Determine the ELF path.
     let project_dir = env::current_dir().expect("Failed to get current directory");
-    let cargo_dir = project_dir
-        .parent()
-        .expect("Failed to find project root directory");
-
-    // Use the correct relative path based on the project root.
+    let cargo_dir = project_dir.parent().expect("Failed to find project root directory");
     let nori_elf_dir = cargo_dir.join("nori-elf");
     let elf_path = nori_elf_dir.join("nori-sp1-helios-program");
     let output_path = elf_path.with_extension("pi0.json");
 
-    // Construct the json string from the public input.
-    let json_string = format!("\"{}\"", zeroth_public_input);
+    // Load ELF and derive the VK.
+    let elf_bytes: &'static [u8] = fs::read(&elf_path).expect("Failed to read ELF file").leak();
+    let client = ProverClient::builder().mock().build().await;
+    let pk = client.setup(Elf::Static(elf_bytes)).await.expect("Failed to setup proving key");
 
-    // Write the file.
+    // bytes32() = "0x<hex>" of hash_bn254() — same value as public_inputs[0] in a real Plonk proof.
+    let vk_bytes32 = pk.verifying_key().bytes32();
+    let hex = vk_bytes32.strip_prefix("0x").expect("bytes32 should start with 0x");
+    let decimal_pi0 = U256::from_str_radix(hex, 16).expect("invalid hex").to_string();
+
+    println!("pi0: {}", decimal_pi0);
+
+    let json_string = format!("\"{}\"", decimal_pi0);
     println!("Attempting to write to {:?}", output_path);
     fs::write(&output_path, json_string).expect("Failed to write pi0 JSON file");
     println!("plonk pi0 written to {:?}", output_path);
-
-    Ok(())
 }

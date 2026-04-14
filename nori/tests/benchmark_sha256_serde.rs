@@ -1,12 +1,9 @@
 use alloy_primitives::FixedBytes;
 use anyhow::Result;
-use helios_consensus_core::{consensus_spec::MainnetConsensusSpec};
+use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
-use nori::{
-     rpcs::consensus::ConsensusHttpProxy,
-    sp1_prover::ELF,
-};
-use sp1_sdk::{ProverClient, SP1PublicValues, SP1Stdin};
+use nori::{rpcs::consensus::ConsensusHttpProxy, sp1_prover::ELF};
+use sp1_sdk::{Elf, Prover, ProverClient, SP1PublicValues, SP1Stdin};
 
 /// A stripped down version of finality_update_job used to generate cycle information without the opt
 pub async fn benchmark_finality_update(
@@ -24,35 +21,31 @@ pub async fn benchmark_finality_update(
     println!("Encoding sp1 proof inputs.");
     let encoded_proof_inputs = serde_cbor::to_vec(&proof_inputs_with_window)?;
 
-    let public_values = tokio::task::spawn_blocking(move || -> Result<SP1PublicValues> {
-        // Setup prover client
-        println!("Setting up prover client");
-        let mut stdin = SP1Stdin::new();
-        stdin.write_slice(&encoded_proof_inputs);
-        let prover_client = ProverClient::from_env();
-        println!("Prover client setup complete.");
+    // Setup prover client
+    println!("Setting up prover client");
+    let mut stdin = SP1Stdin::new();
+    stdin.write_slice(&encoded_proof_inputs);
 
-        // Generate report
-        let (sp1_public_values, report) = prover_client
-            .execute(ELF, &stdin)
-            // .deferred_proof_verification(false)
-            .run()
-            .expect("executing failed");
+    let prover_client = ProverClient::builder().cpu().build().await;
+    println!("Prover client setup complete.");
 
-        println!(
-            "Execution total_instruction_count: {:?}",
-            report.total_instruction_count()
-        );
-        println!(
-            "Execution total_syscall_count: {:?}",
-            report.total_syscall_count()
-        );
+    // Generate report
+    let (sp1_public_values, report) = prover_client
+        .execute(Elf::Static(ELF), stdin)
+        // .deferred_proof_verification(false)
+        .await
+        .expect("executing failed");
 
-        Ok(sp1_public_values)
-    })
-    .await??;
+    println!(
+        "Execution total_instruction_count: {:?}",
+        report.total_instruction_count()
+    );
+    println!(
+        "Execution total_syscall_count: {:?}",
+        report.total_syscall_count()
+    );
 
-    Ok(public_values)
+    Ok(sp1_public_values)
 }
 
 #[tokio::test]

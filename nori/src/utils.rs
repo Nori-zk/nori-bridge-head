@@ -58,7 +58,15 @@ pub async fn handle_nori_proof_message(proof_message: &ProofMessage) -> Result<(
 
 pub fn enable_logging_from_cargo_run() {
     dotenv::dotenv().ok();
-    env::set_var("RUST_LOG", env::var("NORI_LOG").unwrap_or("".to_string()));
+    let nori_log = env::var("NORI_LOG").unwrap_or_default();
+    let log_level = if nori_log.contains("debug") || nori_log.contains("trace") {
+        nori_log.clone()
+    } else if nori_log.is_empty() {
+        "alloy_transport_http=off".to_string()
+    } else {
+        format!("{},alloy_transport_http=off", nori_log)
+    };
+    env::set_var("RUST_LOG", log_level);
     env_logger::init();
 }
 
