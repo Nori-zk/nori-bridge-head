@@ -1,5 +1,5 @@
 [workspace]
-members = ["primitives", "script", "program", "nori/src/contract_bindings", "nori", "nori-hash", "nori-program"]
+members = ["primitives", "program", "nori/src/contract_bindings", "nori", "nori-hash", "nori-program", "nori-build-zk"]
 resolver = "2"
 
 [workspace.package]
@@ -25,7 +25,7 @@ o1-utils = { git = "https://github.com/o1-labs/proof-systems", package = "o1-uti
 
 
 # sp1-helios
-sp1-helios-script = { path = "script" }
+# sp1-helios-script = { path = "script" }
 sp1-helios-program = { path = "program" }
 sp1-helios-primitives = { path = "primitives" }
 
@@ -37,9 +37,10 @@ helios-ethereum = { git = "https://github.com/a16z/helios", tag = "0.11.0" }
 # general
 dotenv = "0.15.0"
 eyre = "0.6.12"
-sp1-sdk = "5.2.4"
-sp1-build = "5.2.4"
-tokio = "1.38.0"
+sp1-sdk = { version = "6.0.1", features = ["network"] }
+sp1-build = "6.0.1"
+sp1-cuda = "6.0.1"
+tokio = { version = "1.38.0", features = ["signal", "rt-multi-thread", "macros"] }
 tracing = "0.1.37"
 serde = "1.0.203"
 thiserror = "1.0.61"
@@ -64,13 +65,13 @@ reqwest = "0.12.5"
 tree_hash = "0.10.0"
 serde_with = { version = "3.4.0", features = ["hex"] }
 cargo_metadata = "0.18"
-sha2-v0-10-9 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.8-sp1-4.0.0" }
+sha2-v0-10-8 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.8-sp1-6.0.0" }
 once_cell = "=1.21.3"
 
 [patch.crates-io]
-sha3-v0-10-8 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha3", tag = "patch-sha3-0.10.8-sp1-4.0.0" }
+sha3-v0-10-8 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha3", tag = "patch-sha3-0.10.8-sp1-6.0.0" }
 #sha2-v0-10-9 = { git = "https://github.com/sp1-patches/RustCrypto-hashes", package = "sha2", tag = "patch-sha2-0.10.9-sp1-4.0.0" }
-tiny-keccak = { git = "https://github.com/sp1-patches/tiny-keccak", tag = "patch-2.0.2-sp1-4.0.0" }
-bls12_381 = { git = "https://github.com/sp1-patches/bls12_381", tag = "patch-0.8.0-sp1-5.0.0-v2" }
+tiny-keccak = { git = "https://github.com/sp1-patches/tiny-keccak", tag = "patch-2.0.2-sp1-6.0.0" }
+bls12_381 = { git = "https://github.com/sp1-patches/bls12_381", tag = "patch-0.8.0-sp1-6.0.0-v2" }
 # From upstream: https://github.com/a16z/helios/blob/master/Cargo.toml#L115
 ethereum_hashing = { git = "https://github.com/ncitron/ethereum_hashing", rev = "7ee70944ed4fabe301551da8c447e4f4ae5e6c35" }
