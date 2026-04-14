@@ -19,7 +19,7 @@ fn main() {
         nori_program_path.to_str().expect("Invalid path"),
         BuildArgs {
             docker: true,
-            tag: "v6.0.1".to_string(),
+            tag: "v6.1.0".to_string(),
             output_directory: Some(nori_elf_dir.to_str().expect("Invalid path").to_string()),
             ..Default::default()
         },

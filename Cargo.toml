@@ -37,9 +37,9 @@ helios-ethereum = { git = "https://github.com/a16z/helios", tag = "0.11.0" }
 # general
 dotenv = "0.15.0"
 eyre = "0.6.12"
-sp1-sdk = { version = "6.0.1", features = ["network", "cuda"] }
-sp1-build = "6.0.1"
-sp1-cuda = "6.0.1"
+sp1-sdk = { version = "6.1.0", features = ["network", "cuda"] }
+sp1-build = "6.1.0"
+sp1-cuda = "6.1.0"
 tokio = { version = "1.38.0", features = ["signal", "rt-multi-thread", "macros"] }
 tracing = "0.1.37"
 serde = "1.0.203"
