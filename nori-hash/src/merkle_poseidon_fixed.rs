@@ -3,7 +3,7 @@ use anyhow::Result;
 use mina_curves::pasta::Fp;
 use mina_poseidon::{
     constants::PlonkSpongeConstantsKimchi,
-    pasta::fp_kimchi,
+    pasta::{fp_kimchi, FULL_ROUNDS},
     poseidon::{ArithmeticSponge as Poseidon, Sponge as _},
 };
 use o1_utils::FieldHelpers;
@@ -15,7 +15,7 @@ const MERKLE_ZEROS: &[u8; N_MERKLE_ZEROS * 32] = include_bytes!("merkle-zeros.da
 // Kimchi poseidon hash
 
 pub fn poseidon_hash(input: &[Fp]) -> Fp {
-    let mut hash = Poseidon::<Fp, PlonkSpongeConstantsKimchi>::new(fp_kimchi::static_params());
+    let mut hash = Poseidon::<Fp, PlonkSpongeConstantsKimchi, FULL_ROUNDS>::new(fp_kimchi::static_params());
     hash.absorb(input);
     hash.squeeze()
 }
