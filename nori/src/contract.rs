@@ -1,7 +1,7 @@
 use nori_sp1_helios_primitives::types::{
     get_storage_location_for_key, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
 };
-use nori_contract_bindings::NoriStateBridge::TokensLocked;
+use nori_contract_bindings::NoriTokenBridge::TokensLocked;
 use alloy_primitives::{Address, Log, B256, U256};
 use anyhow::{Context, Result};
 use std::{
@@ -17,19 +17,18 @@ pub fn get_source_contract_address() -> Result<Address> {
     Ok(source_state_bridge_contract_address)
 }
 
-pub fn addresses_attestation_pair_to_storage_slots(
+pub fn code_challenge_to_storage_slots(
     locked_token_event: Vec<Log<TokensLocked>>,
-) -> HashMap<B256, (Address, U256)> {
-    let mut slot_to_address_attestation = HashMap::<B256, (Address, U256)>::new();
+) -> HashMap<B256, U256> {
+    let mut slot_to_code_challenge = HashMap::<B256, U256>::new();
     for locked_token_event in locked_token_event.iter() {
         let slot = get_storage_location_for_key(
-            locked_token_event.user,
-            locked_token_event.attestationHash,
+            locked_token_event.codeChallenge,
             SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
         );
-        slot_to_address_attestation.insert(slot, (locked_token_event.user, locked_token_event.attestationHash));
+        slot_to_code_challenge.insert(slot, locked_token_event.codeChallenge);
     }
-    slot_to_address_attestation
+    slot_to_code_challenge
 }
 
 // https://ethereum.stackexchange.com/questions/133473/how-to-calculate-the-location-index-slot-in-storage-of-a-mapping-key
@@ -61,21 +60,24 @@ mod tests {
 // https://www.rareskills.io/post/solidity-dynamic
 // "Now let’s show a code example of getting nested array value from storage using assembly"
 #[test]
-fn test_nested_mapping_storage_slot() {
+fn test_single_mapping_storage_slot() {
     use alloy::hex;
-    use alloy_primitives::Uint;
+    use alloy_primitives::{keccak256, Uint};
     use std::str::FromStr;
     use super::*;
 
-    let address = Address::from_slice(&hex::decode("0000000000000000000000000000000000000b0b").unwrap());
-    let token_id = Uint::<256, 4>::from_str("1111").unwrap();
-    let base_slot: u8 = 0;
+    // For mapping(uint256 => uint256) at storage index 0:
+    // slot = keccak256(abi.encode(key, mappingIndex))
+    let code_challenge = Uint::<256, 4>::from_str("1111").unwrap();
+    let mapping_index: u8 = 0;
 
-    let slot = get_storage_location_for_key(address, token_id, base_slot);
+    let slot = get_storage_location_for_key(code_challenge, mapping_index);
 
-    let expected = B256::from_slice(
-        &hex::decode("0b061f98898a826aef6fdfc2d8eb981af54b85700e4516b39466540f69aced0f").unwrap(),
-    );
+    // Manually compute expected: keccak256(code_challenge ++ padding(0))
+    let mut encoded = [0u8; 64];
+    encoded[0..32].copy_from_slice(&code_challenge.to_be_bytes::<32>());
+    encoded[63] = mapping_index;
+    let expected = keccak256(encoded);
 
     assert_eq!(slot, expected);
 }

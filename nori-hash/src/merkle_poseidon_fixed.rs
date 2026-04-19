@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, U256};
+use alloy_primitives::U256;
 use anyhow::Result;
 use mina_curves::pasta::Fp;
 use mina_poseidon::{
@@ -400,24 +400,21 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
     hash
 }
 
-/// Computes a Poseidon hash for a storage slot leaf node given a contract address,
-/// an attestation hash, and a 32-byte value.
+/// Computes a Poseidon hash for a storage slot leaf node given a code challenge and a 32-byte value.
 ///
-/// The storage slot leaf combines the 20-byte contract address, a 32-byte attestation hash,
-/// and a 32-byte value into three field elements, which are then hashed together using Poseidon.
-/// This process encodes the data carefully to avoid overflow issues due to the 254-bit field size
-/// (which cannot safely hold 256 bits).
+/// The storage slot leaf combines a 32-byte code challenge and a 32-byte value into three field
+/// elements, which are then hashed together using Poseidon. This process encodes the data carefully
+/// to avoid overflow issues due to the 254-bit field size (which cannot safely hold 256 bits).
 ///
 /// Specifically:
-/// - The first field contains the 20-byte address, the first byte of the attestation hash,
-///   and the first byte of the value (total 22 bytes).
-/// - The second field contains the remaining 31 bytes of the attestation hash.
+/// - The first field contains the first byte of the code challenge and the first byte of the value
+///   (total 2 bytes, padded to 32 with zeros).
+/// - The second field contains the remaining 31 bytes of the code challenge.
 /// - The third field contains the remaining 31 bytes of the value.
 /// - All three are converted from bytes to field elements and then hashed.
 ///
 /// # Parameters
-/// - `address`: Reference to a 20-byte Address key.
-/// - `attestation_hash`: A 256-bit `U256` representing the attestation_hash key.
+/// - `code_challenge`: A 256-bit `U256` representing the SCRAM code challenge.
 /// - `value`: The 32-byte slot value.
 ///
 /// # Returns
@@ -429,43 +426,41 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
 ///
 /// # Example
 /// ```rust
-/// let address = Address::from_hex("0x1234567890abcdef1234567890abcdef12345678").unwrap();
-/// let attestation_hash = U256::from_be_hex("0xdeadbeef...");
-/// let value = FixedBytes::from_hex("0xabcdef...").unwrap();
-/// let leaf_hash = hash_storage_slot_leaf(&address, &attestation_hash, &value).unwrap();
+/// let code_challenge = U256::from_be_hex("0xdeadbeef...");
+/// let value = U256::from_be_hex("0xabcdef...");
+/// let leaf_hash = hash_storage_slot(&code_challenge, &value).unwrap();
 /// ```
 pub fn hash_storage_slot(
-    address: &Address,
-    attestation_hash: &U256,
+    code_challenge: &U256,
     value: &U256,
-    //value: &FixedBytes<32>,
 ) -> Result<Fp> {
-    let address_slice = address.as_slice();
-    let att_hash_bytes = attestation_hash.to_be_bytes::<32>();
-    let value_slice = value.to_be_bytes::<32>();
+    let code_challenge_bytes = code_challenge.to_be_bytes::<32>();
+    let value_bytes = value.to_be_bytes::<32>();
 
     // Left here for debugging purposes
-    /*print!("{:?} 0x", address);
-    for b in attestation_hash.to_be_bytes::<32>().iter() {
+    /*print!("0x");
+    for b in code_challenge.to_be_bytes::<32>().iter() {
         print!("{:02x}", b);
     }
     print!(" ");
-    //println!(" {:?}", value);
     for b in value.to_be_bytes::<32>().iter() {
         print!("{:02x}", b);
     }
     println!();*/
 
+    // 64 bytes total (32 + 32), max 31 bytes per field → 3 fields
+    // firstFieldBytes: 1 byte from codeChallenge + 1 byte from value + 30 zeros
     let mut first_field_bytes = [0u8; 32];
-    first_field_bytes[0..20].copy_from_slice(&address_slice[0..20]);
-    first_field_bytes[20] = att_hash_bytes[0];
-    first_field_bytes[21] = value_slice[0];
+    first_field_bytes[0] = code_challenge_bytes[0];
+    first_field_bytes[1] = value_bytes[0];
 
+    // secondFieldBytes: remaining 31 bytes from codeChallenge (1 to 31)
     let mut second_field_bytes = [0u8; 32];
-    second_field_bytes[0..31].copy_from_slice(&att_hash_bytes[1..32]);
+    second_field_bytes[0..31].copy_from_slice(&code_challenge_bytes[1..32]);
 
+    // thirdFieldBytes: remaining 31 bytes from value (1 to 31)
     let mut third_field_bytes = [0u8; 32];
-    third_field_bytes[0..31].copy_from_slice(&value_slice[1..32]);
+    third_field_bytes[0..31].copy_from_slice(&value_bytes[1..32]);
 
     let first_field = Fp::from_bytes(&first_field_bytes)?;
     let second_field = Fp::from_bytes(&second_field_bytes)?;
@@ -487,21 +482,17 @@ pub fn hash_storage_slot(
 #[cfg(test)]
 mod merkle_fixed_tests {
     use super::*;
-    use alloy_primitives::Address;
     use anyhow::Result;
 
-    fn dummy_address(i: i32) -> Address {
-        let mut bytes = [0u8; 20];
-        let i_bytes = i.to_le_bytes();
-        bytes[16..20].copy_from_slice(&i_bytes);
-        Address::from_slice(&bytes)
-    }
-
-    fn dummy_attestation(i: i32) -> U256 {
+    fn dummy_code_challenge(i: i32) -> U256 {
         let mut bytes = [0u8; 32];
         let i_bytes = i.to_le_bytes();
         bytes[0..4].copy_from_slice(&i_bytes);
-        U256::from_le_bytes(bytes)
+        // CHECKME: was U256::from_le_bytes when this was dummy_attestation. from_le_bytes causes
+        // .to_be_bytes() to reverse the byte array, so byte[0] in the hash input differs from TS
+        // (TS Bytes32.from(arr).toBytes() preserves order). Previously the old dummy_attestation also
+        // used from_le_bytes and tests matched cross-language — needs investigation as to why that worked.
+        U256::from_be_bytes(bytes)
     }
 
     fn dummy_value(i: i32) -> U256 {
@@ -511,19 +502,19 @@ mod merkle_fixed_tests {
         U256::from_be_bytes(bytes)
     }
 
-    // Build leaf hashes from given (address, attestation_hash, value) tuples
-    fn build_leaves(triples: &[(Address, U256, U256)]) -> Result<Vec<Fp>> {
-        let mut leaves = Vec::with_capacity(triples.len());
-        for (addr, att_hash, val) in triples {
-            leaves.push(hash_storage_slot(addr, att_hash, val)?);
+    // Build leaf hashes from given (code_challenge, value) pairs
+    fn build_leaves(pairs: &[(U256, U256)]) -> Result<Vec<Fp>> {
+        let mut leaves = Vec::with_capacity(pairs.len());
+        for (code_challenge, val) in pairs {
+            leaves.push(hash_storage_slot(code_challenge, val)?);
         }
         Ok(leaves)
     }
 
-    // Full Merkle lifecycle test using your actual hashed leaves
-    fn full_merkle_test(triples: &[(Address, U256, U256)], leaf_index: usize) -> Result<()> {
+    // Full Merkle lifecycle test using actual hashed leaves
+    fn full_merkle_test(pairs: &[(U256, U256)], leaf_index: usize) -> Result<()> {
         let zeros = get_merkle_zeros();
-        let leaves = build_leaves(triples)?;
+        let leaves = build_leaves(pairs)?;
         let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
 
         let mut leaves_clone = leaves.clone();
@@ -557,25 +548,16 @@ mod merkle_fixed_tests {
     #[test]
     fn rarg_test_hash_storage_slot() {
         // Provided hex strings (without 0x prefix)
-        let slot_key_address_str = "c7e910807dd2e3f49b34efe7133cfb684520da69";
-        let slot_nested_key_attestation_hash_str =
+        let slot_key_code_challenge_str =
             "2f000000000000000000000000000000000000000000000000038d7ec293e52f";
         let value_str = "e8d4a51000";
 
-        // Convert slot_key_address_str to Address ([u8; 20])
-        let mut address_bytes = [0u8; 20];
-        for i in 0..20 {
-            let byte_str = &slot_key_address_str[i * 2..i * 2 + 2];
-            address_bytes[i] = u8::from_str_radix(byte_str, 16).unwrap();
-        }
-        let address = Address::from(address_bytes);
-
         let mut hash_bytes = [0u8; 32];
         for i in 0..32 {
-            let byte_str = &slot_nested_key_attestation_hash_str[i * 2..i * 2 + 2];
+            let byte_str = &slot_key_code_challenge_str[i * 2..i * 2 + 2];
             hash_bytes[31 - i] = u8::from_str_radix(byte_str, 16).unwrap(); // reverse into LE
         }
-        let attestation_hash = U256::from_le_bytes(hash_bytes);
+        let code_challenge = U256::from_le_bytes(hash_bytes);
 
         // Convert value_str to U256, left-padded with zeros
 
@@ -596,16 +578,15 @@ mod merkle_fixed_tests {
             value_bytes[i] = u8::from_str_radix(byte_str, 16).unwrap();
         }
 
-        //let value = FixedBytes::<32>::from(&value_bytes);
         let value = U256::from_be_bytes(value_bytes);
 
-        print!("{:?} 0x", address);
-        for b in attestation_hash.to_be_bytes::<32>().iter() {
+        print!("0x");
+        for b in code_challenge.to_be_bytes::<32>().iter() {
             print!("{:02x}", b);
         }
         println!(" {:?}", value);
         // Call hash_storage_slot function
-        let result = hash_storage_slot(&address, &attestation_hash, &value).unwrap();
+        let result = hash_storage_slot(&code_challenge, &value).unwrap();
 
         // Assert or print result as needed
         println!("Hash result big int: {:?}", result.to_bigint_positive());
@@ -623,18 +604,17 @@ mod merkle_fixed_tests {
     #[test]
     fn test_large_slots() -> Result<()> {
         let n = 1000;
-        let triples: Vec<(Address, U256, U256)> = (0..n)
-            .map(|i| (dummy_address(i), dummy_attestation(i), dummy_value(i)))
+        let pairs: Vec<(U256, U256)> = (0..n)
+            .map(|i| (dummy_code_challenge(i), dummy_value(i)))
             .collect();
-        full_merkle_test(&triples, 543)
+        full_merkle_test(&pairs, 543)
     }
 
     #[test]
     fn test_hash_storage_slot_basic() -> Result<()> {
-        let address = dummy_address(1);
-        let att_hash = dummy_attestation(2);
+        let code_challenge = dummy_code_challenge(2);
         let value = dummy_value(3);
-        let leaf_hash = hash_storage_slot(&address, &att_hash, &value)?;
+        let leaf_hash = hash_storage_slot(&code_challenge, &value)?;
         assert_ne!(leaf_hash, Fp::from(0));
         Ok(())
     }
@@ -648,11 +628,11 @@ mod merkle_fixed_tests {
             println!("→ Testing with {} leaves", n_leaves);
 
             // Build dummy pairs
-            let triples: Vec<(Address, U256, U256)> = (0..n_leaves)
-                .map(|i| (dummy_address(i), dummy_attestation(i), dummy_value(i)))
+            let pairs: Vec<(U256, U256)> = (0..n_leaves)
+                .map(|i| (dummy_code_challenge(i), dummy_value(i)))
                 .collect();
 
-            let leaves = build_leaves(&triples).expect("build_leaves failed");
+            let leaves = build_leaves(&pairs).expect("build_leaves failed");
             print!("   leaves=");
             for leaf in leaves.clone() {
                 print!("{}, ", leaf);

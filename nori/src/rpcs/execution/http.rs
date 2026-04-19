@@ -1,10 +1,10 @@
 use crate::{
     contract::{
-        addresses_attestation_pair_to_storage_slots, get_source_contract_address,
+        code_challenge_to_storage_slots, get_source_contract_address,
     },
     rpcs::query_with_fallback,
 };
-use nori_contract_bindings::NoriStateBridge;
+use nori_contract_bindings::NoriTokenBridge;
 use nori_sp1_helios_primitives::types::{
     ConsensusProofInputs, ContractStorage, ProofInputs, ProofInputsWithWindow, StorageSlot,
 };
@@ -211,7 +211,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
     ) -> Result<ProofInputs<S>> {
-        let contract_events = Self::_get_source_contract_events::<NoriStateBridge::TokensLocked>(
+        let contract_events = Self::_get_source_contract_events::<NoriTokenBridge::TokensLocked>(
             provider,
             source_state_bridge_contract_address,
             input_block_number,
@@ -219,12 +219,12 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         )
         .await?;
 
-        let storage_slot_address_map = addresses_attestation_pair_to_storage_slots(contract_events);
+        let storage_slot_code_challenge_map = code_challenge_to_storage_slots(contract_events);
 
-        for (storage_slot, address) in storage_slot_address_map.iter() {
+        for (storage_slot, code_challenge) in storage_slot_code_challenge_map.iter() {
             debug!(
-                "Storage slots obtained address '{:?}' storage_slot '{:?}'",
-                address, storage_slot
+                "Storage slots obtained code_challenge '{:?}' storage_slot '{:?}'",
+                code_challenge, storage_slot
             );
         }
 
@@ -232,7 +232,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         let mpt_account_proof = Self::_get_proof(
             provider,
             source_state_bridge_contract_address, //get_source_contract_address()?,
-            storage_slot_address_map.keys().cloned().collect(),
+            storage_slot_code_challenge_map.keys().cloned().collect(),
             BlockId::number(output_block_number),
         )
         .await?;
@@ -246,13 +246,12 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             .storage_proof
             .iter()
             .map(|slot| {
-                let address_attestation_pair = storage_slot_address_map
+                let code_challenge = storage_slot_code_challenge_map
                     .get(&slot.key.as_b256())
                     .copied()
-                    .expect("Missing address attestation pair for storage slot");
+                    .expect("Missing code challenge for storage slot");
                 StorageSlot {
-                    slot_key_address: address_attestation_pair.0,
-                    slot_nested_key_attestation_hash: address_attestation_pair.1,
+                    slot_key_code_challenge: code_challenge,
                     key: slot.key.as_b256(),
                     expected_value: slot.value,
                     mpt_proof: slot.proof.clone(),
@@ -260,14 +259,8 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             })
             .collect();
 
-        // Sort by address order for stability (in case rpc returns strange order)
-        //storage_slots.sort_by_key(|s| s.slot_key_address);
-        storage_slots.sort_by(|a, b| {
-            a.slot_key_address.cmp(&b.slot_key_address).then_with(|| {
-                a.slot_nested_key_attestation_hash
-                    .cmp(&b.slot_nested_key_attestation_hash)
-            })
-        });
+        // Sort by code challenge for stability (in case rpc returns strange order)
+        storage_slots.sort_by_key(|s| s.slot_key_code_challenge);
 
         let contract_storage = ContractStorage {
             address: mpt_account_proof.address,
