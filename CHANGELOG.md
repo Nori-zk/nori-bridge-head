@@ -1,5 +1,21 @@
 # Changelog
 
+## 26/3/26 — Mesa Contracts
+
+### Changed
+
+- **New contract binding method**: switched to github-style fetching for contract bindings ([f9b3fec](../../commit/f9b3fec))
+- **Deprecate address field**: swapped to the new hash function ([6af3166](../../commit/6af3166))
+
+### Added
+
+- **Contract address as public output** (CRITICAL): exposed as a public output so downchain consumers can use it ([c5758ff](../../commit/c5758ff))
+- **ELF rebuild**: regenerated ZK artifact to include `contract_address` in public outputs ([eae41ad](../../commit/eae41ad))
+
+### Fixed
+
+- **`SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX`** bumped by 1: `ReentrancyGuard` inheritance shifted the `NoriTokenBridge` storage slot ([6e676f3](../../commit/6e676f3))
+
 ## 24/2/26 — SP1 v5/v6 Migration
 
 ### Changed
