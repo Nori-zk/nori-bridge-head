@@ -46,6 +46,9 @@ jobs:
               body: message
             })
 
+      - name: Install protobuf compiler
+        run: apt-get update && apt-get install -y protobuf-compiler
+
       - name: Run the nori-bridge-head workflow, run integration tests and build images.
         shell: bash
         env:

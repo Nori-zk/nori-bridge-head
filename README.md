@@ -4,6 +4,12 @@ Helios light client running inside SP1 zkVM generating consensus proofs used in 
 
 Note the relevant workspace is within the `/nori` folder. And nori specific library code have a prefix of `nori-` or nested within folders with such a prefix.
 
+## Pre-requisites
+
+Since sp1v6 `Protocol Buffers compiler` needs to be installed on your system.
+
+`sudo apt install -y protobuf-compiler`
+
 ## Installation
 
 Rust installation:

@@ -9,24 +9,38 @@ use anyhow::Result;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use log::info;
 use nori_sp1_helios_primitives::types::ProofInputs;
-use sp1_sdk::{Prover, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
+use sp1_cuda::CudaProvingKey;
+use sp1_sdk::{Elf, ProveRequest, Prover, ProverClient, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin};
 use std::collections::HashSet;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+use tokio::sync::OnceCell;
 
 /// Import nori sp1 helios program
 pub const ELF: &[u8] = include_bytes!("../../nori-elf/nori-sp1-helios-program");
 
 /// Cache the proving key globally (initialized once)
-static PROVING_KEY: OnceLock<SP1ProvingKey> = OnceLock::new();
+static PROVING_KEY: OnceCell<SP1ProvingKey> = OnceCell::const_new();
+
+/// Cache the CUDA proving key globally (initialized once)
+static CUDA_PROVING_KEY: OnceCell<CudaProvingKey> = OnceCell::const_new();
 
 /// Method to get proving key init or return it if it has been called already
-pub async fn get_proving_key() -> &'static SP1ProvingKey {
-    PROVING_KEY.get_or_init(|| {
+pub async fn get_proving_key() -> Result<&'static SP1ProvingKey> {
+    PROVING_KEY.get_or_try_init(|| async {
         // Initialize prover client for setup (uses mock mode for fast setup)
-        let client = ProverClient::builder().mock().build();
-        let (pk, _) = client.setup(ELF);
+        let client = ProverClient::builder().mock().build().await;
+        let pk = client.setup(Elf::Static(ELF)).await;
         pk
-    })
+    }).await
+}
+
+/// Method to get CUDA proving key init or return it if it has been called already
+pub async fn get_cuda_proving_key() -> Result<&'static CudaProvingKey> {
+    CUDA_PROVING_KEY.get_or_try_init(|| async {
+        let client = ProverClient::builder().cuda().build().await;
+        let pk = client.setup(Elf::Static(ELF)).await?;
+        Ok(pk)
+    }).await
 }
 
 // ================================================================================================
@@ -35,32 +49,41 @@ pub async fn get_proving_key() -> &'static SP1ProvingKey {
 
 /// Enum to hold different prover types
 enum LocalProver {
-    Mock(sp1_sdk::CpuProver),
+    Mock(sp1_sdk::MockProver),
     Cpu(sp1_sdk::CpuProver),
     Cuda(sp1_sdk::CudaProver),
 }
 
 impl LocalProver {
     /// Generate proof with the given proof type
-    fn prove_with_type(
+    async fn prove_with_type(
         self,
-        pk: &SP1ProvingKey,
         stdin: &SP1Stdin,
         proof_type: &ProofType,
     ) -> Result<SP1ProofWithPublicValues> {
         match self {
-            LocalProver::Mock(p) | LocalProver::Cpu(p) => {
-                let cpu_prove_builder = p.prove(pk, stdin);
+            LocalProver::Mock(p) => {
+                let pk = get_proving_key().await?;
+                let mock_prove_request = p.prove(pk, stdin.clone());
                 match proof_type {
-                    ProofType::Plonk => cpu_prove_builder.plonk().run(),
-                    ProofType::Groth16 => cpu_prove_builder.groth16().run(),
+                    ProofType::Plonk => Ok(mock_prove_request.plonk().await?),
+                    ProofType::Groth16 => Ok(mock_prove_request.groth16().await?),
+                }
+            }
+            LocalProver::Cpu(p) => {
+                let pk = get_proving_key().await?;
+                let cpu_prove_builder = p.prove(pk, stdin.clone());
+                match proof_type {
+                    ProofType::Plonk => Ok(cpu_prove_builder.plonk().await?),
+                    ProofType::Groth16 => Ok(cpu_prove_builder.groth16().await?),
                 }
             }
             LocalProver::Cuda(p) => {
-                let cuda_prove_builder = p.prove(pk, stdin);
+                let cuda_pk = get_cuda_proving_key().await?;
+                let cuda_prove_builder = p.prove(cuda_pk, stdin.clone());
                 match proof_type {
-                    ProofType::Plonk => cuda_prove_builder.plonk().run(),
-                    ProofType::Groth16 => cuda_prove_builder.groth16().run(),
+                    ProofType::Plonk => Ok(cuda_prove_builder.plonk().await?),
+                    ProofType::Groth16 => Ok(cuda_prove_builder.groth16().await?),
                 }
             }
         }
@@ -72,9 +95,8 @@ impl LocalProver {
 // ================================================================================================
 
 /// Method to generate an SP1 proof given a prover config, key and stdin
-fn generate_proof(
+async fn generate_proof(
     config: &ProverConfig,
-    pk: &SP1ProvingKey,
     stdin: &SP1Stdin,
     extended_whitelist: Option<Vec<Address>>,
 ) -> Result<SP1ProofWithPublicValues> {
@@ -85,13 +107,16 @@ fn generate_proof(
                 .network_for(net.network_mode)
                 .rpc_url(&net.rpc_url)
                 .private_key(&net.private_key)
-                .build();
+                .build().await;
 
             // Get the SP1 strategy native type
             let strategy = get_fulfillment_strategy(&net.fulfillment);
 
+            // Get proving key
+            let pk = get_proving_key().await?;
+
             // Build the proof request
-            let mut proof_request = prover.prove(pk, stdin);
+            let mut proof_request = prover.prove(pk, stdin.clone());
 
             // Pick the proof type
             proof_request = match config.proof_type {
@@ -156,26 +181,26 @@ fn generate_proof(
             info!("Prover client setup complete.");
 
             info!("Running sp1 proof.");
-            let proof = proof_request.run();
+            let proof = proof_request.await?;
             info!("Finished sp1 proof.");
 
-            proof
+            Ok(proof)
         }
         ProverMode::Local(local_mode) => {
             info!("Setting up prover client");
             let prover = match local_mode {
-                LocalProverMode::Mock => LocalProver::Mock(ProverClient::builder().mock().build()),
-                LocalProverMode::Cpu => LocalProver::Cpu(ProverClient::builder().cpu().build()),
-                LocalProverMode::Cuda => LocalProver::Cuda(ProverClient::builder().cuda().build()),
+                LocalProverMode::Mock => LocalProver::Mock(ProverClient::builder().mock().build().await),
+                LocalProverMode::Cpu => LocalProver::Cpu(ProverClient::builder().cpu().build().await),
+                LocalProverMode::Cuda => LocalProver::Cuda(ProverClient::builder().cuda().build().await),
             };
             info!("Prover client setup complete.");
 
             // Generate proof with the configured proof type
             info!("Running sp1 proof.");
-            let proof = prover.prove_with_type(pk, stdin, &config.proof_type);
+            let proof = prover.prove_with_type(stdin, &config.proof_type).await?;
             info!("Finished sp1 proof.");
 
-            proof
+            Ok(proof)
         }
     }
 }
@@ -227,10 +252,7 @@ pub async fn finality_update_job(
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
     info!("Encoded sp1 proof inputs.");
 
-    // Get proving key
-    let pk = get_proving_key().await;
-
-    // Fetch and extend whitelist if needed (before spawn_blocking since it's async)
+    // Fetch and extend whitelist if needed
     let extended_whitelist = match &config.mode {
         ProverMode::Network(net) if net.whitelist_add_high_availability => {
             info!("Fetching high-availability provers to extend whitelist...");
@@ -269,19 +291,12 @@ pub async fn finality_update_job(
         _ => None,
     };
 
-    // Clone the config and bump ref count
-    let config = Arc::clone(&config);
+    // Setup stdin
+    let mut stdin = SP1Stdin::new();
+    stdin.write_slice(&encoded_proof_inputs);
 
-    let proof: SP1ProofWithPublicValues =
-        tokio::task::spawn_blocking(move || -> Result<SP1ProofWithPublicValues> {
-            // Setup stdin
-            let mut stdin = SP1Stdin::new();
-            stdin.write_slice(&encoded_proof_inputs);
-
-            // Generate proof with configured prover
-            generate_proof(&config, pk, &stdin, extended_whitelist)
-        })
-        .await??; // Await the blocking task and propagate errors properly
+    // Generate proof with configured prover
+    let proof = generate_proof(&config, &stdin, extended_whitelist).await?;
 
     Ok(ProverJobOutput {
         proof,

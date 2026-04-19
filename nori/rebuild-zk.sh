@@ -26,7 +26,7 @@ else
 fi
 
 # Step 5: Build zk
-cd script
+cd nori-build-zk
 cargo run --release --bin make
 cd ..
 
