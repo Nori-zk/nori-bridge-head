@@ -1,5 +1,11 @@
 # Changelog
 
+## 19/4/26 — Bridge SDK ref update
+
+### Changed
+
+- **`nori/src/contract_bindings/bridge-sdk.ref`** bumped to [`ce5bde7b09ef45284e840aef96fbd4fe64d80e48`](https://github.com/Nori-zk/nori-bridge-sdk/tree/ce5bde7b09ef45284e840aef96fbd4fe64d80e48) (branch `CHORE/single-mina-contracts`) — pulls in the latest `NoriTokenBridge` contract with the aligned features required for nori burn
+
 ## 26/3/26 — Mesa Contracts
 
 ### Changed
