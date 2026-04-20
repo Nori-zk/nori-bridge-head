@@ -36,3 +36,4 @@ node_modules
 
 # Ignore bindings
 nori/src/contract_bindings/src/lib.rs
+nori/src/contract_bindings/abi/

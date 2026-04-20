@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, Uint, B256, U256};
+use alloy_primitives::{keccak256, Address, B256, Bytes, FixedBytes, Uint, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{proof, Nibbles};
 use anyhow::Result;
@@ -24,14 +24,13 @@ pub enum MptError {
         slot_key: B256,
         reason: String,
     },
-    InvalidStorageSlotAddressMapping {
+    InvalidStorageSlotCodeChallengeMapping {
         slot_key: B256,
-        address: Address,
-        attestation_hash: U256,
-        computed_address_slot_key: B256,
+        code_challenge: U256,
+        computed_code_challenge_slot_key: B256,
     },
     MerkleHashError {
-        address: Address,
+        code_challenge: U256,
         value: Uint<256, 4>,
         reason: String,
     },
@@ -57,18 +56,17 @@ impl fmt::Display for MptError {
                 slot_key,
                 reason
             ),
-            MptError::InvalidStorageSlotAddressMapping {slot_key, address, attestation_hash, computed_address_slot_key} => write!(
+            MptError::InvalidStorageSlotCodeChallengeMapping {slot_key, code_challenge, computed_code_challenge_slot_key} => write!(
                 f,
-                "MPT invalid storage slot address, expected {:?}, but for address '{:?}' and attestation_hash '{:?}' this slot '{:?}' was computed",
+                "MPT invalid storage slot code challenge, expected {:?}, but for code_challenge '{:?}' this slot '{:?}' was computed",
                 slot_key,
-                address,
-                attestation_hash,
-                computed_address_slot_key
+                code_challenge,
+                computed_code_challenge_slot_key
             ),
-            MptError::MerkleHashError { address, value , reason} => write!(
+            MptError::MerkleHashError { code_challenge, value , reason} => write!(
                 f,
-                "MPT error computing merkle hash of verified slots, address {:?} and value {:?}: {:?}",
-                address,
+                "MPT error computing merkle hash of verified slots, code_challenge {:?} and value {:?}: {:?}",
+                code_challenge,
                 value,
                 reason
             ),
@@ -87,56 +85,43 @@ impl fmt::Display for MptError {
     }
 }
 
-/// Verifies the Merkle Patricia Trie (MPT) proofs for a contract's storage slots against the execution state root,
-/// then computes and returns the Merkle root of the verified storage slots.
+/// Verifies the Merkle Patricia Trie (MPT) proofs for a contract's account and storage slots
+/// against the execution state root, then computes and returns the Merkle root of the verified storage slots.
 ///
-/// This function performs two main verifications:
-/// 1. **Account Verification**: Validates that the contract's `TrieAccount` (RLP-encoded) is present in the global state trie
-///    by verifying the provided MPT proof against the `execution_state_root`. The contract's address is hashed with `keccak256`
-///    and converted to nibbles to traverse the trie.
-/// 2. **Storage Slot Verification**: For each storage slot, verifies its existence in the contract's storage trie using the
-///    `storage_root` from the verified `TrieAccount`. The slot key is hashed with `keccak256` and converted to nibbles for the proof.
-///
-/// After successful verification of each storage slots, the function:
-/// - Hashes the verified storage slot details into a Merkle leaf, collecting them into a vector.
-///
-/// After successful verification of all storage slots, the function:
-/// - Computes the Merkle root through in-place folding
+/// This function performs:
+/// 1. **Account Verification** (unconditional): Validates that the contract's `TrieAccount` (RLP-encoded) is present
+///    in the global state trie by verifying the provided MPT proof against the `execution_state_root`. The contract's
+///    address is hashed with `keccak256` and converted to nibbles to traverse the trie. This always runs, even with
+///    0 storage slots, ensuring the contract exists at the proven execution state root.
+/// 2. **Tree Depth Validation** (skipped if 0 slots): Checks that the number of storage slots does not
+///    exceed `MAX_TREE_DEPTH`.
+/// 3. **Storage Slot Verification** (skipped if 0 slots): For each storage slot:
+///    a. Verifies the code-challenge-to-slot-key mapping is correct (recomputes the storage location from the
+///       code challenge and asserts it matches the provided slot key).
+///    b. Verifies the slot exists in the contract's storage trie using the `storage_root` from the verified
+///       `TrieAccount`. The slot key is hashed with `keccak256` and converted to nibbles for the proof.
+///    c. Hashes the verified slot details (code challenge + value) into a Poseidon Merkle leaf.
+/// 4. **Merkle Root Computation**: Computes the Merkle root from leaves via in-place folding.
 ///
 /// # Parameters
 /// - `execution_state_root`: The root hash of the Ethereum global state trie.
 /// - `contract_storage`: Contains the contract's address, MPT proof for the account, storage slots, and expected values.
 ///
 /// # Returns
-/// The Merkle root of the verified storage slot details as `FixedBytes<32>`.
+/// - `FixedBytes::default()` (zero hash) if the contract exists but has 0 storage slots in this window.
+/// - The Merkle root of the verified storage slot details as `FixedBytes<32>` otherwise.
 ///
 /// # Errors
-/// - `MptError::InvalidAccountProof` if the account proof verification fails
-/// - `MptError::InvalidStorageSlotAddressMapping` if address-to-slot mapping is invalid
+/// - `MptError::InvalidAccountProof` if the account proof verification fails (contract not in state trie)
+/// - `MptError::InvalidStorageSlotCodeChallengeMapping` if code-challenge-to-slot mapping is invalid
 /// - `MptError::InvalidStorageSlotProof` if any storage slot proof is invalid
 /// - `MptError::MerkleHashError` if hashing a storage slot leaf fails
 /// - `MptError::ExceedsMaxTreeDepth` if the number of storage slots yields a merkle tree
 ///   which is too large.
-///
-/// # Steps
-/// 1. Verify contract account exists in global state trie
-/// 2. For each storage slot:
-///    a. Verify address-to-slot-key mapping
-///    b. Verify slot exists in contract's storage trie
-///    c. Hash verified slot details into Merkle leaf
-/// 3. Compute Merkle root from leaves via in-place folding
-/// 4. Return computed Merkle root
 pub fn verify_storage_slot_proofs(
     execution_state_root: FixedBytes<32>,
     contract_storage: ContractStorage,
 ) -> Result<FixedBytes<32>, MptError> {
-    let n_leaves = contract_storage.storage_slots.len();
-
-    // Optimisation, skip doing the MPT proof if we have no storage slots in this window
-    if n_leaves == 0 {
-        return Ok(FixedBytes::default())
-    }
-
     // Convert the contract address into nibbles for the global MPT proof
     // We need to keccak256 the address before converting to nibbles for the MPT proof
     let address_hash = keccak256(contract_storage.address.as_slice());
@@ -159,6 +144,12 @@ pub fn verify_storage_slot_proofs(
         address: contract_storage.address,
         reason: e.to_string(),
     })?;
+
+    // Optimisation, skip doing the MPT proof if we have no storage slots in this window
+    let n_leaves = contract_storage.storage_slots.len();
+    if n_leaves == 0 {
+        return Ok(FixedBytes::default())
+    }
 
     // Calculate tree depth which is ceil(log2(number)) and padded size (leaves to the nearest power of 2)
     let (depth, padded_size) = compute_merkle_tree_depth_and_size(n_leaves);
@@ -185,17 +176,15 @@ pub fn verify_storage_slot_proofs(
         let mut rlp_encoded_value = Vec::new();
         value.encode(&mut rlp_encoded_value);
 
-        // Verify slot address mapping
-        let address = slot.slot_key_address;
-        let attestation_hash = slot.slot_nested_key_attestation_hash;
-        let computed_address_attestation_slot_key =
-            get_storage_location_for_key(address, attestation_hash, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
-        if computed_address_attestation_slot_key != key {
-            return Err(MptError::InvalidStorageSlotAddressMapping {
+        // Verify slot code challenge mapping
+        let code_challenge = slot.slot_key_code_challenge;
+        let computed_code_challenge_slot_key =
+            get_storage_location_for_key(code_challenge, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX);
+        if computed_code_challenge_slot_key != key {
+            return Err(MptError::InvalidStorageSlotCodeChallengeMapping {
                 slot_key: key,
-                address,
-                attestation_hash,
-                computed_address_slot_key: computed_address_attestation_slot_key,
+                code_challenge,
+                computed_code_challenge_slot_key,
             });
         }
 
@@ -211,12 +200,12 @@ pub fn verify_storage_slot_proofs(
             reason: e.to_string(),
         })?;
 
-        let slot_merkle_leaf_result = hash_storage_slot(&address, &attestation_hash, &value);
+        let slot_merkle_leaf_result = hash_storage_slot(&code_challenge, &value);
         let slot_merkle_leaf = match slot_merkle_leaf_result {
             Ok(val) => val,
             Err(error) => {
                 return Err(MptError::MerkleHashError {
-                    address,
+                    code_challenge,
                     value,
                     reason: error.to_string(),
                 })
