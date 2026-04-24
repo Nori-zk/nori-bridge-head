@@ -355,7 +355,7 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    - `ExceedsMaxTreeDepth { slots, requested_depth, max_depth }` → if the number of storage slots yields a merkle tree
 ///       which is too large.
 ///    Any of these returns a `MptError`, wrapped as `ProgramError::MptError`
-/// 
+///
 pub fn consensus_mpt_program<S: ConsensusSpec>(
     proof_inputs: ProofInputs<S>,
     debug_print: bool,
@@ -372,6 +372,12 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         contract_storage,
     } = proof_inputs;
     let contract_address = contract_storage.address;
+    // @AUDIT - We should consider whether we want to enforce that there are no best valid updates in the store here.
+    // 0. we should not proceed if we have a best valid update in our store
+    // as we have a next_sync_committe non zero assertion in the verifier contract on Mina
+    // if let Some(best) = &store.best_valid_update {
+    //     panic!("Best valid update in store: {:?}", best);
+    // }
 
     // 1. Last Store Hash Validation - Calculate SHA-256(serde_serialize(store)) and assert equality with input_store_hash
     if debug_print {
@@ -510,7 +516,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         verified_contract_storage_slots_root,
         next_sync_committee_hash,
         contract_address,
-        genesis_root
+        genesis_root,
     };
     if debug_print {
         println!("Packed outputs.");
