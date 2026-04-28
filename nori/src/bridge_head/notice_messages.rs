@@ -72,6 +72,10 @@ pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
     pub output_block_number: u64,
     pub output_store_hash: FixedBytes<32>,
     pub execution_state_root: FixedBytes<32>,
+    pub verified_contract_storage_slots_root: FixedBytes<32>,
+    pub next_sync_committee_hash: FixedBytes<32>,
+    pub contract_address: alloy_primitives::Address,
+    pub genesis_root: FixedBytes<32>,
     pub contract_storage_slots: Vec<VerifiedContractStorageSlot>,
     pub elapsed_sec: f64,
 }
