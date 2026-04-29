@@ -1,5 +1,15 @@
 # Changelog
 
+23/4/26 — Bridge SDK ref update + genesis_root commitment
+
+### Added
+
+- Commit genesis_root as ZK public output. Without genesis_root a governance action could silently swap the underlying Ethereum chain, allowing store hashes from a different derivative chain to pass verification. Adding genesis_root as a committed proof output ensures all transitions are bound to the same chain lineage. Surface all proof commitments for transparency, align consensus.rs docs with execution steps.
+- nori-primitives/src/types.rs: Add genesis_root to ProofOutputs ([196..228]) and ConsensusProofOutputs ([144..176]) with serialization/deserialization, bump SIZE from 196->228 and 144->176
+- nori-program/src/consensus.rs: Commit genesis_root in both consensus_program and consensus_mpt_program outputs, rename State Commitment to State Capture, add Output Commitment as distinct final step, correct SHA-256(serde_serialize(store)) description, align all inline comments with docstring step names, update debug/println messages (old->last, packing->committing)
+- nori/src/bridge_head/api.rs: Add verified_contract_storage_slots_root, next_sync_committee_hash, contract_address, genesis_root to ProofMessage struct and both construction sites (BridgeHeadJobSucceeded notice and proof emit)
+- nori/src/bridge_head/notice_messages.rs: Add verified_contract_storage_slots_root, next_sync_committee_hash, contract_address, genesis_root to TransitionNoticeExtensionBridgeHeadJobSucceeded
+
 ## 19/4/26 — Bridge SDK ref update
 
 ### Changed

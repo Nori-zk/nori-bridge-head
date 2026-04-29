@@ -41,6 +41,10 @@ pub struct ProofMessage {
     pub output_store_hash: FixedBytes<32>,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
+    pub verified_contract_storage_slots_root: FixedBytes<32>,
+    pub next_sync_committee_hash: FixedBytes<32>,
+    pub contract_address: alloy_primitives::Address,
+    pub genesis_root: FixedBytes<32>,
     pub contract_storage_slots: Vec<VerifiedContractStorageSlot>,
     pub elapsed_sec: f64,
 }
@@ -344,6 +348,10 @@ impl BridgeHead {
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
                     output_store_hash: proof_outputs.output_store_hash,
+                    verified_contract_storage_slots_root: proof_outputs.verified_contract_storage_slots_root,
+                    next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
+                    contract_address: proof_outputs.contract_address,
+                    genesis_root: proof_outputs.genesis_root,
                     contract_storage_slots: contract_storage_slots.clone(),
                 },
             ))
@@ -359,6 +367,10 @@ impl BridgeHead {
                 output_store_hash,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
+                verified_contract_storage_slots_root: proof_outputs.verified_contract_storage_slots_root,
+                next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
+                contract_address: proof_outputs.contract_address,
+                genesis_root: proof_outputs.genesis_root,
                 contract_storage_slots,
                 elapsed_sec,
             })
