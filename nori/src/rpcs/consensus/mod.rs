@@ -212,6 +212,9 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
             Err(e) => Err(e), // Propagate error if it's an Err
         }
     }
+    pub fn get_inner_client(&self) -> &Inner<S, R> {
+        &self.inner
+    }
 
     /// Updates a cloned `LightClientStore` with next sync committee data from the provided update.
     ///
