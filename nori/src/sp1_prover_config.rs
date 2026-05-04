@@ -56,6 +56,21 @@ const ENV_SP1_WHITELIST: &str = "SP1_WHITELIST"; // Maps to ProveRequest.whiteli
 // A custom env (a boolean) to use a query to add the provers with the best uptime (high_availability_only: true) to the whitelist before starting
 const ENV_SP1_WHITELIST_ADD_HIGH_AVAILABILITY: &str = "SP1_WHITELIST_ADD_HIGH_AVAILABILITY";
 
+// A custom env (a boolean) to extend SP1_WHITELIST with the SDK default pool of recently
+// reliable provers (get_provers_by_uptime with high_availability_only: false). Same shape
+// as SP1_WHITELIST_ADD_HIGH_AVAILABILITY but uses the broader pool. Only meaningful when
+// SP1_WHITELIST is set; ignored otherwise.
+const ENV_SP1_WHITELIST_ADD_DEFAULT: &str = "SP1_WHITELIST_ADD_DEFAULT";
+
+// Opt-in: when SP1_WHITELIST is unset and SP1_WHITELIST_OPEN=true, send an empty whitelist
+// to the prover network (= "any prover can participate" per the auction proto).
+// This bypasses the SDK's default behaviour at sp1-sdk-6.1.0/src/network/client.rs:614-623,
+// where a `None` whitelist is silently replaced by all recently reliable provers fetched
+// via get_provers_by_uptime. Also disables the auction-failure retry-with-fallback path
+// at sp1-sdk-6.1.0/src/network/prover.rs:691, which only fires when whitelist.is_none().
+// Reference: sp1-sdk-6.1.0/src/network/proto/auction/types.rs:125-126
+const ENV_SP1_WHITELIST_OPEN: &str = "SP1_WHITELIST_OPEN";
+
 // Default values from sp1-sdk-5.2.2
 
 // 1 PROVE (18 decimals). from 5.2.2/src/network/prove.rs Line 508 wrong value TODO
@@ -115,12 +130,24 @@ pub struct NetworkConfig {
     pub timeout: Duration,
     pub whitelist: Option<Vec<Address>>,
     pub whitelist_add_high_availability: bool,
+    pub whitelist_add_default: bool,
 }
 
-// Get a set of high availability fallback provers
-pub async fn get_fallback_whitelist(config: &NetworkConfig) -> anyhow::Result<Vec<Address>> {
+// Get a set of fallback provers. When `high_availability_only` is true the returned set
+// is restricted to the network's high-availability subset; when false it is the full
+// recently-reliable pool (the same set the SDK injects when no whitelist is provided).
+pub async fn get_fallback_whitelist(
+    config: &NetworkConfig,
+    high_availability_only: bool,
+) -> anyhow::Result<Vec<Address>> {
     const MAX_RETRIES: u32 = 3;
     const INITIAL_BACKOFF_MS: u64 = 500;
+
+    let label = if high_availability_only {
+        "high-availability"
+    } else {
+        "default-pool"
+    };
 
     let mut attempt = 0;
     let mut backoff_ms = INITIAL_BACKOFF_MS;
@@ -128,27 +155,28 @@ pub async fn get_fallback_whitelist(config: &NetworkConfig) -> anyhow::Result<Ve
     loop {
         attempt += 1;
 
-        match try_get_fallback_whitelist(config).await {
+        match try_get_fallback_whitelist(config, high_availability_only).await {
             Ok(whitelist) => {
                 if attempt > 1 {
                     info!(
-                        "Successfully fetched high-availability provers on attempt {}",
-                        attempt
+                        "Successfully fetched {} provers on attempt {}",
+                        label, attempt
                     );
                 }
                 return Ok(whitelist);
             }
             Err(e) if attempt >= MAX_RETRIES => {
                 return Err(anyhow::anyhow!(
-                    "Failed to fetch high-availability provers after {} attempts: {}",
+                    "Failed to fetch {} provers after {} attempts: {}",
+                    label,
                     MAX_RETRIES,
                     e
                 ));
             }
             Err(e) => {
                 info!(
-                    "Failed to fetch high-availability provers (attempt {}/{}): {}. Retrying in {}ms...",
-                    attempt, MAX_RETRIES, e, backoff_ms
+                    "Failed to fetch {} provers (attempt {}/{}): {}. Retrying in {}ms...",
+                    label, attempt, MAX_RETRIES, e, backoff_ms
                 );
                 tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
                 backoff_ms *= 2; // Exponential backoff
@@ -157,7 +185,10 @@ pub async fn get_fallback_whitelist(config: &NetworkConfig) -> anyhow::Result<Ve
     }
 }
 
-pub async fn try_get_fallback_whitelist(config: &NetworkConfig) -> anyhow::Result<Vec<Address>> {
+pub async fn try_get_fallback_whitelist(
+    config: &NetworkConfig,
+    high_availability_only: bool,
+) -> anyhow::Result<Vec<Address>> {
     // Ensure crypto provider is installed (only happens once globally)
     ensure_crypto_provider();
 
@@ -167,7 +198,7 @@ pub async fn try_get_fallback_whitelist(config: &NetworkConfig) -> anyhow::Resul
     let fallback_whitelist = auction_network_client
         .get_provers_by_uptime(
             sp1_sdk::network::proto::auction_types::GetProversByUptimeRequest {
-                high_availability_only: true,
+                high_availability_only,
             },
         )
         .await?
@@ -487,6 +518,54 @@ impl ProverConfig {
                     None => false,
                 };
 
+                // If a whitelist is provided, optionally include the SDK default pool of
+                // recently reliable provers. Same shape as whitelist_add_high_availability
+                // but uses high_availability_only: false.
+                let whitelist_add_default = match &whitelist {
+                    Some(_) => env::var(ENV_SP1_WHITELIST_ADD_DEFAULT).map_or(
+                        Ok(false),
+                        |val| {
+                            val.parse::<bool>().with_context(|| {
+                                format!(
+                                    "Failed to parse {} as bool. Got: '{}'",
+                                    ENV_SP1_WHITELIST_ADD_DEFAULT, val
+                                )
+                            })
+                        },
+                    )?,
+                    None => false,
+                };
+
+                // SP1_WHITELIST_OPEN: when true with no SP1_WHITELIST, send an empty whitelist
+                // (= any prover can participate). Mutually exclusive with SP1_WHITELIST.
+                // Behaviour: parse as bool or error on invalid, default false.
+                let whitelist_open = match env::var(ENV_SP1_WHITELIST_OPEN) {
+                    Ok(val) => val.parse::<bool>().with_context(|| {
+                        format!(
+                            "Failed to parse {} as bool. Got: '{}'. Expected 'true' or 'false'",
+                            ENV_SP1_WHITELIST_OPEN, val
+                        )
+                    })?,
+                    Err(_) => false,
+                };
+
+                if whitelist_open && whitelist.is_some() {
+                    return Err(anyhow::anyhow!(
+                        "{} and {} are mutually exclusive. Set {} to opt out of any whitelist, \
+                         or provide {} to restrict bidders — not both.",
+                        ENV_SP1_WHITELIST_OPEN,
+                        ENV_SP1_WHITELIST,
+                        ENV_SP1_WHITELIST_OPEN,
+                        ENV_SP1_WHITELIST
+                    ));
+                }
+
+                let whitelist = if whitelist_open {
+                    Some(Vec::new())
+                } else {
+                    whitelist
+                };
+
                 ProverMode::Network(NetworkConfig {
                     network_mode,
                     private_key,
@@ -499,6 +578,7 @@ impl ProverConfig {
                     timeout,
                     whitelist,
                     whitelist_add_high_availability,
+                    whitelist_add_default,
                 })
             }
             Some(invalid) => {
@@ -593,6 +673,9 @@ impl ProverConfig {
 
                 // Whitelist
                 match &net.whitelist {
+                    Some(addresses) if addresses.is_empty() => {
+                        info!("  Whitelist: (open - empty list sent, any prover can participate)");
+                    }
                     Some(addresses) => {
                         info!("  Whitelist:");
                         for addr in addresses {
@@ -606,6 +689,16 @@ impl ProverConfig {
                             }
                             false => {
                                 info!("  Whitelist add high availability: false");
+                            }
+                        }
+
+                        // Whitelist add default pool
+                        match &net.whitelist_add_default {
+                            true => {
+                                info!("  Whitelist add default pool: true");
+                            }
+                            false => {
+                                info!("  Whitelist add default pool: false");
                             }
                         }
                     }

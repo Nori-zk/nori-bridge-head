@@ -258,41 +258,57 @@ pub async fn finality_update_job(
     let encoded_proof_inputs = serde_cbor::to_vec(&inputs)?;
     info!("Encoded sp1 proof inputs.");
 
-    // Fetch and extend whitelist if needed
+    // Fetch and extend whitelist if either extension flag is set. Both flags can be active
+    // at once (HA subset + default pool); duplicates are removed and original order is kept.
     let extended_whitelist = match &config.mode {
-        ProverMode::Network(net) if net.whitelist_add_high_availability => {
-            info!("Fetching high-availability provers to extend whitelist...");
-            match try_get_fallback_whitelist(net).await {
-                Ok(fallback) => {
-                    info!("Successfully fetched {} high-availability provers.", fallback.len());
+        ProverMode::Network(net)
+            if net.whitelist_add_high_availability || net.whitelist_add_default =>
+        {
+            let mut extended = net.whitelist.clone().unwrap_or_default();
+            let mut seen: HashSet<Address> = extended.iter().copied().collect();
 
-                    // Extend the existing whitelist with fallback provers (deduplicated, order preserved)
-                    let mut extended = net.whitelist.clone().unwrap_or_default();
-                    let mut seen: HashSet<Address> = extended.iter().copied().collect();
-
-                    let mut added_count = 0;
-                    for addr in fallback {
-                        if seen.insert(addr) {
-                            extended.push(addr);
-                            added_count += 1;
-                        }
+            let mut append_unique = |label: &str, fetched: Vec<Address>| {
+                let mut added = 0;
+                for addr in fetched {
+                    if seen.insert(addr) {
+                        extended.push(addr);
+                        added += 1;
                     }
-
-                    info!(
-                        "Whitelist extended with {} new provers (total: {}):",
-                        added_count,
-                        extended.len()
-                    );
-                    for addr in &extended {
-                        info!("  - {}", addr);
-                    }
-                    Some(extended)
                 }
-                Err(e) => {
-                    info!("Failed to fetch high-availability provers: {}. Using configured whitelist only.", e);
-                    net.whitelist.clone()
+                info!("Added {} {} provers (after dedup).", added, label);
+            };
+
+            if net.whitelist_add_high_availability {
+                info!("Fetching high-availability provers to extend whitelist...");
+                match try_get_fallback_whitelist(net, true).await {
+                    Ok(fallback) => {
+                        info!("Successfully fetched {} high-availability provers.", fallback.len());
+                        append_unique("high-availability", fallback);
+                    }
+                    Err(e) => {
+                        info!("Failed to fetch high-availability provers: {}. Skipping HA extension.", e);
+                    }
                 }
             }
+
+            if net.whitelist_add_default {
+                info!("Fetching default-pool provers to extend whitelist...");
+                match try_get_fallback_whitelist(net, false).await {
+                    Ok(default_pool) => {
+                        info!("Successfully fetched {} default-pool provers.", default_pool.len());
+                        append_unique("default-pool", default_pool);
+                    }
+                    Err(e) => {
+                        info!("Failed to fetch default-pool provers: {}. Skipping default-pool extension.", e);
+                    }
+                }
+            }
+
+            info!("Whitelist after extensions (total: {}):", extended.len());
+            for addr in &extended {
+                info!("  - {}", addr);
+            }
+            Some(extended)
         }
         _ => None,
     };

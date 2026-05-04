@@ -77,10 +77,42 @@ NORI_LOG=info
 - **SP1_CYCLE_LIMIT**: Max cycles. Only required when `SP1_SKIP_SIMULATION=true`; otherwise SP1 calculates from simulation (defaults when required: Mainnet=1T, Reserved=100M)
 - **SP1_GAS_LIMIT**: Gas limit. Only required when `SP1_SKIP_SIMULATION=true`; otherwise SP1 calculates from simulation (default when required: 1B)
 - **SP1_TIMEOUT_SECS**: Overall timeout in seconds (default: 600 / 10 minutes)
-- **SP1_WHITELIST**: Comma-separated list of prover addresses to whitelist. If not set, SDK uses recently reliable provers (optional)
-- **SP1_WHITELIST_ADD_HIGH_AVAILABILITY**: When `true`, extends the configured whitelist with high-availability provers from the network. Only applies when `SP1_WHITELIST` is provided. Useful for ensuring backup provers are available - `true` or `false` (default: `false`, optional)
+- **Whitelist (auction bidder restriction)**: see [Whitelist configuration](#whitelist-configuration) below
 
 See `.env.example`
+
+#### Whitelist configuration
+
+Only relevant when `SP1_FULFILLMENT_STRATEGY=auction`. The whitelist tells the prover network which provers are allowed to bid on your request.
+
+There are three pools the SDK / our code can pull from:
+
+| Pool | Source |
+|---|---|
+| **User list** | Addresses you set in `SP1_WHITELIST` |
+| **Default pool** | `get_provers_by_uptime(high_availability_only: false)` — every recently reliable prover. This is the set the SDK silently injects when you provide no whitelist. |
+| **HA subset** | `get_provers_by_uptime(high_availability_only: true)` — the high-availability subset of the default pool. |
+
+**Variables:**
+
+- **`SP1_WHITELIST`** *(optional)* — Comma-separated prover addresses. If set, the auction is restricted to *exactly* these provers (unless extended via the flags below).
+- **`SP1_WHITELIST_ADD_HIGH_AVAILABILITY`** *(`true` / `false`, default `false`)* — Extension flag. Requires `SP1_WHITELIST`. When `true`, merges the HA subset into the user list.
+- **`SP1_WHITELIST_ADD_DEFAULT`** *(`true` / `false`, default `false`)* — Extension flag. Requires `SP1_WHITELIST`. When `true`, merges the default pool into the user list. Can be combined with `SP1_WHITELIST_ADD_HIGH_AVAILABILITY`; merges are deduplicated.
+- **`SP1_WHITELIST_OPEN`** *(`true` / `false`, default `false`)* — Open-auction flag. Mutually exclusive with `SP1_WHITELIST`. When `true`, sends an empty whitelist on the wire, which the network interprets as "any prover can bid." Also disables the SDK's auction-failure retry-with-HA-fallback (which only fires when the whitelist is left unset).
+
+**Regimes (combinations of the four vars above):**
+
+| `SP1_WHITELIST` | `..._ADD_HIGH_AVAILABILITY` | `..._ADD_DEFAULT` | `SP1_WHITELIST_OPEN` | What gets sent to the network |
+|---|---|---|---|---|
+| unset | — | — | unset / `false` | **SDK default** — SDK auto-injects the default pool client-side; on auction failure, retries with the HA subset |
+| unset | — | — | `true` | **Empty list** — any prover can bid; no SDK auto-injection, no fallback retry |
+| `0xA,0xB` | `false` | `false` | unset | **Exactly `0xA, 0xB`** |
+| `0xA,0xB` | `true` | `false` | unset | **`0xA, 0xB` ∪ HA subset** |
+| `0xA,0xB` | `false` | `true` | unset | **`0xA, 0xB` ∪ default pool** |
+| `0xA,0xB` | `true` | `true` | unset | **`0xA, 0xB` ∪ HA subset ∪ default pool** (deduplicated) |
+
+Invalid combinations (config will error on startup):
+- `SP1_WHITELIST` set together with `SP1_WHITELIST_OPEN=true`
 
 ### Example Configurations
 
