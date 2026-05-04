@@ -127,9 +127,15 @@ async fn generate_proof(
             // Apply the strategy
             proof_request = proof_request.strategy(strategy);
 
-            // Apply the auction timeout if and only if we are in Auction mode
-            if let FulfillmentConfig::Auction { timeout } = net.fulfillment {
-                proof_request = proof_request.auction_timeout(timeout);
+            // Apply the auction timeout and min auction period if and only if we are in Auction mode
+            if let FulfillmentConfig::Auction {
+                timeout,
+                min_auction_period,
+            } = net.fulfillment
+            {
+                proof_request = proof_request
+                    .auction_timeout(timeout)
+                    .min_auction_period(min_auction_period);
             }
 
             // Use the extended whitelist if provided, otherwise use the config's whitelist

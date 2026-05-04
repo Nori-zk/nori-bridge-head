@@ -71,6 +71,7 @@ NORI_LOG=info
 - **SP1_NETWORK_MODE**: Network type - `mainnet` or `reserved` (default: `mainnet`)
 - **SP1_FULFILLMENT_STRATEGY**: Fulfillment method - `auction`, `hosted`, or `reserved` (defaults: Mainnet=`auction`, Reserved=`reserved`)
 - **SP1_AUCTION_TIMEOUT_SECS**: Auction timeout in seconds, only used when strategy is `auction` (default: 30)
+- **SP1_MIN_AUCTION_PERIOD_SECS**: Minimum time (seconds) the auction must remain open before settling, only used when strategy is `auction`. The auction settles only after this period has elapsed AND at least one bid is received. Recommended 10-15 if you don't have strict latency requirements, to give bidders time to compete and improve pricing (default: 1)
 - **SP1_MAX_PRICE_PER_PGU**: Maximum price per PGU (default: 1,000,000,000 / 1.0 $PROVE)
 - **SP1_SKIP_SIMULATION**: Skip simulation step - `true` or `false`. When `true`, you must provide cycle/gas limits (default: `false`)
 - **SP1_CYCLE_LIMIT**: Max cycles. Only required when `SP1_SKIP_SIMULATION=true`; otherwise SP1 calculates from simulation (defaults when required: Mainnet=1T, Reserved=100M)

@@ -50,6 +50,7 @@ const ENV_SP1_SKIP_SIMULATION: &str = "SP1_SKIP_SIMULATION"; // Maps to ProveReq
 const ENV_SP1_TIMEOUT_SECS: &str = "SP1_TIMEOUT_SECS"; // Maps to ProveRequest.timeout()
 const ENV_SP1_MAX_PRICE_PER_PGU: &str = "SP1_MAX_PRICE_PER_PGU";
 const ENV_SP1_AUCTION_TIMEOUT_SECS: &str = "SP1_AUCTION_TIMEOUT_SECS"; // Maps to auction timeout
+const ENV_SP1_MIN_AUCTION_PERIOD_SECS: &str = "SP1_MIN_AUCTION_PERIOD_SECS"; // Maps to ProveRequest.min_auction_period()
 const ENV_SP1_WHITELIST: &str = "SP1_WHITELIST"; // Maps to ProveRequest.whitelist()
 
 // A custom env (a boolean) to use a query to add the provers with the best uptime (high_availability_only: true) to the whitelist before starting
@@ -64,6 +65,7 @@ const SDK_DEFAULT_PRICE_PER_PGU: u64 = 1_000_000_000; //Max price per bPGU: 1000
 const SDK_MAINNET_RPC_URL: &str = "https://rpc.mainnet.succinct.xyz"; // Line 67
 const SDK_RESERVED_RPC_URL: &str = "https://rpc.production.succinct.xyz"; // Line 69
 const SDK_DEFAULT_AUCTION_TIMEOUT_SECS: u64 = 30; // Line 76: Duration::from_secs(30) / or 1sec TODO?
+const SDK_DEFAULT_MIN_AUCTION_PERIOD_SECS: u64 = 1; // SDK default per Succinct docs: wait at least 1s before settling auction
 
 const SDK_MAINNET_DEFAULT_CYCLE_LIMIT: u64 = 1_000_000_000_000; // Line 77
 const SDK_RESERVED_DEFAULT_CYCLE_LIMIT: u64 = 100_000_000; // Line 78
@@ -93,7 +95,10 @@ pub enum ProofType {
 }
 
 pub enum FulfillmentConfig {
-    Auction { timeout: Duration },
+    Auction {
+        timeout: Duration,
+        min_auction_period: u64,
+    },
     Hosted,
     Reserved,
 }
@@ -300,6 +305,20 @@ impl ProverConfig {
                     },
                 };
 
+                // Get min auction period from environment, defaults to SDK_DEFAULT_MIN_AUCTION_PERIOD_SECS (1)
+                // Reference: sp1-sdk-6.1.0/src/network/prove.rs:238 (min_auction_period method, takes u64 seconds)
+                // Behaviour: parse as u64 or error on invalid, use default if missing.
+                // Only meaningful when fulfillment strategy is auction; ignored otherwise.
+                let min_auction_period = match env::var(ENV_SP1_MIN_AUCTION_PERIOD_SECS) {
+                    Ok(val) => val.parse::<u64>().with_context(|| {
+                        format!(
+                            "Failed to parse {} as u64. Got: '{}'",
+                            ENV_SP1_MIN_AUCTION_PERIOD_SECS, val
+                        )
+                    })?,
+                    Err(_) => SDK_DEFAULT_MIN_AUCTION_PERIOD_SECS,
+                };
+
                 // Get fulfillment strategy from environment
                 // Reference: sp1-sdk-5.2.2/src/network/prover.rs:98-102 (default_fulfillment_strategy)
                 // Behaviour: Pick from 'auction', 'hosted', or 'reserved'. Default based on network mode
@@ -318,6 +337,7 @@ impl ProverConfig {
                         };
                         FulfillmentConfig::Auction {
                             timeout: Duration::from_secs(secs),
+                            min_auction_period,
                         }
                     }
                     Some("hosted") => FulfillmentConfig::Hosted,
@@ -332,6 +352,7 @@ impl ProverConfig {
                     None => match network_mode {
                         NetworkMode::Mainnet => FulfillmentConfig::Auction {
                             timeout: Duration::from_secs(SDK_DEFAULT_AUCTION_TIMEOUT_SECS),
+                            min_auction_period,
                         },
                         NetworkMode::Reserved => FulfillmentConfig::Reserved,
                     },
@@ -536,10 +557,14 @@ impl ProverConfig {
 
                 // Fulfillment strategy
                 match &net.fulfillment {
-                    FulfillmentConfig::Auction { timeout } => {
+                    FulfillmentConfig::Auction {
+                        timeout,
+                        min_auction_period,
+                    } => {
                         info!(
-                            "  Fulfillment Strategy: auction (timeout: {}s)",
-                            timeout.as_secs()
+                            "  Fulfillment Strategy: auction (timeout: {}s, min_auction_period: {}s)",
+                            timeout.as_secs(),
+                            min_auction_period
                         );
                     }
                     FulfillmentConfig::Hosted => {
