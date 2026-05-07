@@ -1,7 +1,7 @@
 use alloy::signers::local::PrivateKeySigner;
 use alloy_primitives::Address;
 use anyhow::{Context, Result};
-use log::info;
+use log::{info, warn};
 use reqwest::Url;
 use sp1_sdk::network::{
     proto::{
@@ -515,7 +515,15 @@ impl ProverConfig {
                             })
                         },
                     )?,
-                    None => false,
+                    None => {
+                        if env::var(ENV_SP1_WHITELIST_ADD_HIGH_AVAILABILITY).ok().as_deref() == Some("true") {
+                            warn!(
+                                "{} is set but {} is not provided. The flag has no effect without a whitelist to extend.",
+                                ENV_SP1_WHITELIST_ADD_HIGH_AVAILABILITY, ENV_SP1_WHITELIST
+                            );
+                        }
+                        false
+                    },
                 };
 
                 // If a whitelist is provided, optionally include the SDK default pool of
@@ -533,7 +541,15 @@ impl ProverConfig {
                             })
                         },
                     )?,
-                    None => false,
+                    None => {
+                        if env::var(ENV_SP1_WHITELIST_ADD_DEFAULT).ok().as_deref() == Some("true") {
+                            warn!(
+                                "{} is set but {} is not provided. The flag has no effect without a whitelist to extend.",
+                                ENV_SP1_WHITELIST_ADD_DEFAULT, ENV_SP1_WHITELIST
+                            );
+                        }
+                        false
+                    },
                 };
 
                 // SP1_WHITELIST_OPEN: when true with no SP1_WHITELIST, send an empty whitelist
