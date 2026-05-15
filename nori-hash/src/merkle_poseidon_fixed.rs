@@ -708,6 +708,114 @@ mod merkle_fixed_tests {
             }
         }
     }
+
+    // Brute-force reference: pad with Fp(0), hash every pair, no zeros cache.
+    fn reference_root_bruteforce(leaves: &[Fp], padded_size: usize) -> Fp {
+        let mut level: Vec<Fp> = leaves.to_vec();
+        level.resize(padded_size, Fp::from(0));
+        while level.len() > 1 {
+            let mut next = Vec::with_capacity(level.len() / 2);
+            for i in (0..level.len()).step_by(2) {
+                next.push(poseidon_hash(&[level[i], level[i + 1]]));
+            }
+            level = next;
+        }
+        level[0]
+    }
+
+    // Recursive reference: computes the root of a subtree by recursion.
+    fn reference_root_recursive(leaves: &[Fp], padded_size: usize) -> Fp {
+        fn subtree(leaves: &[Fp], offset: usize, size: usize) -> Fp {
+            if size == 1 {
+                return if offset < leaves.len() {
+                    leaves[offset]
+                } else {
+                    Fp::from(0)
+                };
+            }
+            let half = size / 2;
+            let left = subtree(leaves, offset, half);
+            let right = subtree(leaves, offset + half, half);
+            poseidon_hash(&[left, right])
+        }
+        subtree(leaves, 0, padded_size)
+    }
+
+    // 1,3  - no dummy pairs (sanity)
+    // 5,6  - dummy pairs at depth 3
+    // 9    - dummy pairs at depth 4
+    // 17   - dummy pairs at depth 5
+    const REGRESSION_LEAF_COUNTS: &[i32] = &[1, 3, 5, 6, 9, 17];
+
+    #[test]
+    fn regression_a2090_bruteforce_reference() {
+        let zeros = get_merkle_zeros();
+        let mut failures: Vec<String> = Vec::new();
+        for &n_leaves in REGRESSION_LEAF_COUNTS {
+            let pairs: Vec<(U256, U256)> = (0..n_leaves)
+                .map(|i| (dummy_code_challenge(i), dummy_value(i)))
+                .collect();
+            let leaves = build_leaves(&pairs).expect("build_leaves failed");
+            let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
+
+            let expected = reference_root_bruteforce(&leaves, padded_size);
+
+            let tree = build_merkle_tree(leaves.clone(), padded_size, depth, &zeros);
+            if tree[0][0] != expected {
+                failures.push(format!(
+                    "[n_leaves={}] build_merkle_tree root does not match brute-force reference",
+                    n_leaves
+                ));
+            }
+
+            let mut leaves_for_fold = leaves.clone();
+            let root_fold = fold_merkle_left(&mut leaves_for_fold, padded_size, depth, &zeros);
+            if root_fold != expected {
+                failures.push(format!(
+                    "[n_leaves={}] fold_merkle_left root does not match brute-force reference",
+                    n_leaves
+                ));
+            }
+        }
+        if !failures.is_empty() {
+            panic!("{} failures:\n{}", failures.len(), failures.join("\n"));
+        }
+    }
+
+    #[test]
+    fn regression_a2090_recursive_reference() {
+        let zeros = get_merkle_zeros();
+        let mut failures: Vec<String> = Vec::new();
+        for &n_leaves in REGRESSION_LEAF_COUNTS {
+            let pairs: Vec<(U256, U256)> = (0..n_leaves)
+                .map(|i| (dummy_code_challenge(i), dummy_value(i)))
+                .collect();
+            let leaves = build_leaves(&pairs).expect("build_leaves failed");
+            let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
+
+            let expected = reference_root_recursive(&leaves, padded_size);
+
+            let tree = build_merkle_tree(leaves.clone(), padded_size, depth, &zeros);
+            if tree[0][0] != expected {
+                failures.push(format!(
+                    "[n_leaves={}] build_merkle_tree root does not match recursive reference",
+                    n_leaves
+                ));
+            }
+
+            let mut leaves_for_fold = leaves.clone();
+            let root_fold = fold_merkle_left(&mut leaves_for_fold, padded_size, depth, &zeros);
+            if root_fold != expected {
+                failures.push(format!(
+                    "[n_leaves={}] fold_merkle_left root does not match recursive reference",
+                    n_leaves
+                ));
+            }
+        }
+        if !failures.is_empty() {
+            panic!("{} failures:\n{}", failures.len(), failures.join("\n"));
+        }
+    }
 }
 
 /// STATICALLY BUILT ZEROS
