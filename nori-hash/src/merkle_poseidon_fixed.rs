@@ -134,7 +134,7 @@ pub fn fold_merkle_left(
             if left_idx >= n_non_dummy_nodes {
                 // We are a dummy node and by virtue so is right_idx
                 // rather than computing the posiedon hash we can look it up.
-                merkle_nodes[i] = zeros[level];
+                merkle_nodes[i] = zeros[depth + 1 - level];
                 //println!("Optimisation made 💪");
             } else {
                 let right_idx = i2 + 1;
@@ -227,7 +227,7 @@ pub fn build_merkle_tree(
             if left_idx >= n_non_dummy_nodes {
                 // We are a dummy node and by virtue so is right_idx
                 // rather than computing the posiedon hash we can look it up.
-                parent_level.push(zeros[level]);
+                parent_level.push(zeros[depth + 1 - level]);
                 //println!("Optimisation made 💪");
             } else {
                 let right_idx = i2 + 1;
@@ -324,7 +324,7 @@ pub fn get_merkle_path_from_leaves(
             if left_idx >= n_non_dummy_nodes {
                 // We are a dummy node and by virtue so is right_idx
                 // rather than computing the posiedon hash we can look it up.
-                merkle_nodes[i] = zeros[level];
+                merkle_nodes[i] = zeros[depth + 1 - level];
             } else {
                 let right_idx = i2 + 1;
                 // Atleast one is a real node

@@ -88,6 +88,20 @@ Results:
 - Cross-reference (unpatched Rust vs unpatched TypeScript non-provable): 51 leaf counts, all leaves and roots match. Zero differences.
 - Cross-reference (unpatched Rust vs unpatched TypeScript provable): 11 leaf counts (0-10), all leaves and roots match. Zero differences.
 
+### Commit 2 - Fix applied
+
+- **`zeros[level]` corrected to `zeros[depth + 1 - level]`** (`nori-hash/src/merkle_poseidon_fixed.rs`): three sites patched in `fold_merkle_left` (line 137), `build_merkle_tree` (line 230), and `get_merkle_path_from_leaves` (line 327). When the tree-building loop is at a given `level` counting down from `depth`, the parent node of two dummy children represents an all-zero subtree of height `depth + 1 - level`. The corrected index selects the matching precomputed zero hash from `get_merkle_zeros`.
+
+Results:
+
+- Regression tests: 2 pass, 0 fail (`regression_a2090_bruteforce_reference`, `regression_a2090_recursive_reference`). All leaf counts [1, 3, 5, 6, 9, 17] now match both the brute-force and recursive references for both `build_merkle_tree` and `fold_merkle_left` (24 checks, 24 pass).
+- Self-consistency (Rust): passes 0-50 leaves.
+- Self-consistency (TypeScript non-provable): passes 0-50 leaves.
+- Self-consistency (TypeScript provable): passes 0-10 leaves.
+- Cross-reference (patched Rust vs patched TypeScript non-provable): 51 leaf counts, 0 leaf mismatches, 0 root mismatches.
+- Cross-reference (patched Rust vs patched TypeScript provable): 51 leaf counts checked, 0 root mismatches, 40 leaf mismatches (all MISSING, provable suite only runs 0-10, no data exists for 11-50), 11 overlapping leaf counts all leaves and roots match.
+- Cross-reference (patched TypeScript non-provable vs patched TypeScript provable): 51 leaf counts checked, 0 root mismatches, 40 leaf mismatches (all MISSING, provable suite only runs 0-10, no data exists for 11-50), 11 overlapping leaf counts all leaves and roots match.
+
 ## 23/4/26 — Bridge SDK ref update + genesis_root commitment
 
 ### Added
