@@ -5355,7 +5355,7 @@ dependencies = [
 
 [[package]]
 name = "nori"
-version = "10.0.7"
+version = "10.0.8"
 dependencies = [
  "alloy",
  "alloy-primitives",
