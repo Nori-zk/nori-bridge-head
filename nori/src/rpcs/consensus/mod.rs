@@ -207,10 +207,17 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
             .await
             .map_err(|e| Error::msg(e.to_string())); // Convert error to anyhow::Error
 
-        match updates_result {
-            Ok(mut updates) => Ok(updates.get_mut(0).unwrap().clone()), // Clone the updates if the result is Ok
-            Err(e) => Err(e), // Propagate error if it's an Err
+        // A finalized slot in period P guarantees the beacon node has sync committee updates for P;
+        // finality attestations by that period's committee produce the updates, so a bootstrap
+        // from a finalized checkpoint and an empty update set would be unexpected in practice.
+        let updates = updates_result
+            .map_err(|e| anyhow::anyhow!("Failed to fetch light client updates for period {}: {}", period, e))?; // Propagate error if it's an Err
+
+        if updates.is_empty() {
+            return Err(anyhow::anyhow!("Error updates were missing 0th update."));
         }
+
+        Ok(updates.get(0).unwrap().clone()) // Clone the updates if the result is Ok
     }
 
     /// Updates a cloned `LightClientStore` with next sync committee data from the provided update.
@@ -348,7 +355,10 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
         debug!("Getting sync commitee updates.");
         let mut updates = client.get_updates().await?;
 
-        // Panic if our updates were empty (not sure how to deal with this yet)
+        // Error if our updates were empty (this shouldn't happen but this is defense in depth)
+        // A finalized slot in period P guarantees the beacon node has sync committee updates for P;
+        // finality attestations by that period's committee produce the updates, so a bootstrap
+        // from a finalized checkpoint and an empty update set would be unexpected in practice.
         if updates.is_empty() {
             return Err(anyhow::anyhow!("Error updates were missing 0th update."));
         }
