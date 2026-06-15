@@ -438,6 +438,7 @@ pub struct ConsensusHttpProxy<S: ConsensusSpec, R: ConsensusRpc<S>> {
     all_providers_urls: Vec<Url>,
     _marker: PhantomData<(S, R)>,
     validation_timeout: Duration,
+    execution_proxy: ExecutionHttpProxy<S>,
 }
 
 impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<S, R> {
@@ -475,12 +476,15 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
 
         let backup_providers_urls = urls[1..].to_vec();
 
+        let execution_proxy = ExecutionHttpProxy::<S>::from_env()?;
+
         Ok(ConsensusHttpProxy::<S, R> {
             principal_provider_url,
             backup_providers_urls,
             all_providers_urls: urls,
             _marker: PhantomData,
-            validation_timeout
+            validation_timeout,
+            execution_proxy
         })
     }
 
@@ -605,8 +609,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             })?
             .block_number();
 
-        // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
-        let validated_consensus_mpt_proof_input_with_window = ExecutionHttpProxy::<S>::try_from_env()
+        let validated_consensus_mpt_proof_input_with_window = self.execution_proxy
             .prepare_consensus_mpt_proof_inputs(
                 input_slot,
                 output_slot,

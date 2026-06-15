@@ -1,5 +1,45 @@
 # Changelog
 
+## 15/6/26 - Audit e4e27: `prepare_consensus_mpt_proof_inputs` reconstructs `ExecutionHttpProxy` from env on every window
+
+### Finding (verbatim)
+
+Finding e4e27: `prepare_consensus_mpt_proof_inputs` reconstructs `ExecutionHttpProxy` from env on every window
+
+`ConsensusHttpProxy::prepare_consensus_mpt_proof_inputs` constructs a fresh `ExecutionHttpProxy` via `try_from_env()` on every invocation:
+
+```rust
+// nori-bridge-head/nori/src/rpcs/consensus/mod.rs
+// Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
+let validated_consensus_mpt_proof_input_with_window = ExecutionHttpProxy::<S>::try_from_env()
+    .prepare_consensus_mpt_proof_inputs(
+        input_slot,
+        output_slot,
+        finalized_input_block_number,
+        finalized_output_block_number,
+        validated_consensus_proof_inputs,
+        expected_output_store_hash
+    )
+    .await?;
+```
+
+This happens once per proving window (the function is the per-window orchestrator invoked from the finality change detector). As an optimization, I think you could construct the `ExecutionHttpProxy` once (e.g. own it as a field on `ConsensusHttpProxy`, or pass it in) and reuse it across windows?
+
+### Response
+
+Agreed. The FIXME comment on the line above the call site acknowledged this was untidy. The `from_env()` call is cheap (env var reads, URL parsing, HTTP provider construction, no network calls) and the cost per window is negligible, but reconstructing identical config on every invocation is unnecessary.
+
+The suggested approach of owning `ExecutionHttpProxy` as a field on `ConsensusHttpProxy` was adopted. `ConsensusHttpProxy::from_env()` now also constructs the `ExecutionHttpProxy` and stores it as a field, so `prepare_consensus_mpt_proof_inputs` uses `self.execution_proxy` instead of calling `try_from_env()`.
+
+While auditing all `from_env` call sites, the same pattern was found in `validate_and_prepare_proof_inputs_actor` (`finality_change_detector.rs`), where `ConsensusHttpProxy::try_from_env()` was called inside the job loop on every proving window. This was hoisted above the loop. The `ConsensusHttpProxy` is now constructed once in `api.rs` at startup alongside the `ProverConfig`, passed into `start_validated_consensus_finality_change_detector`, which passes it into the validation actor. No `from_env` calls remain in any loop or per-window path.
+
+### Commit
+
+- **`ConsensusHttpProxy`** (`nori/src/rpcs/consensus/mod.rs`): added `execution_proxy: ExecutionHttpProxy<S>` field to the struct, constructed in `from_env()`. `prepare_consensus_mpt_proof_inputs` now uses `self.execution_proxy` instead of `ExecutionHttpProxy::try_from_env()`, removing the FIXME.
+- **`validate_and_prepare_proof_inputs_actor`** (`nori/src/bridge_head/finality_change_detector.rs`): changed signature to accept a `ConsensusHttpProxy` parameter instead of constructing one internally. Removed per-job `try_from_env()` calls from both the dual-window and solo-window branches.
+- **`start_validated_consensus_finality_change_detector`** (`nori/src/bridge_head/finality_change_detector.rs`): changed signature to accept a `ConsensusHttpProxy` parameter. Uses it for the initial `get_latest_finality_slot()` call and passes it into the validation actor. Removed `MainnetConsensusSpec` and `HttpRpc` imports that are no longer needed.
+- **`BridgeHead::run`** (`nori/src/bridge_head/api.rs`): constructs `ConsensusHttpProxy` once at startup alongside `ProverConfig` and passes it into the finality change detector.
+
 ## 15/6/26 - Audit 8ff57: `get_first_update` panics on empty updates
 
 ### Finding (verbatim)
