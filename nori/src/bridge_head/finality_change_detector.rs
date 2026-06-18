@@ -1,7 +1,7 @@
 use crate::rpcs::consensus::ConsensusHttpProxy;
 use alloy_primitives::FixedBytes;
-use helios_consensus_core::consensus_spec::{ConsensusSpec, MainnetConsensusSpec};
-use helios_ethereum::rpc::{http_rpc::HttpRpc, ConsensusRpc};
+use helios_consensus_core::consensus_spec::ConsensusSpec;
+use helios_ethereum::rpc::ConsensusRpc;
 use log::{debug, error, info};
 use nori_sp1_helios_primitives::types::DualProofInputsWithWindow;
 use std::{time::Duration};
@@ -109,11 +109,16 @@ pub struct FinalityChangeDetectorJobInput {
 /// - **Solo**: only the current window proof inputs are computed (when `next_expected_output` is `None`).
 /// - **Dual**: both current and next window proof inputs are computed concurrently (when `next_expected_output` is `Some`).
 ///
+/// # Arguments
+/// * `consensus_http_proxy` - Pre-constructed consensus proxy reused across all jobs.
+///
 /// # Returns
 /// A tuple containing:
 /// - `mpsc::Sender<FinalityChangeDetectorJobInput>`: channel to submit validation jobs.
 /// - `mpsc::Receiver<Result<DualProofInputsWithWindow<S>, anyhow::Error>>`: channel to receive validation results.
-pub fn validate_and_prepare_proof_inputs_actor<S, R>() -> (
+pub fn validate_and_prepare_proof_inputs_actor<S, R>(
+    consensus_http_proxy: ConsensusHttpProxy<S, R>,
+) -> (
     mpsc::Sender<FinalityChangeDetectorJobInput>,
     mpsc::Receiver<Result<DualProofInputsWithWindow<S>, anyhow::Error>>,
 )
@@ -126,9 +131,9 @@ where
         mpsc::channel::<Result<DualProofInputsWithWindow<S>, anyhow::Error>>(1);
 
     tokio::spawn(async move {
+
         while let Some(job) = job_rx.recv().await {
             let res = if let Some(next_expected_output) = job.next_expected_output {
-                let consensus_http_proxy = ConsensusHttpProxy::<S, R>::try_from_env();
 
                 debug!(
                     "Calculating proof input for CURRENT window, input slot: {}",
@@ -198,7 +203,7 @@ where
                     next_window: Some(next_res),
                 }
             } else {
-                let current_res = ConsensusHttpProxy::<S, R>::try_from_env()
+                let current_res = consensus_http_proxy
                     .prepare_consensus_mpt_proof_inputs(job.slot, job.store_hash, true)
                     .await;
 
@@ -322,6 +327,7 @@ async fn try_start_validation_job(
 /// 8. Automatically handling stale or in-flight validation results and restarting validation jobs as needed
 ///
 /// Arguments:
+/// - `consensus_http_proxy`: Pre-constructed consensus proxy, reused for the lifetime of the detector.
 /// - `slot`: The initial input slot for the **current window**, from which finality change detection begins (anchored to the bridge's slot header).
 /// - `store_hash`: The hash of the store at the input slot for the **current window**.
 /// - `pipeline_inflight_next_expected_output`: Optional in-flight proof job representing the
@@ -364,6 +370,7 @@ async fn try_start_validation_job(
 /// - `S`: The consensus specification type implementing `ConsensusSpec`
 /// - `R`: The RPC interface type implementing `ConsensusRpc<S>` and `Debug`
 pub async fn start_validated_consensus_finality_change_detector<S, R>(
+    consensus_http_proxy: ConsensusHttpProxy<S, R>,
     mut slot: u64,
     mut store_hash: FixedBytes<32>,
     // need an pipeline_inflight_output_slot to represent the end of the window slot of a proof that is currently being processed
@@ -388,11 +395,10 @@ where
         .expect("Failed to parse NORI_HELIOS_POLLING_INTERVAL as f64.");
 
     info!("Fetching helios latest checkpoint.");
-    let init_latest_beacon_slot =
-        ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env()
-            .get_latest_finality_slot()
-            .await
-            .unwrap();
+    let init_latest_beacon_slot = consensus_http_proxy
+        .get_latest_finality_slot()
+        .await
+        .unwrap();
 
     // Channels for finality detector output and input updates
     let (finality_output_tx, finality_output_rx) = mpsc::channel(1);
@@ -403,7 +409,7 @@ where
 
     // Channels for validation actor (job requests and results)
     let (validation_job_tx, mut validation_result_rx) =
-        validate_and_prepare_proof_inputs_actor::<S, R>();
+        validate_and_prepare_proof_inputs_actor::<S, R>(consensus_http_proxy);
 
     tokio::spawn(async move {
         // State tracking

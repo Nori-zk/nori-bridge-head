@@ -207,10 +207,17 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
             .await
             .map_err(|e| Error::msg(e.to_string())); // Convert error to anyhow::Error
 
-        match updates_result {
-            Ok(mut updates) => Ok(updates.get_mut(0).unwrap().clone()), // Clone the updates if the result is Ok
-            Err(e) => Err(e), // Propagate error if it's an Err
+        // A finalized slot in period P guarantees the beacon node has sync committee updates for P;
+        // finality attestations by that period's committee produce the updates, so a bootstrap
+        // from a finalized checkpoint and an empty update set would be unexpected in practice.
+        let updates = updates_result
+            .map_err(|e| anyhow::anyhow!("Failed to fetch light client updates for period {}: {}", period, e))?; // Propagate error if it's an Err
+
+        if updates.is_empty() {
+            return Err(anyhow::anyhow!("Error updates were missing 0th update."));
         }
+
+        Ok(updates.get(0).unwrap().clone()) // Clone the updates if the result is Ok
     }
 
     /// Updates a cloned `LightClientStore` with next sync committee data from the provided update.
@@ -348,7 +355,10 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
         debug!("Getting sync commitee updates.");
         let mut updates = client.get_updates().await?;
 
-        // Panic if our updates were empty (not sure how to deal with this yet)
+        // Error if our updates were empty (this shouldn't happen but this is defense in depth)
+        // A finalized slot in period P guarantees the beacon node has sync committee updates for P;
+        // finality attestations by that period's committee produce the updates, so a bootstrap
+        // from a finalized checkpoint and an empty update set would be unexpected in practice.
         if updates.is_empty() {
             return Err(anyhow::anyhow!("Error updates were missing 0th update."));
         }
@@ -428,6 +438,7 @@ pub struct ConsensusHttpProxy<S: ConsensusSpec, R: ConsensusRpc<S>> {
     all_providers_urls: Vec<Url>,
     _marker: PhantomData<(S, R)>,
     validation_timeout: Duration,
+    execution_proxy: ExecutionHttpProxy<S>,
 }
 
 impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<S, R> {
@@ -465,12 +476,15 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
 
         let backup_providers_urls = urls[1..].to_vec();
 
+        let execution_proxy = ExecutionHttpProxy::<S>::from_env()?;
+
         Ok(ConsensusHttpProxy::<S, R> {
             principal_provider_url,
             backup_providers_urls,
             all_providers_urls: urls,
             _marker: PhantomData,
-            validation_timeout
+            validation_timeout,
+            execution_proxy
         })
     }
 
@@ -595,8 +609,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             })?
             .block_number();
 
-        // Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
-        let validated_consensus_mpt_proof_input_with_window = ExecutionHttpProxy::<S>::try_from_env()
+        let validated_consensus_mpt_proof_input_with_window = self.execution_proxy
             .prepare_consensus_mpt_proof_inputs(
                 input_slot,
                 output_slot,

@@ -1,5 +1,116 @@
 # Changelog
 
+## 15/6/26 - Audit e4e27: `prepare_consensus_mpt_proof_inputs` reconstructs `ExecutionHttpProxy` from env on every window
+
+### Finding (verbatim)
+
+Finding e4e27: `prepare_consensus_mpt_proof_inputs` reconstructs `ExecutionHttpProxy` from env on every window
+
+`ConsensusHttpProxy::prepare_consensus_mpt_proof_inputs` constructs a fresh `ExecutionHttpProxy` via `try_from_env()` on every invocation:
+
+```rust
+// nori-bridge-head/nori/src/rpcs/consensus/mod.rs
+// Get Execution Proxy (Note this is a bit messy to do this here now FIXME)
+let validated_consensus_mpt_proof_input_with_window = ExecutionHttpProxy::<S>::try_from_env()
+    .prepare_consensus_mpt_proof_inputs(
+        input_slot,
+        output_slot,
+        finalized_input_block_number,
+        finalized_output_block_number,
+        validated_consensus_proof_inputs,
+        expected_output_store_hash
+    )
+    .await?;
+```
+
+This happens once per proving window (the function is the per-window orchestrator invoked from the finality change detector). As an optimization, I think you could construct the `ExecutionHttpProxy` once (e.g. own it as a field on `ConsensusHttpProxy`, or pass it in) and reuse it across windows?
+
+### Response
+
+Agreed. The FIXME comment on the line above the call site acknowledged this was untidy. The `from_env()` call is cheap (env var reads, URL parsing, HTTP provider construction, no network calls) and the cost per window is negligible, but reconstructing identical config on every invocation is unnecessary.
+
+The suggested approach of owning `ExecutionHttpProxy` as a field on `ConsensusHttpProxy` was adopted. `ConsensusHttpProxy::from_env()` now also constructs the `ExecutionHttpProxy` and stores it as a field, so `prepare_consensus_mpt_proof_inputs` uses `self.execution_proxy` instead of calling `try_from_env()`.
+
+While auditing all `from_env` call sites, the same pattern was found in `validate_and_prepare_proof_inputs_actor` (`finality_change_detector.rs`), where `ConsensusHttpProxy::try_from_env()` was called inside the job loop on every proving window. This was hoisted above the loop. The `ConsensusHttpProxy` is now constructed once in `api.rs` at startup alongside the `ProverConfig`, passed into `start_validated_consensus_finality_change_detector`, which passes it into the validation actor. No `from_env` calls remain in any loop or per-window path.
+
+### Commit
+
+- **`ConsensusHttpProxy`** (`nori/src/rpcs/consensus/mod.rs`): added `execution_proxy: ExecutionHttpProxy<S>` field to the struct, constructed in `from_env()`. `prepare_consensus_mpt_proof_inputs` now uses `self.execution_proxy` instead of `ExecutionHttpProxy::try_from_env()`, removing the FIXME.
+- **`validate_and_prepare_proof_inputs_actor`** (`nori/src/bridge_head/finality_change_detector.rs`): changed signature to accept a `ConsensusHttpProxy` parameter instead of constructing one internally. Removed per-job `try_from_env()` calls from both the dual-window and solo-window branches.
+- **`start_validated_consensus_finality_change_detector`** (`nori/src/bridge_head/finality_change_detector.rs`): changed signature to accept a `ConsensusHttpProxy` parameter. Uses it for the initial `get_latest_finality_slot()` call and passes it into the validation actor. Removed `MainnetConsensusSpec` and `HttpRpc` imports that are no longer needed.
+- **`BridgeHead::run`** (`nori/src/bridge_head/api.rs`): constructs `ConsensusHttpProxy` once at startup alongside `ProverConfig` and passes it into the finality change detector.
+
+## 15/6/26 - Audit 8ff57: `get_first_update` panics on empty updates
+
+### Finding (verbatim)
+
+Finding 8ff57: `get_first_update` panics on empty updates
+
+`Client::get_first_update` fetches a single light client update for the current sync period and unconditionally indexes element 0 of the returned vector:
+
+```rust
+// nori/src/rpcs/consensus/mod.rs
+pub async fn get_first_update(&self) -> Result<Update<S>> {
+    let period = calc_sync_period::<S>(self.get_current_finalizer_header_beacon_slot());
+
+    // Handling the result and converting errors to anyhow::Error
+    let updates_result = self
+        .inner
+        .rpc
+        .get_updates(period, 1)
+        .await
+        .map_err(|e| Error::msg(e.to_string())); // Convert error to anyhow::Error
+
+    match updates_result {
+        Ok(mut updates) => Ok(updates.get_mut(0).unwrap().clone()), // Clone the updates if the result is Ok
+        Err(e) => Err(e), // Propagate error if it's an Err
+    }
+}
+```
+
+The `.map_err(...)` only captures RPC errors. A successful HTTP response carrying an empty updates array (`[]`) is `Ok(vec![])`, which flows straight into `updates.get_mut(0).unwrap()` and panics.
+
+In contrast, the function `prepare_consensus_proof_inputs` handles the same call with proper error handling instead of panicking:
+
+```rust
+// nori/src/rpcs/consensus/mod.rs
+let mut updates = client.get_updates().await?;
+
+// Panic if our updates were empty (not sure how to deal with this yet)
+if updates.is_empty() {
+    return Err(anyhow::anyhow!("Error updates were missing 0th update."));
+}
+```
+
+### Response
+
+The period queried by `get_first_update` is the period of a slot that has already been finalized and bootstrapped from. The call chain is:
+
+1. `bootstrap_from_slot` / `bootstrap_from_checkpoint` gives a `finalized_header` at some slot
+2. `calc_sync_period` computes which sync committee period that slot falls in
+3. `get_updates(period, 1)` asks the beacon node for light client updates from that period
+
+A sync committee period on mainnet spans 8192 slots (~27 hours). The beacon API endpoint `/eth/v1/beacon/light_client/updates?start_period=P&count=1` returns the best `LightClientUpdate` the node has stored for period P. For a beacon node to have allowed a bootstrap from a finalized checkpoint in period P, that period must be completed or in progress with finality. And a period with finality is expected to produce light client updates, as they are derived from the finality attestations made by that period's sync committee. A beacon node that serves a bootstrap for a period but has zero light client updates for that same period would be unexpected in practice. The consensus spec and major client implementations (including helios, which is our dependency) expect at least one update per period:
+
+- **Consensus spec** (v1.6.1, `specs/altair/light-client/full-node.md` line 171): "Full nodes SHOULD provide the best derivable `LightClientUpdate` ... for each sync committee period" ([link](https://github.com/ethereum/consensus-specs/blob/v1.6.1/specs/altair/light-client/full-node.md#L171-L172))
+- **Lighthouse** (v8.1.3, `light_client_server_cache.rs` line 195-209): quotes the spec requirement verbatim in a comment and implements it by storing the best update per `sync_period` during block processing ([link](https://github.com/sigp/lighthouse/blob/v8.1.3/beacon_node/beacon_chain/src/light_client_server_cache.rs#L195-L209))
+- **Helios** (0.11.1, `consensus.rs` line 460-463): `advance()` calls `get_updates(current_period, 1)` then `updates.get_mut(0).unwrap()`, expecting the 0th update to exist. Empty is treated as "nothing to do" rather than an error state ([link](https://github.com/a16z/helios/blob/0.11.1/ethereum/src/consensus.rs#L460-L463))
+
+The only theoretical edge case would be querying a period that is so new that finality has not yet occurred within it, but that cannot happen here because the period is derived from an already-finalized header, not from wall clock time.
+
+In practice, if one has bootstrapped from a finalized slot in period P, the beacon node will have at least one update for period P. The unwrap is technically unclean but not practically reachable.
+
+`get_first_update` is not in the production path and was never planned to be. It is only called from `get_latest_finality_slot_and_store_hash`, which is the test cold start procedure. In production, the initial store hash is generated by a separate script (`nori/bin/generate_initial_store_hash.rs`, see branch `FEAT/inital-store-hash-script`) which mirrors `prepare_consensus_proof_inputs` directly and has its own empty updates guard. The production path (`prepare_consensus_proof_inputs`) already had the correct error handling before this finding was reported.
+
+The bridge head runs containerised. This function was never planned to be in the production path, but if it were, a panic would result in a container restart with no impact on the wider system.
+
+The fix is accepted regardless. Replacing the unwrap with a proper error return is the right thing to do for code quality and auditability.
+
+### Commit
+
+- **`get_first_update`** (`nori/src/rpcs/consensus/mod.rs`): replaced the `match` block containing `updates.get_mut(0).unwrap()` with a `map_err` providing a meaningful error message including the period number, an `is_empty()` guard returning `Err(anyhow!("Error updates were missing 0th update."))`, and `updates.get(0).unwrap().clone()` after the guard. The unwrap is now unreachable due to the empty check above it.
+- **`prepare_consensus_proof_inputs`** (`nori/src/rpcs/consensus/mod.rs`): updated the comment above the existing `is_empty()` guard from "not sure how to deal with this yet" to "this shouldn't happen but this is defense in depth", and added a rationale comment explaining why empty updates are not expected.
+
 ## 15/5/26 - Audit A2090: Non-standard Merkle zero indexing
 
 ### Finding (verbatim)
