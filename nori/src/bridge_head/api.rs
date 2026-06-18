@@ -1,4 +1,5 @@
 use super::finality_change_detector::start_validated_consensus_finality_change_detector;
+use crate::rpcs::consensus::ConsensusHttpProxy;
 use super::handles::{Command, CommandHandle};
 use super::notice_messages::{
     TransitionNoticeBridgeHeadMessage, TransitionNoticeBridgeHeadMessageExtension,
@@ -493,6 +494,9 @@ impl BridgeHead {
         // Print the loaded configuration for user visibility
         sp1_config.print_config();
 
+        // Construct the consensus proxy (includes execution proxy) from env
+        let consensus_http_proxy = ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env();
+
         // Setup polling client for finality change detection
         info!("Starting finality change detector.");
         let (
@@ -501,6 +505,7 @@ impl BridgeHead {
             finality_advance_input_tx,
             finality_stage_input_tx,
         ) = start_validated_consensus_finality_change_detector::<MainnetConsensusSpec, HttpRpc>(
+            consensus_http_proxy,
             current_slot,
             store_hash,
             pipeline_inflight_next_expected_output,
