@@ -61,6 +61,48 @@ Results:
 
 - `1eb72_non_checkpoint_regression`: FAILED. `consensus_mpt_program` accepts slot 10650047 (% 32 == 31) without error, confirming the vulnerability. The program produces a valid `ProofOutputs` with a non-checkpoint `output_slot`, which could be submitted to `NoriTokenBridge.update()` to brick the bridge.
 
+### Commit 2 - Fix applied
+
+The constraint is enforced against `output_slot`, i.e. `store.finalized_header.beacon().slot` as it stands after `consensus_mpt_program` has finished applying `updates` and `finality_update`, since `output_slot` is the value committed into `ProofOutputs` and ultimately written on-chain by `NoriTokenBridge.update()`. `store.finalized_header` is not set from a single, fixed source: both `apply_update` (called once per entry in `updates`) and `apply_finality_update` (called for `finality_update`) route through the same helios function, `apply_generic_update` (`helios ethereum/consensus-core/src/consensus_core.rs`), which first decides whether the update qualifies at all:
+
+```rust
+// helios: ethereum/consensus-core/src/consensus_core.rs, apply_generic_update
+let should_apply_update = {
+    let has_majority = committee_bits * 3 >= S::sync_committee_size() * 2;
+    let update_is_newer = update_finalized_slot > store.finalized_header.beacon().slot;
+    let good_update = update_is_newer || update_has_finalized_next_committee;
+    has_majority && good_update
+};
+if should_apply_update {
+    apply_update_no_quorum_check(store, update);
+}
+```
+
+Only if `should_apply_update` is true does it call `apply_update_no_quorum_check`, which re-checks slot progression before actually writing the field:
+
+```rust
+// helios: ethereum/consensus-core/src/consensus_core.rs, apply_update_no_quorum_check
+if update_finalized_slot > store.finalized_header.beacon().slot {
+    store.finalized_header = update.finalized_header.clone().unwrap();
+}
+```
+
+This is the only line in helios that assigns `store.finalized_header`. `verify_update`/`verify_finality_update` establish that an update is cryptographically valid; neither establishes that `should_apply_update` or this second slot check will hold for it. So whether processing a given entry in `updates`, or `finality_update`, changes `store.finalized_header` at all, and to what, depends on the store's finalized slot as left by whatever was processed immediately before it. After both processing steps, `store.finalized_header.beacon().slot` can therefore end up matching any one of `updates`, `finality_update`, or `input_slot` unchanged, none of which `consensus_mpt_program` can determine ahead of time. That is why the check reads `output_slot` and asserts `output_slot % 32 == 0` only in step 7, after step 6 has captured `store.finalized_header.beacon().slot` post-apply.
+
+- **`ProgramError`** (`nori-program/src/consensus.rs`): added `NonCheckpointOutputSlot { slot: u64 }` variant with display format showing the slot and its `% 32` remainder.
+- **`consensus_mpt_program`** (`nori-program/src/consensus.rs`): added step 7 Checkpoint Slot Validation, checking `output_slot % 32 != 0` and returning `NonCheckpointOutputSlot`, immediately after `output_slot` is captured in step 6 (post-apply). Docstring operations and error-condition lists renumbered and updated accordingly.
+- The check is not added to `consensus_program` because it is only used as an off-chain dry run in `prepare_consensus_mpt_proof_inputs`, gated by the `validate` flag. The existing off-chain `% 32` check in `mod.rs` already handles the `validate=true` case. `consensus_mpt_program` is the ZK circuit entrypoint (`nori-program/src/main.rs`), so enforcing the constraint there makes it impossible to produce a valid proof for a non-checkpoint slot.
+
+Results:
+
+`cargo test -p nori --test 1eb72_non_checkpoint_regression`
+
+- `1eb72_non_checkpoint_regression`: PASSED. `consensus_mpt_program` rejects slot 10650047 (% 32 == 31) with `NonCheckpointOutputSlot` error.
+
+This test is not sufficient proof that the check is anchored to the right value. Its fixture has an empty `updates` array, so `finality_update`'s own (pre-apply) slot and the true post-apply `output_slot` are numerically identical (10650047 in both), and the test cannot tell a check on one from a check on the other. A fixture that could tell them apart would need an `updates[i]` entry that advances `store.finalized_header` to a non-checkpoint slot, followed by a `finality_update` that fails to override it.
+
+Sepolia's live missed-slot rate is about 3.3% per epoch boundary (measured via `light-sepolia.beaconcha.in`, 50 missed slots over 1505 slots), which is what let the existing fixture be captured in about 3.2 hours of polling. But `updates` is only non-empty when a proof crosses a sync-committee period boundary (8192 slots, about 27.3 hours), so on average about 13.65 hours pass before there is even an `updates` entry to look at, and getting that entry's own finalized slot to land on non-checkpoint needs roughly 30 such boundaries at the same 3.3% rate, around 34 days of continuous polling. On top of that the update still has to go unoverridden by the corresponding `finality_update`, which depends on operational conditions (which of `all_providers_urls` a call to `multiplex` lands on, node lag, timing skew between the `get_updates` and `finality_update` calls) rather than slot-miss statistics, and we have no measured rate for it. Given all of that, we are documenting this as a known gap rather than waiting for it.
+
 ## 15/6/26 - Audit e4e27: `prepare_consensus_mpt_proof_inputs` reconstructs `ExecutionHttpProxy` from env on every window
 
 ### Finding (verbatim)
