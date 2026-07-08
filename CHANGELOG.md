@@ -1,5 +1,66 @@
 # Changelog
 
+## 8/7/26 - Audit 1eb72: `output_slot % 32 == 0` checkpoint constraint not enforced in ZK program or on-chain
+
+### Finding (verbatim)
+
+Finding 1eb72:
+
+While the check regarding the slot advancing and the next sync committee not being zero are enforced by the Mina contract, this is not the case for the `store.finalized_header.beacon().slot % 32 == 0` check. For honest provers who prepare proofs via code going through `prepare_consensus_mpt_proof_inputs` function, with `validate` set to true, the out-of-circuit off-chain checks prevent accidental usage of such finalized headers.
+
+That check there appears to strongly suggest that it would a problem for the honest operator code if the finalized header slot to start out with on the next update would not satisfy the `% 32 == 0` condition:
+
+```rust
+// nori-bridge-head: nori/src/rpcs/consensus/mod.rs
+
+// Block non-checkpoint slots (they prevent bootstrapping on restart)
+// We need the validate_progress guard as its used as a flag to allow
+// the proof anyway. And for vk building (and zk change detection) we need to be able to arbirarily bypass this 
+// sort of validation.
+if validate && output_slot % 32 > 0 { 
+    return Err(anyhow::anyhow!(
+        "Output slot {} was a non-checkpoint slot. Preventing this as it prevents bootstrapping if we go offline.",
+        output_slot,
+    ));
+
+// Block non-checkpoint slots (ones where we fail to actually bootstrap by trying it explicitly)
+// This re-enforces the output_slot % 32 > 0 validation check.
+// I addition to checking the output_slot number % 32 lets try to bootstrap from this slot explicitly
+if validate {
+    Client::<S, R>::bootstrap_from_slot(&url, output_slot).await
+    .map_err(|e| anyhow::anyhow!(
+        "Failed to bootstrap from slot {} using {}. Preventing the use of this output_slot as it could lead to a stall of the bridge:\n{}",
+        output_slot, url, e
+    ))?;
+}
+```
+
+What is the reason for this and what is the precise problem?
+
+If this would prevent the honest operator code from producing the next proof, then this would amount to a temporary denial of of service possibility for an attacker who submits an update on-chain for an epoch where the finalized header slot is not a checkpoint slot.
+
+### Response
+
+The severity is higher than the finding suggests. The finding describes a "temporary denial of service" but the impact is a permanent denial of service that is repeatable even after recovery.
+
+The `update()` method on the Mina `NoriTokenBridge` contract is permissionless. Anyone who can produce a valid SP1 proof can call it. The contract advances `latestHead` to the proof's `outputSlot` and updates the store hash chain (`latestHeliusStoreInputHashHighByte`, `latestHeliusStoreInputHashLowerBytes`) to the proof's `outputStoreHash`. Neither the ZK program (`consensus_mpt_program`) nor the contract enforce `outputSlot % 32 == 0`.
+
+If any party submits a proof whose `outputSlot` is a non-checkpoint slot, the honest operator cannot produce a valid next proof from that slot. This does not require malicious intent; anyone running their own operator implementation without the off-chain `% 32` guard would trigger it. When `bootstrap_from_slot` is called, it derives a checkpoint hash from the block at that slot and passes it to the beacon chain's `getLightClientBootstrap` endpoint, which returns "LC bootstrap unavailable" because bootstrapping is only supported for checkpoint slots. The operator cannot reconstruct a Helios store rooted at that slot, so it cannot produce a proof whose `inputStoreHash` matches the now-committed store hash on-chain. The bridge is bricked.
+
+Recovery requires the admin key to call `updateStoreHash()` (`NoriTokenBridge.ts:686`) to manually set the store hash to a valid checkpoint-rooted store. But `update()` remains permissionless and the ZK program still accepts non-checkpoint slots, so the same party can immediately brick the bridge again after recovery.
+
+Missed epoch boundary slots (where the block proposer for a slot at position 0 in the epoch fails to produce a block) occur frequently on mainnet. When this happens, the finalized header points to the last block before the boundary, which is a non-checkpoint slot. An attacker or negligent operator does not need to compromise any proposer; they simply wait for a naturally occurring missed boundary slot and submit a proof during that window.
+
+### Commit 1 - Test exposing non-checkpoint slot acceptance
+
+- **`nori-test-fixtures`** (`nori-test-fixtures/`): new workspace crate with a `generate_non_checkpoint_fixture` binary that captures a real `ProofInputs<MainnetConsensusSpec>` for a non-checkpoint finalized slot. Cold starts once via `get_latest_finality_slot_and_store_hash`, then chains `prepare_consensus_mpt_proof_inputs` with `validate=false`, feeding each output slot and store hash back as the next input until a non-checkpoint output slot is observed.
+- **`non_checkpoint_proof_inputs.10650047.cbor`** (`nori/tests/data/`): captured fixture, slot 10650047 (% 32 == 31), 113807 bytes.
+- **`1eb72_non_checkpoint_regression`** (`nori/tests/1eb72_non_checkpoint_regression.rs`): regression test that deserializes the fixture and passes it to `consensus_mpt_program`. Asserts the program rejects non-checkpoint slots.
+
+Results:
+
+- `1eb72_non_checkpoint_regression`: FAILED. `consensus_mpt_program` accepts slot 10650047 (% 32 == 31) without error, confirming the vulnerability. The program produces a valid `ProofOutputs` with a non-checkpoint `output_slot`, which could be submitted to `NoriTokenBridge.update()` to brick the bridge.
+
 ## 15/6/26 - Audit e4e27: `prepare_consensus_mpt_proof_inputs` reconstructs `ExecutionHttpProxy` from env on every window
 
 ### Finding (verbatim)

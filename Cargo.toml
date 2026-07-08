@@ -1,5 +1,5 @@
 [workspace]
-members = ["nori/src/contract_bindings", "nori", "nori-hash", "nori-program", "nori-build-zk"]
+members = ["nori/src/contract_bindings", "nori", "nori-hash", "nori-program", "nori-build-zk", "nori-test-fixtures"]
 resolver = "2"
 
 [workspace.package]
