@@ -28,6 +28,8 @@ pub enum ProgramError {
     StoreHashingError(String),
     /// Error for MPT specific errors
     MptError(MptError),
+    /// Error when output_slot is not a checkpoint slot (output_slot % 32 != 0)
+    NonCheckpointOutputSlot { slot: u64 },
 }
 
 impl fmt::Display for ProgramError {
@@ -54,6 +56,14 @@ impl fmt::Display for ProgramError {
             }
             ProgramError::MptError(e) => {
                 write!(f, "MPT error: {}", e)
+            }
+            ProgramError::NonCheckpointOutputSlot { slot } => {
+                write!(
+                    f,
+                    "Output slot {} is not a checkpoint slot (% 32 == {})",
+                    slot,
+                    slot % 32
+                )
             }
         }
     }
@@ -313,10 +323,19 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    - Extract `next_sync_committee_hash` = `store.next_sync_committee.tree_hash_root()`
 ///      (`B256::ZERO` if `next_sync_committee` is `None`)
 ///
-/// 7. **Post-State Hashing**
+/// 7. **Checkpoint Slot Validation** (Output Rejection)
+///    - Assert `output_slot % 32 == 0`
+///    - `output_slot` reflects the store's actual finalized header slot after `updates` and
+///      `finality_update` have been applied (`apply_generic_update` only advances
+///      `store.finalized_header` when the update is newer/quorate, so the pre-apply
+///      `finality_update.finalized_header().beacon().slot` is not a reliable stand-in for it)
+///    - Non-checkpoint slots cannot be bootstrapped via `getLightClientBootstrap`,
+///      so committing one on-chain bricks the bridge (see finding 1eb72)
+///
+/// 8. **Post-State Hashing**
 ///    - Compute `output_store_hash` = `SHA-256(serde_serialize(store))`, to be validated in the next round
 ///
-/// 8. **Output Commitment**
+/// 9. **Output Commitment**
 ///    - Pack `ProofOutputs` committing: `input_slot`, `input_store_hash`,
 ///      `output_slot`, `output_store_hash`, `execution_state_root`,
 ///      `verified_contract_storage_slots_root`, `next_sync_committee_hash`,
@@ -337,7 +356,7 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///
 /// # Error Conditions
 /// 1. **Store Hashing Error**
-///    `sha256_hash_helios_store` fails → `StoreHashingError` (steps 1 and 7)
+///    `sha256_hash_helios_store` fails → `StoreHashingError` (steps 1 and 8)
 /// 2. **Hash Chain Break**
 ///    `calculated_prev_store_hash != input_store_hash` → Invalid initial state
 /// 3. **Invalid Update**
@@ -355,6 +374,8 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    - `ExceedsMaxTreeDepth { slots, requested_depth, max_depth }` → if the number of storage slots yields a merkle tree
 ///       which is too large.
 ///    Any of these returns a `MptError`, wrapped as `ProgramError::MptError`
+/// 7. **Non-Checkpoint Output Slot**
+///    `output_slot % 32 != 0` (checked after `updates`/`finality_update` are applied) → `NonCheckpointOutputSlot`
 ///
 pub fn consensus_mpt_program<S: ConsensusSpec>(
     proof_inputs: ProofInputs<S>,
@@ -492,7 +513,12 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         println!("output_slot, next_sync_committee_hash captured.");
     }
 
-    // 7. Post-State Hashing - Calculate updated store hash to be validated in the next round
+    // 7. Checkpoint Slot Validation - Reject non-checkpoint output slots (output_slot % 32 != 0)
+    if output_slot % 32 != 0 {
+        return Err(ProgramError::NonCheckpointOutputSlot { slot: output_slot });
+    }
+
+    // 8. Post-State Hashing - Calculate updated store hash to be validated in the next round
     if debug_print {
         println!("Hashing updated store.");
     }
@@ -503,7 +529,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         println!("Hashing updated store complete: {}", output_store_hash);
     }
 
-    // 8. Output Commitment
+    // 9. Output Commitment
     if debug_print {
         println!("Committing outputs.");
     }
