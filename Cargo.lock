@@ -5457,6 +5457,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "nori-test-fixtures"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "dotenv",
+ "env_logger",
+ "helios-consensus-core",
+ "helios-ethereum",
+ "nori",
+ "nori-sp1-helios-primitives",
+ "serde_cbor",
+ "tokio",
+]
+
+[[package]]
 name = "ntapi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
