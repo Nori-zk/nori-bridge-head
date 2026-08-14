@@ -1,4 +1,4 @@
-use alloy_primitives::U256;
+use alloy_primitives::{Address, B256, U256};
 use anyhow::Result;
 use mina_curves::pasta::Fp;
 use mina_poseidon::{
@@ -477,6 +477,211 @@ pub fn hash_storage_slot(
     //println!("hash {:?}", hash);
 
     Ok(hash)
+}
+
+/// Hashes one verified queue request into a Merkle leaf.
+///
+/// Packs 117 bytes of leaf data into four field elements, each kept below the
+/// 254-bit field size, then applies Poseidon. Byte handling matches
+/// `hash_storage_slot`: big-endian payload bytes are written from index 0 and
+/// read back little-endian by `Fp::from_bytes`.
+///
+/// Field layout:
+/// - field 1: `target` (20) ++ `collection_keys_count` ++ `key_0[0]` ++ `key_1[0]` ++ `value[0]`
+/// - field 2: `key_0[1..32]`
+/// - field 3: `key_1[1..32]`
+/// - field 4: `value[1..32]`
+///
+/// `collection_keys_count` is hashed so that an unused trailing key, which is
+/// zero, cannot collide with a request that supplied a zero key.
+///
+/// The o1js `provableRequestLeafHash` must pack identically; the shared test
+/// vectors pin both implementations.
+pub fn hash_request_leaf(
+    target: &Address,
+    collection_keys_count: u8,
+    collection_key_0: &B256,
+    collection_key_1: &B256,
+    value: &U256,
+) -> Result<Fp> {
+    let target_bytes = target.as_slice();
+    let key_0_bytes = collection_key_0.as_slice();
+    let key_1_bytes = collection_key_1.as_slice();
+    let value_bytes = value.to_be_bytes::<32>();
+
+    let mut first_field_bytes = [0u8; 32];
+    first_field_bytes[0..20].copy_from_slice(target_bytes);
+    first_field_bytes[20] = collection_keys_count;
+    first_field_bytes[21] = key_0_bytes[0];
+    first_field_bytes[22] = key_1_bytes[0];
+    first_field_bytes[23] = value_bytes[0];
+
+    let mut second_field_bytes = [0u8; 32];
+    second_field_bytes[0..31].copy_from_slice(&key_0_bytes[1..32]);
+
+    let mut third_field_bytes = [0u8; 32];
+    third_field_bytes[0..31].copy_from_slice(&key_1_bytes[1..32]);
+
+    let mut fourth_field_bytes = [0u8; 32];
+    fourth_field_bytes[0..31].copy_from_slice(&value_bytes[1..32]);
+
+    let first_field = Fp::from_bytes(&first_field_bytes)?;
+    let second_field = Fp::from_bytes(&second_field_bytes)?;
+    let third_field = Fp::from_bytes(&third_field_bytes)?;
+    let fourth_field = Fp::from_bytes(&fourth_field_bytes)?;
+
+    Ok(poseidon_hash(&[
+        first_field,
+        second_field,
+        third_field,
+        fourth_field,
+    ]))
+}
+
+#[cfg(test)]
+mod request_leaf_tests {
+    use super::*;
+
+    fn leaf(
+        target: Address,
+        count: u8,
+        key_0: B256,
+        key_1: B256,
+        value: U256,
+    ) -> Fp {
+        hash_request_leaf(&target, count, &key_0, &key_1, &value).unwrap()
+    }
+
+    #[test]
+    fn hashes_an_all_zero_request() {
+        leaf(Address::ZERO, 0, B256::ZERO, B256::ZERO, U256::ZERO);
+    }
+
+    #[test]
+    fn hashes_maximum_bytes_without_field_overflow() {
+        leaf(
+            Address::repeat_byte(0xff),
+            u8::MAX,
+            B256::repeat_byte(0xff),
+            B256::repeat_byte(0xff),
+            U256::MAX,
+        );
+    }
+
+    #[test]
+    fn key_count_distinguishes_an_unused_key_from_a_zero_key() {
+        let one_key = leaf(
+            Address::repeat_byte(0x11),
+            1,
+            B256::repeat_byte(0x22),
+            B256::ZERO,
+            U256::from(7u64),
+        );
+        let two_keys = leaf(
+            Address::repeat_byte(0x11),
+            2,
+            B256::repeat_byte(0x22),
+            B256::ZERO,
+            U256::from(7u64),
+        );
+        assert_ne!(one_key, two_keys);
+    }
+
+    #[test]
+    fn distinct_targets_produce_distinct_leaves() {
+        let a = leaf(
+            Address::repeat_byte(0x01),
+            1,
+            B256::repeat_byte(0x22),
+            B256::ZERO,
+            U256::from(7u64),
+        );
+        let b = leaf(
+            Address::repeat_byte(0x02),
+            1,
+            B256::repeat_byte(0x22),
+            B256::ZERO,
+            U256::from(7u64),
+        );
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn distinct_values_produce_distinct_leaves() {
+        let a = leaf(
+            Address::repeat_byte(0x11),
+            1,
+            B256::repeat_byte(0x22),
+            B256::ZERO,
+            U256::from(7u64),
+        );
+        let b = leaf(
+            Address::repeat_byte(0x11),
+            1,
+            B256::repeat_byte(0x22),
+            B256::ZERO,
+            U256::from(8u64),
+        );
+        assert_ne!(a, b);
+    }
+
+    /// The leading byte of each 32-byte input is packed separately from its
+    /// remaining 31 bytes, so it needs its own coverage.
+    #[test]
+    fn leading_bytes_are_included_in_the_hash() {
+        let mut key_high = [0u8; 32];
+        key_high[0] = 0xaa;
+        let mut value_high = [0u8; 32];
+        value_high[0] = 0xbb;
+
+        let base = leaf(
+            Address::ZERO,
+            2,
+            B256::ZERO,
+            B256::ZERO,
+            U256::ZERO,
+        );
+        let key_0_differs = leaf(
+            Address::ZERO,
+            2,
+            B256::from(key_high),
+            B256::ZERO,
+            U256::ZERO,
+        );
+        let key_1_differs = leaf(
+            Address::ZERO,
+            2,
+            B256::ZERO,
+            B256::from(key_high),
+            U256::ZERO,
+        );
+        let value_differs = leaf(
+            Address::ZERO,
+            2,
+            B256::ZERO,
+            B256::ZERO,
+            U256::from_be_bytes(value_high),
+        );
+
+        assert_ne!(base, key_0_differs);
+        assert_ne!(base, key_1_differs);
+        assert_ne!(base, value_differs);
+        assert_ne!(key_0_differs, key_1_differs);
+    }
+
+    #[test]
+    fn is_deterministic() {
+        let args = || {
+            leaf(
+                Address::repeat_byte(0x33),
+                2,
+                B256::repeat_byte(0x44),
+                B256::repeat_byte(0x55),
+                U256::from(99u64),
+            )
+        };
+        assert_eq!(args(), args());
+    }
 }
 
 #[cfg(test)]

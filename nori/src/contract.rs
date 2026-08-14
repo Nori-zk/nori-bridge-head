@@ -1,5 +1,5 @@
 use nori_sp1_helios_primitives::types::{
-    get_storage_location_for_key, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
+    mapping_entry_location, SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
 };
 use nori_contract_bindings::NoriTokenBridge::TokensLocked;
 use alloy_primitives::{Address, Log, B256, U256};
@@ -8,6 +8,16 @@ use std::{
     collections::HashMap,
     env,
 };
+
+/// Address of the NoriProofRequestQueue, the account every storage proof is
+/// anchored on and the address committed to Mina.
+pub fn get_proof_queue_address() -> Result<Address> {
+    let proof_queue_address = env::var("NORI_PROOF_QUEUE_ADDRESS")
+        .context("Missing NORI_PROOF_QUEUE_ADDRESS in environment")?
+        .parse::<Address>()
+        .context("Invalid Ethereum address format")?;
+    Ok(proof_queue_address)
+}
 
 pub fn get_source_contract_address() -> Result<Address> {
     let source_state_bridge_contract_address = env::var("NORI_TOKEN_BRIDGE_ADDRESS")
@@ -22,7 +32,7 @@ pub fn code_challenge_to_storage_slots(
 ) -> HashMap<B256, U256> {
     let mut slot_to_code_challenge = HashMap::<B256, U256>::new();
     for locked_token_event in locked_token_event.iter() {
-        let slot = get_storage_location_for_key(
+        let slot = mapping_entry_location(
             locked_token_event.codeChallenge,
             SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX,
         );
@@ -45,7 +55,7 @@ mod tests {
             Address::from_slice(&hex::decode("6827b8f6cc60497d9bf5210d602C0EcaFDF7C405").unwrap());
         let mapping_index: u8 = 0;
 
-        let storage_slot = get_storage_location_for_key(address, mapping_index);
+        let storage_slot = mapping_entry_location(address, mapping_index);
 
         // Expected hash from the comment
         let expected = B256::from_slice(
@@ -71,7 +81,7 @@ fn test_single_mapping_storage_slot() {
     let code_challenge = Uint::<256, 4>::from_str("1111").unwrap();
     let mapping_index: u8 = 0;
 
-    let slot = get_storage_location_for_key(code_challenge, mapping_index);
+    let slot = mapping_entry_location(code_challenge, mapping_index);
 
     // Manually compute expected: keccak256(code_challenge ++ padding(0))
     let mut encoded = [0u8; 64];

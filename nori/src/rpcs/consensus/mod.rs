@@ -515,6 +515,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         &self,
         input_slot: u64,
         store_hash: FixedBytes<32>,
+        input_request_cursor: u64,
         validate: bool
     ) -> Result<ProofInputsWithWindow<S>> {
         // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
@@ -615,6 +616,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 output_slot,
                 finalized_input_block_number,
                 finalized_output_block_number,
+                input_request_cursor,
                 validated_consensus_proof_inputs,
                 expected_output_store_hash
             )

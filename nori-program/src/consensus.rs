@@ -11,7 +11,7 @@ use nori_sp1_helios_primitives::types::{
 use std::fmt;
 use tree_hash::TreeHash;
 
-use crate::mpt::{verify_storage_slot_proofs, MptError};
+use crate::mpt::{verify_queue, MptError};
 
 /// Custom error type for program execution failures
 #[derive(Debug)]
@@ -390,9 +390,12 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         genesis_root,
         forks,
         store_hash: input_store_hash,
-        contract_storage,
+        queue_storage,
     } = proof_inputs;
-    let contract_address = contract_storage.address;
+    // The queue is the account the storage proofs anchor on, so it is the
+    // address committed to the destination chain.
+    let proof_request_queue_address = queue_storage.proof_request_queue_address;
+    let input_request_cursor = queue_storage.input_cursor;
     // @AUDIT - We should consider whether we want to enforce that there are no best valid updates in the store here.
     // 0. we should not proceed if we have a best valid update in our store
     // as we have a next_sync_committe non zero assertion in the verifier contract on Mina
@@ -489,15 +492,16 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
     if debug_print {
-        println!("Verifying contract storage slots.");
+        println!("Verifying proof request queue.");
     }
-    let verified_slots_result = verify_storage_slot_proofs(execution_state_root, contract_storage);
-    if let Err(verified_slots_err) = verified_slots_result {
-        return Err(ProgramError::MptError(verified_slots_err));
-    }
-    let verified_contract_storage_slots_root = verified_slots_result.unwrap();
+    let (output_request_cursor, verified_contract_storage_slots_root) =
+        verify_queue(execution_state_root, queue_storage)
+            .map_err(ProgramError::MptError)?;
     if debug_print {
-        println!("Contract storage slots are valid.");
+        println!(
+            "Proof request queue is valid, cursor {} -> {}.",
+            input_request_cursor, output_request_cursor
+        );
     }
 
     // 6. State Capture (Post-Update Snapshot) - output_slot, next_sync_committee_hash
@@ -541,8 +545,10 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         execution_state_root,
         verified_contract_storage_slots_root,
         next_sync_committee_hash,
-        contract_address,
+        proof_request_queue_address,
         genesis_root,
+        input_request_cursor,
+        output_request_cursor,
     };
     if debug_print {
         println!("Packed outputs.");

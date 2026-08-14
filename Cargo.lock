@@ -5359,6 +5359,7 @@ version = "10.0.11"
 dependencies = [
  "alloy",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-trie",
  "anyhow",
  "async-trait",
@@ -5432,6 +5433,7 @@ dependencies = [
  "alloy-trie",
  "anyhow",
  "helios-consensus-core",
+ "nori-hash",
  "serde",
 ]
 

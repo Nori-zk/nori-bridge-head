@@ -44,6 +44,7 @@ env_logger = { workspace = true }
 alloy-primitives = { workspace = true }
 alloy = { workspace = true }
 alloy-trie = { workspace = true }
+alloy-rlp = { workspace = true }
 anyhow = { workspace = true }
 cargo_metadata = { workspace = true }
 reqwest = { workspace = true }

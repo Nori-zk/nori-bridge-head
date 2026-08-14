@@ -19,7 +19,7 @@ use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
 use helios_ethereum::rpc::http_rpc::HttpRpc;
 use log::{error, info};
 use nori_sp1_helios_primitives::types::{
-    DualProofInputsWithWindow, ProofInputsWithWindow, ProofOutputs, VerifiedContractStorageSlot,
+    DualProofInputsWithWindow, ProofInputsWithWindow, ProofOutputs, VerifiedRequest,
 };
 use serde::{Deserialize, Serialize};
 use sp1_sdk::SP1ProofWithPublicValues;
@@ -44,9 +44,11 @@ pub struct ProofMessage {
     pub execution_state_root: FixedBytes<32>,
     pub verified_contract_storage_slots_root: FixedBytes<32>,
     pub next_sync_committee_hash: FixedBytes<32>,
-    pub contract_address: alloy_primitives::Address,
+    pub proof_request_queue_address: alloy_primitives::Address,
     pub genesis_root: FixedBytes<32>,
-    pub contract_storage_slots: Vec<VerifiedContractStorageSlot>,
+    pub verified_requests: Vec<VerifiedRequest>,
+    /// Queue cursor after this proof settles.
+    pub output_request_cursor: u64,
     pub elapsed_sec: f64,
 }
 
@@ -224,9 +226,20 @@ impl BridgeHead {
         // Clone job arguments
         let current_slot = self.current_slot;
         let store_hash = self.store_hash;
-        let inputs = proof_inputs_with_window.proof_inputs;
         let expected_output_slot = proof_inputs_with_window.expected_output_slot;
         let expected_output_store_hash = proof_inputs_with_window.expected_output_store_hash;
+        // This job drains its whole batch, so the cursor it will settle at is
+        // the one it started from plus the entries it covers.
+        let expected_output_request_cursor = proof_inputs_with_window
+            .proof_inputs
+            .queue_storage
+            .input_cursor
+            + proof_inputs_with_window
+                .proof_inputs
+                .queue_storage
+                .entries
+                .len() as u64;
+        let inputs = proof_inputs_with_window.proof_inputs;
 
         // Spawn proof job in worker thread (check for blocking)
         tokio::spawn(async move {
@@ -258,6 +271,7 @@ impl BridgeHead {
             .send(FinalityChangeDetectorUpdate {
                 slot: expected_output_slot,
                 store_hash: expected_output_store_hash,
+                request_cursor: expected_output_request_cursor,
             })
             .await?;
 
@@ -325,15 +339,28 @@ impl BridgeHead {
         info!("-----------------------------------------------------------------------------------------");
         info!("-----------------------------------------------------------------------------------------");
 
-        // Build a vector of VerifiedContractStorageSlot
-        let contract_storage_slots: Vec<VerifiedContractStorageSlot> = inputs_with_window
-            .proof_inputs
-            .contract_storage
-            .storage_slots
+        // The committed leaf set, in cursor order. Every entry contributes a
+        // leaf, so this is what a consumer rebuilds Merkle paths from.
+        let queue_storage = &inputs_with_window.proof_inputs.queue_storage;
+        let verified_requests: Vec<VerifiedRequest> = queue_storage
+            .entries
             .iter()
-            .map(|slot| VerifiedContractStorageSlot {
-                slot_key_code_challenge: slot.slot_key_code_challenge,
-                value: slot.expected_value,
+            .map(|entry| VerifiedRequest {
+                target: entry.target,
+                collection_keys_count: entry.collection_keys_count,
+                collection_keys: entry.collection_keys,
+                value: queue_storage
+                    .targets
+                    .iter()
+                    .find(|target| target.target_address == entry.target)
+                    .and_then(|target| {
+                        target
+                            .slots
+                            .iter()
+                            .find(|slot| slot.key == entry.slot_key)
+                            .map(|slot| slot.value)
+                    })
+                    .unwrap_or_default(),
             })
             .collect();
 
@@ -351,9 +378,9 @@ impl BridgeHead {
                     output_store_hash: proof_outputs.output_store_hash,
                     verified_contract_storage_slots_root: proof_outputs.verified_contract_storage_slots_root,
                     next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
-                    contract_address: proof_outputs.contract_address,
+                    proof_request_queue_address: proof_outputs.proof_request_queue_address,
                     genesis_root: proof_outputs.genesis_root,
-                    contract_storage_slots: contract_storage_slots.clone(),
+                    verified_requests: verified_requests.clone(),
                 },
             ))
             .await?;
@@ -370,9 +397,10 @@ impl BridgeHead {
                 execution_state_root: proof_outputs.execution_state_root,
                 verified_contract_storage_slots_root: proof_outputs.verified_contract_storage_slots_root,
                 next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
-                contract_address: proof_outputs.contract_address,
+                proof_request_queue_address: proof_outputs.proof_request_queue_address,
                 genesis_root: proof_outputs.genesis_root,
-                contract_storage_slots,
+                verified_requests,
+                output_request_cursor: proof_outputs.output_request_cursor,
                 elapsed_sec,
             })
             .await?;
@@ -484,7 +512,7 @@ impl BridgeHead {
     // Event loop
     // ================================================================================================
 
-    pub async fn run(mut self, current_slot: u64, store_hash: FixedBytes<32>, pipeline_inflight_next_expected_output: Option<FinalityChangeDetectorUpdate>) {
+    pub async fn run(mut self, current_slot: u64, store_hash: FixedBytes<32>, request_cursor: u64, pipeline_inflight_next_expected_output: Option<FinalityChangeDetectorUpdate>) {
         // Extract the Sp1 config from envs and wrap it in an Arc so we can share it
         let sp1_config = Arc::new(
             ProverConfig::from_env()
@@ -508,6 +536,7 @@ impl BridgeHead {
             consensus_http_proxy,
             current_slot,
             store_hash,
+            request_cursor,
             pipeline_inflight_next_expected_output,
         )
         .await;
@@ -566,7 +595,7 @@ impl BridgeHead {
                             Command::Advance(message) => {
                                 // Notify finality change detector of a change to the head position
                                 // message.slot is the output slot which was finalised
-                                if let Err(err) = finality_advance_input_tx.send(FinalityChangeDetectorUpdate {slot: message.slot, store_hash: message.store_hash}).await {
+                                if let Err(err) = finality_advance_input_tx.send(FinalityChangeDetectorUpdate {slot: message.slot, store_hash: message.store_hash, request_cursor: message.request_cursor}).await {
                                     error!("Bridge Head API Error: Failed to notify finality detector of head advancement: {:?}", err);
                                     break;
                                 }
