@@ -8,8 +8,14 @@ use nori_hash::merkle_poseidon_fixed::MAX_TREE_DEPTH;
 use serde::{Deserialize, Serialize};
 
 // TODO FIX ME FIND A BETTER PLACE FOR THIS!
+#[deprecated(
+    note = "Superseded by the proof request queue storage layout (QUEUE_HEAD_STORAGE_INDEX, QUEUE_REQUESTS_STORAGE_INDEX). Only referenced by the deprecated legacy storage slot path."
+)]
 pub const SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX: u8 = 2u8;
 
+#[deprecated(
+    note = "Superseded by the proof request queue types (QueueStorage, QueueEntryProof, TargetStorageProof). Only used by the deprecated verify_storage_slot_proofs path."
+)]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct StorageSlot {
     pub key: B256, // raw 32 byte storage slot key e.g. for slot 0: 0x000...00
@@ -18,6 +24,10 @@ pub struct StorageSlot {
     pub mpt_proof: Vec<Bytes>, // contract-specific MPT proof
 }
 
+#[deprecated(
+    note = "Superseded by QueueStorage, along with the StorageSlot entries it holds. Only used by the deprecated verify_storage_slot_proofs path."
+)]
+#[allow(deprecated)]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ContractStorage {
     pub address: Address,
@@ -148,6 +158,9 @@ pub struct ExecutionStateProof {
 }
 
 // TODO do we need the contract address here.
+#[deprecated(
+    note = "Superseded by VerifiedRequest in the proof request queue path. No remaining references."
+)]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct VerifiedContractStorageSlot {
     pub slot_key_code_challenge: U256,
@@ -332,6 +345,8 @@ impl ConsensusProofOutputs {
 //
 // Shared by the guest, which derives the keys it verifies, and the host, which
 // fetches those same keys over RPC.
+//
+// FIXME(request-queue): these functions are not types and are misplaced. Move them to a new sibling module, storage_layout.rs.
 // -----------------------------------------------------------------------------
 
 /// Storage slot of a value-type state variable declared at `index`.

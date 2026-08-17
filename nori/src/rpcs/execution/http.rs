@@ -35,6 +35,9 @@ const EXECUTION_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
 pub struct ExecutionHttpProxy<S: ConsensusSpec> {
     principal_provider: RootProvider<Ethereum>,
     backup_providers: Vec<RootProvider<Ethereum>>,
+    #[deprecated(
+        note = "Superseded by the proof request queue; only read by the deprecated source-contract event path. The prover anchors on proof_queue_address."
+    )]
     source_state_bridge_contract_address: Address,
     proof_queue_address: Address,
     _marker: PhantomData<S>,
@@ -92,6 +95,8 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
         let principal_provider = providers.remove(0);
 
+        // FIXME(request-queue): only the superseded event path reads this field.
+        // Remove this line and the field once that path is deleted.
         let source_state_bridge_contract_address = get_source_contract_address()?;
         let proof_queue_address = get_proof_queue_address()?;
 
@@ -109,6 +114,9 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         ExecutionHttpProxy::from_env().unwrap()
     }
 
+    #[deprecated(
+        note = "Superseded by the proof request queue; the host reads queue storage directly instead of scanning TokensLocked events. No longer used in the proving path."
+    )]
     async fn _get_source_contract_event_chunk<T>(
         provider: &RootProvider<Ethereum>,
         source_state_bridge_contract_address: &Address,
@@ -136,6 +144,10 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         Ok(events)
     }
 
+    #[deprecated(
+        note = "Superseded by the proof request queue, which reads queue storage directly instead of scanning TokensLocked events. No longer used in the proving path."
+    )]
+    #[allow(deprecated)]
     async fn _get_source_contract_events<T>(
         provider: &RootProvider<Ethereum>,
         source_state_bridge_contract_address: &Address,
@@ -191,6 +203,36 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         Ok(all_events)
     }
 
+    // This is the bulk eth_getProof helper: it forwards storage_keys.len() keys
+    // in one request with no chunking or cap. Two distinct RPC concerns apply.
+    //
+    // FIXME(request-queue): request batching. The queue caller can pass up to
+    // 1 + MAX_BATCH * QUEUE_ENTRY_WORDS = 327,681 keys, roughly a 20 MB JSON
+    // body, far over what vendors accept.
+    //   Request size, what vendors allow:
+    //     Chainstack: request body capped at 1 MB.
+    //       https://docs.chainstack.com/docs/limits
+    //     Infura and general JSON-RPC: batch payload near 1 MB.
+    //       https://docs.infura.io/api/networks/ethereum/json-rpc-methods
+    //     Alchemy: 1000 requests per JSON-RPC batch over HTTP.
+    //       https://www.alchemy.com/docs/reference/batch-requests
+    //   Request size, recommendation:
+    //     Ethereum execution-apis issue 752 (eth_getStorageValues) proposes a
+    //     default cap of 1024 storage slots per bulk request.
+    //       https://github.com/ethereum/execution-apis/issues/752
+    //   Rate limits, what vendors allow:
+    //     Chainstack: plan RPS tier is 25, 100, 250, 500, or 1000 RPS (Enterprise
+    //       unlimited); 1000 requests per HTTP connection; 500 open HTTP
+    //       connections. https://docs.chainstack.com/docs/limits
+    //     Infura: returns HTTP 429 when rate limited.
+    //       https://docs.infura.io/api/networks/ethereum/json-rpc-methods
+    //   Action: chunk storage_keys, then pace the chunks under the RPS tier.
+    //
+    // FIXME(request-queue): historical state. Proving an old block needs an
+    //   archive node, and eth_getProof history is itself capped by some backends.
+    //     Chainstack: on Erigon eth_getProof reaches 100,000 blocks back,
+    //       unbounded on Geth.
+    //       https://docs.chainstack.com/docs/deep-dive-into-merkle-proofs-and-eth-getproof-ethereum-rpc-method
     async fn _get_proof(
         provider: &RootProvider<Ethereum>,
         address: &Address,
@@ -506,6 +548,10 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         Ok(output_with_blocks)
     }
 
+    #[deprecated(
+        note = "Superseded by the proof request queue, which reads queue storage directly instead of scanning TokensLocked events. No longer used in the proving path."
+    )]
+    #[allow(deprecated)]
     pub async fn get_source_contract_events<T>(
         &self,
         start_block: u64,

@@ -13,7 +13,8 @@ pub async fn benchmark_finality_update(
     let consensus_client = ConsensusHttpProxy::<MainnetConsensusSpec, HttpRpc>::try_from_env();
 
     let proof_inputs_with_window = consensus_client
-        .prepare_consensus_mpt_proof_inputs(input_head, store_hash, false)
+        // request cursor 0: drain the queue from its start for a self-contained benchmark
+        .prepare_consensus_mpt_proof_inputs(input_head, store_hash, 0, false)
         .await
         .unwrap();
 

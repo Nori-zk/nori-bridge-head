@@ -19,6 +19,9 @@ pub fn get_proof_queue_address() -> Result<Address> {
     Ok(proof_queue_address)
 }
 
+#[deprecated(
+    note = "Superseded by the proof request queue; the prover anchors on NORI_PROOF_QUEUE_ADDRESS (get_proof_queue_address). Its result now only feeds the deprecated source-contract event path."
+)]
 pub fn get_source_contract_address() -> Result<Address> {
     let source_state_bridge_contract_address = env::var("NORI_TOKEN_BRIDGE_ADDRESS")
         .context("Missing NORI_TOKEN_BRIDGE_ADDRESS in environment")?
@@ -27,6 +30,10 @@ pub fn get_source_contract_address() -> Result<Address> {
     Ok(source_state_bridge_contract_address)
 }
 
+#[deprecated(
+    note = "Superseded by the proof request queue, which derives each slot at enqueue time on Ethereum. No longer used in the proving path."
+)]
+#[allow(deprecated)]
 pub fn code_challenge_to_storage_slots(
     locked_token_event: Vec<Log<TokensLocked>>,
 ) -> HashMap<B256, U256> {
@@ -69,6 +76,7 @@ mod tests {
 
 // https://www.rareskills.io/post/solidity-dynamic
 // "Now let’s show a code example of getting nested array value from storage using assembly"
+// FIXME(request-queue): move this to the nori-primitives crate in the new storage_layout file.
 #[test]
 fn test_single_mapping_storage_slot() {
     use alloy::hex;

@@ -53,12 +53,14 @@ pub enum MptError {
         reason: String,
     },
     /// Only produced by the superseded `verify_storage_slot_proofs`.
+    #[deprecated(note = "Only produced by the deprecated verify_storage_slot_proofs path.")]
     InvalidStorageSlotCodeChallengeMapping {
         slot_key: B256,
         code_challenge: U256,
         computed_code_challenge_slot_key: B256,
     },
     /// Only produced by the superseded `verify_storage_slot_proofs`.
+    #[deprecated(note = "Only produced by the deprecated verify_storage_slot_proofs path.")]
     MerkleHashError {
         code_challenge: U256,
         value: Uint<256, 4>,
@@ -120,6 +122,8 @@ impl fmt::Display for MptError {
                 value,
                 reason
             ),
+            // Deprecated: only produced by the superseded verify_storage_slot_proofs.
+            #[allow(deprecated)]
             MptError::InvalidStorageSlotCodeChallengeMapping {slot_key, code_challenge, computed_code_challenge_slot_key} => write!(
                 f,
                 "MPT invalid storage slot code challenge, expected {:?}, but for code_challenge '{:?}' this slot '{:?}' was computed",
@@ -127,6 +131,8 @@ impl fmt::Display for MptError {
                 code_challenge,
                 computed_code_challenge_slot_key
             ),
+            // Deprecated: only produced by the superseded verify_storage_slot_proofs.
+            #[allow(deprecated)]
             MptError::MerkleHashError { code_challenge, value , reason} => write!(
                 f,
                 "MPT error computing merkle hash of verified slots, code_challenge {:?} and value {:?}: {:?}",
@@ -444,6 +450,7 @@ pub fn verify_queue(
 #[deprecated(
     note = "Superseded by verify_queue. The prover supplies the storage keys here, so the committed root is not constrained to be complete."
 )]
+#[allow(deprecated)]
 pub fn verify_storage_slot_proofs(
     execution_state_root: FixedBytes<32>,
     contract_storage: ContractStorage,

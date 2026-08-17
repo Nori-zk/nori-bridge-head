@@ -8,6 +8,17 @@ use mina_poseidon::{
 };
 use o1_utils::FieldHelpers;
 
+// FIXME(request-queue): this depth also drives MAX_BATCH (nori-primitives) =
+// 2^MAX_TREE_DEPTH, the cap on queue entries N a single proof may cover. Each
+// entry makes the SP1 guest run verify_storage_word on its QUEUE_ENTRY_WORDS
+// words plus one target slot, and each distinct target adds one verify_account.
+// So the MPT proofs one SP1 job must verify is:
+//     2 + N * (QUEUE_ENTRY_WORDS + 1) + T,   with 1 <= T <= N distinct targets
+// that is a fixed 2 (queue account and head), plus QUEUE_ENTRY_WORDS + 1 = 6 per
+// entry, plus T target accounts. Worst case T = N gives 2 + 7N. At
+// MAX_TREE_DEPTH = 16, N = 65,536 and that is 458,754 MPT verifications in one
+// job, far beyond a single SP1 proof's cycle and memory budget. Size this depth
+// to what one SP1 proof can actually verify.
 pub const MAX_TREE_DEPTH: usize = 16;
 const N_MERKLE_ZEROS: usize = MAX_TREE_DEPTH + 1;
 const MERKLE_ZEROS: &[u8; N_MERKLE_ZEROS * 32] = include_bytes!("merkle-zeros.dat");
@@ -430,6 +441,9 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
 /// let value = U256::from_be_hex("0xabcdef...");
 /// let leaf_hash = hash_storage_slot(&code_challenge, &value).unwrap();
 /// ```
+#[deprecated(
+    note = "Superseded by hash_request_leaf (proof request queue leaf packing). Retained only for the deprecated verify_storage_slot_proofs path until the Mina-side cutover."
+)]
 pub fn hash_storage_slot(
     code_challenge: &U256,
     value: &U256,
@@ -707,7 +721,16 @@ mod merkle_fixed_tests {
         U256::from_be_bytes(bytes)
     }
 
-    // Build leaf hashes from given (code_challenge, value) pairs
+    // Build leaf hashes from given (code_challenge, value) pairs.
+    //
+    // FIXME(request-queue): broken. This calls the deprecated hash_storage_slot
+    // (the old 2 field leaf). The live leaf is hash_request_leaf(target, count,
+    // key0, key1, value). This helper exists only to feed the Merkle
+    // build/fold/path tests below (test_large_slots and
+    // test_all_leaf_counts_and_indices_with_build_and_fold), whose real coverage
+    // is the tree machinery rather than the leaf. Regenerate the dummy inputs as
+    // request leaf arguments and call hash_request_leaf here, so that coverage
+    // moves onto the current leaf format. Do not simply delete these tests.
     fn build_leaves(pairs: &[(U256, U256)]) -> Result<Vec<Fp>> {
         let mut leaves = Vec::with_capacity(pairs.len());
         for (code_challenge, val) in pairs {
@@ -750,6 +773,10 @@ mod merkle_fixed_tests {
         println!("Root {:?}", root.to_biguint());
         Ok(())
     }
+    // FIXME(request-queue): broken. This exercises the deprecated
+    // hash_storage_slot. Adapt it to hash_request_leaf(target, count, key0,
+    // key1, value), carrying the fixed input vector and result assertion over to
+    // the new leaf format so the coverage is preserved.
     #[test]
     fn rarg_test_hash_storage_slot() {
         // Provided hex strings (without 0x prefix)
@@ -815,6 +842,10 @@ mod merkle_fixed_tests {
         full_merkle_test(&pairs, 543)
     }
 
+    // FIXME(request-queue): broken. This exercises the deprecated
+    // hash_storage_slot. Adapt it to hash_request_leaf(target, count, key0,
+    // key1, value), keeping the non zero leaf assertion so the coverage is
+    // preserved on the new leaf format.
     #[test]
     fn test_hash_storage_slot_basic() -> Result<()> {
         let code_challenge = dummy_code_challenge(2);
