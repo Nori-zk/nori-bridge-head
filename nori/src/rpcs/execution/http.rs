@@ -354,19 +354,16 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         provider: &RootProvider<Ethereum>,
         proof_queue_address: &Address,
         input_queue_cursor: u64,
-        output_block_number: u64,
+        output_block_number: u64, // FIXME possible bug this is the expected output block of the window post helios updates are applied
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
+        output_execution_state_root: FixedBytes<32>,
     ) -> Result<ProofInputs<S>> {
         let block = BlockId::number(output_block_number);
-        let execution_state_root = validated_consensus_proof_inputs
-            .store
-            .finalized_header
-            .execution()
-            .map_err(|e| anyhow!("Finalized header has no execution payload: {e:?}"))?
-            .state_root()
-            .to_owned();
 
         // 1. Queue head, and the batch it derives with the cursor.
+        // THIS block here needs to be the start of the window
+        // otherwise within a batch as the head progresses due to multiple
+        // deposits the head advances we care about the head at the start of the window
         let queue_head_key = storage_slot_of_index(QUEUE_HEAD_STORAGE_INDEX);
         let queue_head = Self::_get_queue_head(provider, proof_queue_address, block).await?;
 
@@ -453,7 +450,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         for (address, slot_keys) in slots_by_target {
             let target_proof =
                 Self::_get_proof(provider, &address, slot_keys.clone(), block).await?;
-            let account = Self::_account_witness(&target_proof, execution_state_root)?;
+            let account = Self::_account_witness(&target_proof, output_execution_state_root)?;
 
             let proved: HashMap<B256, (U256, Vec<Bytes>)> = target_proof
                 .storage_proof
@@ -540,6 +537,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         input_queue_cursor: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
         expected_output_store_hash: FixedBytes<32>,
+        expected_execution_state_root: FixedBytes<32>,
     ) -> Result<ProofInputsWithWindow<S>> {
         let proof_queue_address = self.proof_queue_address;
         let output = query_with_fallback(
@@ -555,6 +553,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                         input_queue_cursor,
                         output_block_number,
                         validated_consensus_proof_inputs,
+                        expected_execution_state_root
                     )
                     .await
                 }

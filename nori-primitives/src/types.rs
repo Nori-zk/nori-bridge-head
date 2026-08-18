@@ -191,16 +191,17 @@ pub struct ProofOutputs {
     pub next_sync_committee_hash: B256,             // [144..176] bytes32
     /// NoriProofRequestQueue address; the account every storage proof anchors on.
     pub proof_request_queue_address: Address,       // [176..196] bytes20
-    pub genesis_root: B256,                         // [196..228] bytes32
     /// Cursor this proof resumed from; the destination chain asserts it matches
     /// the cursor it has stored.
-    pub input_queue_cursor: u64,                    // [228..236] u64
+    pub input_queue_cursor: u64,                    // [196..204] u64
     /// Cursor after draining this batch.
-    pub output_queue_cursor: u64,                   // [236..244] u64
+    pub output_queue_cursor: u64,                   // [204..212] u64
+    /// Execution block number of the finalized output header.
+    pub output_block_number: u64,                   // [212..220] u64
 }
 
 impl ProofOutputs {
-    pub const SIZE: usize = 244;
+    pub const SIZE: usize = 220;
 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut buf = [0u8; Self::SIZE];
@@ -213,9 +214,9 @@ impl ProofOutputs {
         buf[112..144].copy_from_slice(&self.verified_contract_storage_slots_root.0);
         buf[144..176].copy_from_slice(&self.next_sync_committee_hash.0);
         buf[176..196].copy_from_slice(self.proof_request_queue_address.as_slice()); // BE
-        buf[196..228].copy_from_slice(&self.genesis_root.0);
-        buf[228..236].copy_from_slice(&self.input_queue_cursor.to_be_bytes());
-        buf[236..244].copy_from_slice(&self.output_queue_cursor.to_be_bytes());
+        buf[196..204].copy_from_slice(&self.input_queue_cursor.to_be_bytes());
+        buf[204..212].copy_from_slice(&self.output_queue_cursor.to_be_bytes());
+        buf[212..220].copy_from_slice(&self.output_block_number.to_be_bytes());
 
         buf
     }
@@ -247,17 +248,21 @@ impl ProofOutputs {
         let verified_contract_storage_slots_root = B256::from_slice(&bytes[112..144]);
         let next_sync_committee_hash = B256::from_slice(&bytes[144..176]);
         let proof_request_queue_address = Address::from_slice(&bytes[176..196]);
-        let genesis_root = B256::from_slice(&bytes[196..228]);
 
-        let input_queue_cursor_bytes: [u8; 8] = bytes[228..236]
+        let input_queue_cursor_bytes: [u8; 8] = bytes[196..204]
             .try_into()
             .context("Failed to parse input_queue_cursor bytes")?;
         let input_queue_cursor = u64::from_be_bytes(input_queue_cursor_bytes);
 
-        let output_queue_cursor_bytes: [u8; 8] = bytes[236..244]
+        let output_queue_cursor_bytes: [u8; 8] = bytes[204..212]
             .try_into()
             .context("Failed to parse output_queue_cursor bytes")?;
         let output_queue_cursor = u64::from_be_bytes(output_queue_cursor_bytes);
+
+        let output_block_number_bytes: [u8; 8] = bytes[212..220]
+            .try_into()
+            .context("Failed to parse output_block_number bytes")?;
+        let output_block_number = u64::from_be_bytes(output_block_number_bytes);
 
         Ok(Self {
             input_slot,
@@ -268,9 +273,9 @@ impl ProofOutputs {
             verified_contract_storage_slots_root,
             next_sync_committee_hash,
             proof_request_queue_address,
-            genesis_root,
             input_queue_cursor,
             output_queue_cursor,
+            output_block_number,
         })
     }
 }
@@ -398,9 +403,9 @@ mod proof_outputs_tests {
             verified_contract_storage_slots_root: B256::repeat_byte(0x44),
             next_sync_committee_hash: B256::repeat_byte(0x55),
             proof_request_queue_address: Address::repeat_byte(0x66),
-            genesis_root: B256::repeat_byte(0x77),
             input_queue_cursor: 3,
             output_queue_cursor: 9,
+            output_block_number: 12345,
         }
     }
 
@@ -412,15 +417,17 @@ mod proof_outputs_tests {
         let decoded = ProofOutputs::from_bytes(&bytes).unwrap();
         assert_eq!(decoded.input_queue_cursor, 3);
         assert_eq!(decoded.output_queue_cursor, 9);
+        assert_eq!(decoded.output_block_number, 12345);
         assert_eq!(decoded.to_bytes(), bytes);
     }
 
     /// The destination chain verifier reads these offsets, so they are part of the contract.
     #[test]
-    fn cursors_occupy_the_final_sixteen_bytes() {
+    fn cursors_and_block_number_occupy_the_final_twenty_four_bytes() {
         let bytes = sample().to_bytes();
-        assert_eq!(&bytes[228..236], &3u64.to_be_bytes());
-        assert_eq!(&bytes[236..244], &9u64.to_be_bytes());
+        assert_eq!(&bytes[196..204], &3u64.to_be_bytes());
+        assert_eq!(&bytes[204..212], &9u64.to_be_bytes());
+        assert_eq!(&bytes[212..220], &12345u64.to_be_bytes());
     }
 
     #[test]

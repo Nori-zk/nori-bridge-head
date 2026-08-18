@@ -339,7 +339,7 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    - Pack `ProofOutputs` committing: `input_slot`, `input_store_hash`,
 ///      `output_slot`, `output_store_hash`, `execution_state_root`,
 ///      `verified_contract_storage_slots_root`, `next_sync_committee_hash`,
-///      `contract_address`, `genesis_root`
+///      `contract_address`, `output_block_number`
 ///
 /// # Outputs (All Values Are Hash Commitments)
 /// | Field                                  | Type      | Description                                     |
@@ -352,7 +352,7 @@ pub fn consensus_program<S: ConsensusSpec>(
 /// | `verified_contract_storage_slots_root` | `B256`    | Merkle root of verified storage slots           |
 /// | `next_sync_committee_hash`             | `B256`    | Hash of the next sync committee state (or zero) |
 /// | `contract_address`                     | `Address` | Ethereum contract address (20 bytes, BE)        |
-/// | `genesis_root`                         | `B256`    | Genesis validators root                         |
+/// | `output_block_number`                  | `u64`     | Execution block number of finalized output      |
 ///
 /// # Error Conditions
 /// 1. **Store Hashing Error**
@@ -491,6 +491,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     }
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
+    let output_block_number = *execution.block_number();
     if debug_print {
         println!("Verifying proof request queue.");
     }
@@ -546,9 +547,9 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         verified_contract_storage_slots_root,
         next_sync_committee_hash,
         proof_request_queue_address,
-        genesis_root,
         input_queue_cursor,
         output_queue_cursor,
+        output_block_number,
     };
     if debug_print {
         println!("Packed outputs.");

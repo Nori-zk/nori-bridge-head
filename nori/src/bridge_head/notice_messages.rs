@@ -75,7 +75,6 @@ pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
     pub verified_contract_storage_slots_root: FixedBytes<32>,
     pub next_sync_committee_hash: FixedBytes<32>,
     pub proof_request_queue_address: alloy_primitives::Address,
-    pub genesis_root: FixedBytes<32>,
     pub verified_requests: Vec<VerifiedRequest>,
     pub elapsed_sec: f64,
 }

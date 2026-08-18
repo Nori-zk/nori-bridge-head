@@ -520,7 +520,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     ) -> Result<ProofInputsWithWindow<S>> {
         // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
         // Deserves it own location
-        let (input_slot, output_slot, validated_consensus_proof_inputs, expected_output_store_hash) = multiplex(
+        let (input_slot, output_slot, validated_consensus_proof_inputs, expected_output_store_hash, expected_execution_state_root) = multiplex(
             |url| {
                 async move {
                     // Fetch proof_inputs
@@ -530,13 +530,16 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                     .await?;
 
                     // Run the CPU-heavy program and slot validation inside spawn_blocking
-                    let (output_slot, validated_proof_inputs, expected_output_store_hash) =
+                    let (output_slot, validated_proof_inputs, expected_output_store_hash, expected_execution_state_root) =
                         tokio::task::spawn_blocking(move || {
                             // Run program logic
                             let proof_outputs = consensus_program(consensus_proof_inputs.clone())?;
 
                             // Convert newHead to u64
                             let output_slot = proof_outputs.output_slot;
+
+                                                       
+                            let expected_execution_state_root=  proof_outputs.execution_state_root; // LOOK HERE THIS IS THE EXECUTION STATE ROOT AT THE END OF THE WINDOW THAT WE WILL HAVE AFTER RUNNING THE CONSENSUS PROGRAM
 
                             // Validate progression
                             if validate && output_slot <= input_slot {
@@ -566,7 +569,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                                 ));
                             }
 
-                            Ok((output_slot, consensus_proof_inputs, proof_outputs.output_store_hash))
+                            Ok((output_slot, consensus_proof_inputs, proof_outputs.output_store_hash, expected_execution_state_root))
                         })
                         .await??;
 
@@ -582,7 +585,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                         }
 
 
-                    Ok((input_slot, output_slot, validated_proof_inputs, expected_output_store_hash))
+                    Ok((input_slot, output_slot, validated_proof_inputs, expected_output_store_hash, expected_execution_state_root))
                 }
                 .boxed()
             },
@@ -618,7 +621,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                 finalized_output_block_number,
                 input_queue_cursor,
                 validated_consensus_proof_inputs,
-                expected_output_store_hash
+                expected_output_store_hash,
+                expected_execution_state_root,
             )
             .await?;
 
