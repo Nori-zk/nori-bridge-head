@@ -395,7 +395,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     // The queue is the account the storage proofs anchor on, so it is the
     // address committed to the destination chain.
     let proof_request_queue_address = queue_storage.proof_request_queue_address;
-    let input_request_cursor = queue_storage.input_cursor;
+    let input_queue_cursor = queue_storage.input_cursor;
     // @AUDIT - We should consider whether we want to enforce that there are no best valid updates in the store here.
     // 0. we should not proceed if we have a best valid update in our store
     // as we have a next_sync_committe non zero assertion in the verifier contract on Mina
@@ -494,13 +494,13 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     if debug_print {
         println!("Verifying proof request queue.");
     }
-    let (output_request_cursor, verified_contract_storage_slots_root) =
+    let (output_queue_cursor, verified_contract_storage_slots_root) =
         verify_queue(execution_state_root, queue_storage)
             .map_err(ProgramError::MptError)?;
     if debug_print {
         println!(
             "Proof request queue is valid, cursor {} -> {}.",
-            input_request_cursor, output_request_cursor
+            input_queue_cursor, output_queue_cursor
         );
     }
 
@@ -547,8 +547,8 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         next_sync_committee_hash,
         proof_request_queue_address,
         genesis_root,
-        input_request_cursor,
-        output_request_cursor,
+        input_queue_cursor,
+        output_queue_cursor,
     };
     if debug_print {
         println!("Packed outputs.");

@@ -13,7 +13,7 @@ pub struct NoriBridgeCheckpoint {
     /// Queue cursor settled on the destination chain at `slot`. Defaults to 0 so checkpoints
     /// written before the proof request queue still load.
     #[serde(default)]
-    pub request_cursor: u64,
+    pub queue_cursor: u64,
 }
 
 /// Static method to check if the checkpoint file exists
@@ -39,7 +39,7 @@ pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
 }
 
 /// Static method to save a checkpoint file
-pub fn save_nb_checkpoint(slot: u64, store_hash: FixedBytes<32>, request_cursor: u64) {
+pub fn save_nb_checkpoint(slot: u64, store_hash: FixedBytes<32>, queue_cursor: u64) {
     info!("Saving checkpoint.");
 
     // Create dir if nessesary
@@ -52,7 +52,7 @@ pub fn save_nb_checkpoint(slot: u64, store_hash: FixedBytes<32>, request_cursor:
     let checkpoint = NoriBridgeCheckpoint {
         slot,
         store_hash,
-        request_cursor
+        queue_cursor
     };
 
     // Serialize the checkpoint to a byte vector

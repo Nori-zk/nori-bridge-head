@@ -48,7 +48,7 @@ pub struct ProofMessage {
     pub genesis_root: FixedBytes<32>,
     pub verified_requests: Vec<VerifiedRequest>,
     /// Queue cursor after this proof settles.
-    pub output_request_cursor: u64,
+    pub output_queue_cursor: u64,
     pub elapsed_sec: f64,
 }
 
@@ -230,7 +230,7 @@ impl BridgeHead {
         let expected_output_store_hash = proof_inputs_with_window.expected_output_store_hash;
         // This job drains its whole batch, so the cursor it will settle at is
         // the one it started from plus the entries it covers.
-        let expected_output_request_cursor = proof_inputs_with_window
+        let expected_output_queue_cursor = proof_inputs_with_window
             .proof_inputs
             .queue_storage
             .input_cursor
@@ -271,7 +271,7 @@ impl BridgeHead {
             .send(FinalityChangeDetectorUpdate {
                 slot: expected_output_slot,
                 store_hash: expected_output_store_hash,
-                request_cursor: expected_output_request_cursor,
+                queue_cursor: expected_output_queue_cursor,
             })
             .await?;
 
@@ -400,7 +400,7 @@ impl BridgeHead {
                 proof_request_queue_address: proof_outputs.proof_request_queue_address,
                 genesis_root: proof_outputs.genesis_root,
                 verified_requests,
-                output_request_cursor: proof_outputs.output_request_cursor,
+                output_queue_cursor: proof_outputs.output_queue_cursor,
                 elapsed_sec,
             })
             .await?;
@@ -512,7 +512,7 @@ impl BridgeHead {
     // Event loop
     // ================================================================================================
 
-    pub async fn run(mut self, current_slot: u64, store_hash: FixedBytes<32>, request_cursor: u64, pipeline_inflight_next_expected_output: Option<FinalityChangeDetectorUpdate>) {
+    pub async fn run(mut self, current_slot: u64, store_hash: FixedBytes<32>, queue_cursor: u64, pipeline_inflight_next_expected_output: Option<FinalityChangeDetectorUpdate>) {
         // Extract the Sp1 config from envs and wrap it in an Arc so we can share it
         let sp1_config = Arc::new(
             ProverConfig::from_env()
@@ -536,7 +536,7 @@ impl BridgeHead {
             consensus_http_proxy,
             current_slot,
             store_hash,
-            request_cursor,
+            queue_cursor,
             pipeline_inflight_next_expected_output,
         )
         .await;
@@ -595,7 +595,7 @@ impl BridgeHead {
                             Command::Advance(message) => {
                                 // Notify finality change detector of a change to the head position
                                 // message.slot is the output slot which was finalised
-                                if let Err(err) = finality_advance_input_tx.send(FinalityChangeDetectorUpdate {slot: message.slot, store_hash: message.store_hash, request_cursor: message.request_cursor}).await {
+                                if let Err(err) = finality_advance_input_tx.send(FinalityChangeDetectorUpdate {slot: message.slot, store_hash: message.store_hash, queue_cursor: message.queue_cursor}).await {
                                     error!("Bridge Head API Error: Failed to notify finality detector of head advancement: {:?}", err);
                                     break;
                                 }

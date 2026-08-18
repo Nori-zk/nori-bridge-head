@@ -9,7 +9,7 @@ pub struct AdvanceMessage {
     pub slot: u64,
     pub store_hash: FixedBytes<32>,
     /// Queue cursor the destination chain stored for the settled update.
-    pub request_cursor: u64,
+    pub queue_cursor: u64,
 }
 
 pub enum Command {
@@ -46,14 +46,14 @@ impl CommandHandle {
         &self,
         slot: u64,
         store_hash: FixedBytes<32>,
-        request_cursor: u64,
+        queue_cursor: u64,
     ) -> Result<(), SendError<Command>> {
         return self
             .command_tx
             .send(Command::Advance(AdvanceMessage {
                 slot,
                 store_hash,
-                request_cursor,
+                queue_cursor,
             }))
             .await;
     }

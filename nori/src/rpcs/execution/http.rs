@@ -264,6 +264,37 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             .map_err(|e| anyhow!("ExecutionHttp RPC error reading storage: {e}"))
     }
 
+    /// Reads the proof request queue `head` at `block` on the given provider, so
+    /// a caller assembling one preparation reads it from the same provider as the
+    /// rest of its reads.
+    async fn _get_queue_head(
+        provider: &RootProvider<Ethereum>,
+        proof_queue_address: &Address,
+        block: BlockId,
+    ) -> Result<u64> {
+        let head_key = storage_slot_of_index(QUEUE_HEAD_STORAGE_INDEX);
+        Self::_get_storage_word(provider, proof_queue_address, head_key, block)
+            .await?
+            .try_into()
+            .map_err(|_| anyhow!("Queue head exceeds u64"))
+    }
+
+    /// Reads the proof request queue `head` at `block`, with provider fallback,
+    /// for standalone callers that have no provider of their own.
+    pub async fn get_queue_head(&self, block: BlockId) -> Result<u64> {
+        let proof_queue_address = self.proof_queue_address;
+        query_with_fallback(
+            &self.principal_provider,
+            &self.backup_providers,
+            |provider| {
+                async move { Self::_get_queue_head(&provider, &proof_queue_address, block).await }
+                    .boxed()
+            },
+            EXECUTION_PROVIDER_TIMEOUT,
+        )
+        .await
+    }
+
     /// Decides whether an account exists by verifying its proof both ways.
     ///
     /// Clients disagree on what an absent account looks like in an
@@ -312,7 +343,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         Ok(None)
     }
 
-    /// Builds the queue witness for the batch `[input_cursor, head)`.
+    /// Builds the queue witness for entries `queue_cursor` up to `head`, exclusive of `head`.
     ///
     /// The key set is not chosen here: `head` is read from queue storage,
     /// entry locations are derived from their index, and each entry names its
@@ -322,7 +353,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
     async fn _prepare_consensus_mpt_proof_inputs(
         provider: &RootProvider<Ethereum>,
         proof_queue_address: &Address,
-        input_cursor: u64,
+        input_queue_cursor: u64,
         output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
     ) -> Result<ProofInputs<S>> {
@@ -336,25 +367,22 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             .to_owned();
 
         // 1. Queue head, and the batch it derives with the cursor.
-        let head_key = storage_slot_of_index(QUEUE_HEAD_STORAGE_INDEX);
-        let head: u64 = Self::_get_storage_word(provider, proof_queue_address, head_key, block)
-            .await?
-            .try_into()
-            .map_err(|_| anyhow!("Queue head exceeds u64"))?;
+        let queue_head_key = storage_slot_of_index(QUEUE_HEAD_STORAGE_INDEX);
+        let queue_head = Self::_get_queue_head(provider, proof_queue_address, block).await?;
 
-        if input_cursor > head {
+        if input_queue_cursor > queue_head {
             return Err(anyhow!(
-                "Request cursor {input_cursor} is ahead of queue head {head}"
+                "Request cursor {input_queue_cursor} is ahead of queue head {queue_head}"
             ));
         }
-        let batch = std::cmp::min(head - input_cursor, MAX_BATCH as u64);
-        debug!("Queue head {head}, cursor {input_cursor}, batch {batch}");
+        let batch = std::cmp::min(queue_head - input_queue_cursor, MAX_BATCH as u64);
+        debug!("Queue head {queue_head}, cursor {input_queue_cursor}, batch {batch}");
 
         // 2. Entry fields, read from their index-derived locations.
         let mut entry_word_keys: Vec<B256> = Vec::with_capacity(batch as usize * QUEUE_ENTRY_WORDS);
         for offset in 0..batch {
             let base = mapping_entry_location(
-                U256::from(input_cursor + offset),
+                U256::from(input_queue_cursor + offset),
                 QUEUE_REQUESTS_STORAGE_INDEX,
             );
             entry_word_keys.push(base);
@@ -369,7 +397,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         //    empty batch this is a single key: the proof that head == cursor,
         //    which the circuit still requires before it will commit an empty
         //    root.
-        let mut queue_keys = vec![head_key];
+        let mut queue_keys = vec![queue_head_key];
         queue_keys.extend(entry_word_keys.iter().copied());
         let queue_proof =
             Self::_get_proof(provider, proof_queue_address, queue_keys, block).await?;
@@ -466,9 +494,9 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                 code_hash: queue_proof.code_hash,
             },
             proof_request_queue_account_mpt_proof: queue_proof.account_proof,
-            head,
-            head_mpt_proof: word_at(&head_key)?.1,
-            input_cursor,
+            head: queue_head,
+            head_mpt_proof: word_at(&queue_head_key)?.1,
+            input_cursor: input_queue_cursor,
             entries,
             targets,
         };
@@ -509,7 +537,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         output_slot: u64,
         input_block_number: u64,
         output_block_number: u64,
-        input_request_cursor: u64,
+        input_queue_cursor: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
         expected_output_store_hash: FixedBytes<32>,
     ) -> Result<ProofInputsWithWindow<S>> {
@@ -524,7 +552,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                     Self::_prepare_consensus_mpt_proof_inputs(
                         &provider,
                         &proof_queue_address,
-                        input_request_cursor,
+                        input_queue_cursor,
                         output_block_number,
                         validated_consensus_proof_inputs,
                     )
@@ -536,6 +564,11 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         )
         .await?;
 
+        // Output cursor the proof will commit: the input cursor plus the entries
+        // this batch drains. entries.len() is the MAX_BATCH-capped batch, so this
+        // advances by at most MAX_BATCH.
+        let expected_output_queue_cursor =
+            input_queue_cursor + output.queue_storage.entries.len() as u64;
         let output_with_blocks = ProofInputsWithWindow::<S> {
             input_slot,
             expected_output_slot: output_slot,
@@ -543,6 +576,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             expected_output_block_number: output_block_number,
             proof_inputs: output,
             expected_output_store_hash,
+            expected_output_queue_cursor,
         };
 
         Ok(output_with_blocks)

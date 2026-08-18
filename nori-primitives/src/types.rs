@@ -128,7 +128,8 @@ pub struct ProofInputsWithWindow<S: ConsensusSpec> {
     pub input_block_number: u64,
     pub expected_output_block_number: u64,
     pub proof_inputs: ProofInputs<S>,
-    pub expected_output_store_hash: FixedBytes<32>
+    pub expected_output_store_hash: FixedBytes<32>,
+    pub expected_output_queue_cursor: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -193,9 +194,9 @@ pub struct ProofOutputs {
     pub genesis_root: B256,                         // [196..228] bytes32
     /// Cursor this proof resumed from; the destination chain asserts it matches
     /// the cursor it has stored.
-    pub input_request_cursor: u64,                  // [228..236] u64
+    pub input_queue_cursor: u64,                    // [228..236] u64
     /// Cursor after draining this batch.
-    pub output_request_cursor: u64,                 // [236..244] u64
+    pub output_queue_cursor: u64,                   // [236..244] u64
 }
 
 impl ProofOutputs {
@@ -213,8 +214,8 @@ impl ProofOutputs {
         buf[144..176].copy_from_slice(&self.next_sync_committee_hash.0);
         buf[176..196].copy_from_slice(self.proof_request_queue_address.as_slice()); // BE
         buf[196..228].copy_from_slice(&self.genesis_root.0);
-        buf[228..236].copy_from_slice(&self.input_request_cursor.to_be_bytes());
-        buf[236..244].copy_from_slice(&self.output_request_cursor.to_be_bytes());
+        buf[228..236].copy_from_slice(&self.input_queue_cursor.to_be_bytes());
+        buf[236..244].copy_from_slice(&self.output_queue_cursor.to_be_bytes());
 
         buf
     }
@@ -248,15 +249,15 @@ impl ProofOutputs {
         let proof_request_queue_address = Address::from_slice(&bytes[176..196]);
         let genesis_root = B256::from_slice(&bytes[196..228]);
 
-        let input_request_cursor_bytes: [u8; 8] = bytes[228..236]
+        let input_queue_cursor_bytes: [u8; 8] = bytes[228..236]
             .try_into()
-            .context("Failed to parse input_request_cursor bytes")?;
-        let input_request_cursor = u64::from_be_bytes(input_request_cursor_bytes);
+            .context("Failed to parse input_queue_cursor bytes")?;
+        let input_queue_cursor = u64::from_be_bytes(input_queue_cursor_bytes);
 
-        let output_request_cursor_bytes: [u8; 8] = bytes[236..244]
+        let output_queue_cursor_bytes: [u8; 8] = bytes[236..244]
             .try_into()
-            .context("Failed to parse output_request_cursor bytes")?;
-        let output_request_cursor = u64::from_be_bytes(output_request_cursor_bytes);
+            .context("Failed to parse output_queue_cursor bytes")?;
+        let output_queue_cursor = u64::from_be_bytes(output_queue_cursor_bytes);
 
         Ok(Self {
             input_slot,
@@ -268,8 +269,8 @@ impl ProofOutputs {
             next_sync_committee_hash,
             proof_request_queue_address,
             genesis_root,
-            input_request_cursor,
-            output_request_cursor,
+            input_queue_cursor,
+            output_queue_cursor,
         })
     }
 }
@@ -398,8 +399,8 @@ mod proof_outputs_tests {
             next_sync_committee_hash: B256::repeat_byte(0x55),
             proof_request_queue_address: Address::repeat_byte(0x66),
             genesis_root: B256::repeat_byte(0x77),
-            input_request_cursor: 3,
-            output_request_cursor: 9,
+            input_queue_cursor: 3,
+            output_queue_cursor: 9,
         }
     }
 
@@ -409,8 +410,8 @@ mod proof_outputs_tests {
         assert_eq!(bytes.len(), ProofOutputs::SIZE);
 
         let decoded = ProofOutputs::from_bytes(&bytes).unwrap();
-        assert_eq!(decoded.input_request_cursor, 3);
-        assert_eq!(decoded.output_request_cursor, 9);
+        assert_eq!(decoded.input_queue_cursor, 3);
+        assert_eq!(decoded.output_queue_cursor, 9);
         assert_eq!(decoded.to_bytes(), bytes);
     }
 

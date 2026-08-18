@@ -52,7 +52,7 @@ pub struct FinalityChangeDetectorUpdate {
     pub slot: u64,
     pub store_hash: FixedBytes<32>,
     /// Queue cursor at `slot`, advanced by each settled update.
-    pub request_cursor: u64,
+    pub queue_cursor: u64,
 }
 
 /// FinalityChangeDetector job input struct describing the window starts the detector worker must
@@ -82,7 +82,7 @@ pub struct FinalityChangeDetectorUpdate {
 pub struct FinalityChangeDetectorJobInput {
     pub slot: u64,
     pub store_hash: FixedBytes<32>,
-    pub request_cursor: u64,
+    pub queue_cursor: u64,
     pub next_expected_output: Option<FinalityChangeDetectorUpdate>,
 }
 
@@ -151,7 +151,7 @@ where
                 let current_res = consensus_http_proxy.prepare_consensus_mpt_proof_inputs(
                     job.slot,
                     job.store_hash,
-                    job.request_cursor,
+                    job.queue_cursor,
                     true,
                 );
 
@@ -159,7 +159,7 @@ where
                 let next_res = consensus_http_proxy.prepare_consensus_mpt_proof_inputs(
                     next_expected_output.slot,
                     next_expected_output.store_hash,
-                    next_expected_output.request_cursor,
+                    next_expected_output.queue_cursor,
                     true,
                 );
 
@@ -209,7 +209,7 @@ where
                 }
             } else {
                 let current_res = consensus_http_proxy
-                    .prepare_consensus_mpt_proof_inputs(job.slot, job.store_hash, job.request_cursor, true)
+                    .prepare_consensus_mpt_proof_inputs(job.slot, job.store_hash, job.queue_cursor, true)
                     .await;
 
                 let current_res = match current_res {
@@ -273,7 +273,7 @@ async fn try_start_validation_job(
     validation_job_tx: &mpsc::Sender<FinalityChangeDetectorJobInput>,
     slot: u64,
     store_hash: FixedBytes<32>,
-    request_cursor: u64,
+    queue_cursor: u64,
     next_expected_output: &Option<FinalityChangeDetectorUpdate>,
     in_flight: &mut bool,
 ) -> Result<(), ()> {
@@ -296,7 +296,7 @@ async fn try_start_validation_job(
     let job = FinalityChangeDetectorJobInput {
         slot,
         store_hash,
-        request_cursor,
+        queue_cursor,
         next_expected_output: filtered_next,
     };
 
@@ -380,7 +380,7 @@ pub async fn start_validated_consensus_finality_change_detector<S, R>(
     consensus_http_proxy: ConsensusHttpProxy<S, R>,
     mut slot: u64,
     mut store_hash: FixedBytes<32>,
-    mut request_cursor: u64,
+    mut queue_cursor: u64,
     // need an pipeline_inflight_output_slot to represent the end of the window slot of a proof that is currently being processed
     // by the pipeline if it exists such that we can compute windowed proof inputs from this as an input slot in case that the inflight
     // job succeeds
@@ -469,7 +469,7 @@ where
                         // Cache the update
                         slot = update.slot;
                         store_hash = update.store_hash;
-                        request_cursor = update.request_cursor;
+                        queue_cursor = update.queue_cursor;
                 
                         // Our last computed proof input was from a different input slot and thus is not really valid
                         // when the observer calls advance -> api advance gets called this is with the output slot of that proof
@@ -524,7 +524,7 @@ where
                             // Drop this result
                             stale = false;
                             // Immediately start an new proof validation job validation_job_tx.send(job)
-                            if try_start_validation_job(&validation_job_tx, slot, store_hash, request_cursor, &next_expected_output, &mut in_flight).await.is_err() {
+                            if try_start_validation_job(&validation_job_tx, slot, store_hash, queue_cursor, &next_expected_output, &mut in_flight).await.is_err() {
                                 error!("Finality Transition Detector Actor: Failed to start validation job for stale result retry.");
                                 break;
                             }
@@ -592,7 +592,7 @@ where
 
                 // Tick event - try to start validation if none in-flight
                 _ = tick_interval.tick() => {
-                    if !in_flight && try_start_validation_job(&validation_job_tx, slot, store_hash, request_cursor, &next_expected_output, &mut in_flight).await.is_err() {
+                    if !in_flight && try_start_validation_job(&validation_job_tx, slot, store_hash, queue_cursor, &next_expected_output, &mut in_flight).await.is_err() {
                         error!("Finality Transition Detector Actor: Failed to start validation job during polling tick.");
                         break;
                     }
