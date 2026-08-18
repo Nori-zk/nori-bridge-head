@@ -354,16 +354,15 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         provider: &RootProvider<Ethereum>,
         proof_queue_address: &Address,
         input_queue_cursor: u64,
-        output_block_number: u64, // FIXME possible bug this is the expected output block of the window post helios updates are applied
+        output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
         output_execution_state_root: FixedBytes<32>,
     ) -> Result<ProofInputs<S>> {
+        // Every read is pinned to the window's output block, the block whose state
+        // root the guest verifies them against.
         let block = BlockId::number(output_block_number);
 
         // 1. Queue head, and the batch it derives with the cursor.
-        // THIS block here needs to be the start of the window
-        // otherwise within a batch as the head progresses due to multiple
-        // deposits the head advances we care about the head at the start of the window
         let queue_head_key = storage_slot_of_index(QUEUE_HEAD_STORAGE_INDEX);
         let queue_head = Self::_get_queue_head(provider, proof_queue_address, block).await?;
 

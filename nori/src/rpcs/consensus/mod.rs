@@ -538,8 +538,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                             // Convert newHead to u64
                             let output_slot = proof_outputs.output_slot;
 
-                                                       
-                            let expected_execution_state_root=  proof_outputs.execution_state_root; // LOOK HERE THIS IS THE EXECUTION STATE ROOT AT THE END OF THE WINDOW THAT WE WILL HAVE AFTER RUNNING THE CONSENSUS PROGRAM
+                            // The state root the window ends on
+                            let expected_execution_state_root = proof_outputs.execution_state_root;
 
                             // Validate progression
                             if validate && output_slot <= input_slot {

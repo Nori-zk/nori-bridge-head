@@ -46,6 +46,8 @@ pub struct ProofMessage {
     pub next_sync_committee_hash: FixedBytes<32>,
     pub proof_request_queue_address: alloy_primitives::Address,
     pub verified_requests: Vec<VerifiedRequest>,
+    /// Queue cursor this proof resumed from.
+    pub input_queue_cursor: u64,
     /// Queue cursor after this proof settles.
     pub output_queue_cursor: u64,
     pub elapsed_sec: f64,
@@ -379,6 +381,8 @@ impl BridgeHead {
                     next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
                     proof_request_queue_address: proof_outputs.proof_request_queue_address,
                     verified_requests: verified_requests.clone(),
+                    input_queue_cursor: proof_outputs.input_queue_cursor,
+                    output_queue_cursor: proof_outputs.output_queue_cursor,
                 },
             ))
             .await?;
@@ -397,6 +401,7 @@ impl BridgeHead {
                 next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
                 proof_request_queue_address: proof_outputs.proof_request_queue_address,
                 verified_requests,
+                input_queue_cursor: proof_outputs.input_queue_cursor,
                 output_queue_cursor: proof_outputs.output_queue_cursor,
                 elapsed_sec,
             })

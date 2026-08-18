@@ -899,6 +899,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "amqp_serde"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f450f572a1ec4cdb4af7af09cbd0c7c3e1b9da2bfc7414c059a780993a8e16"
+dependencies = [
+ "bytes",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "amqprs"
+version = "2.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b768f791c4e8b038dc883cb0f1b533a498a9e59a7ddb352ed2ea9cb0a728dbf4"
+dependencies = [
+ "amqp_serde",
+ "async-trait",
+ "bytes",
+ "serde",
+ "serde_bytes",
+ "tokio",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1962,7 +1987,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -2418,6 +2443,16 @@ name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b05b61dc5112cbb17e4b6cd61790d9845d13888356391624cbe7e41efeac1e75"
+
+[[package]]
+name = "combine"
+version = "4.6.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
+dependencies = [
+ "bytes",
+ "memchr",
+]
 
 [[package]]
 name = "compression-codecs"
@@ -3813,6 +3848,64 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphql-introspection-query"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e063446242093b0acecc78a2313801e6c4faafa3501277b409a2b1972eff5d85"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "graphql-parser"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a818c0d883d7c0801df27be910917750932be279c7bc82dc541b8769425f409"
+dependencies = [
+ "combine",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "graphql_client"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0f04840854efa7b06377d86fab117f598f5f5c95727067463417ccaf8aa7635"
+dependencies = [
+ "graphql_query_derive",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "graphql_client_codegen"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa0141e66c8d0302f8a586df12ad5d0cf87c0fa8c391f2f5b5dc296312dce569"
+dependencies = [
+ "graphql-introspection-query",
+ "graphql-parser",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.106",
+]
+
+[[package]]
+name = "graphql_query_derive"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e16ecf9bb87a6760cf5227f66cbe48bad7b89505aeb002aa9439ea090e6038a3"
+dependencies = [
+ "graphql_client_codegen",
+ "proc-macro2",
+ "syn 2.0.106",
+]
+
+[[package]]
 name = "group"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4999,7 +5092,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.53.5",
 ]
 
 [[package]]
@@ -5435,6 +5528,7 @@ dependencies = [
  "helios-consensus-core",
  "nori-hash",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -7760,6 +7854,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94a16b99c5ea4fe3daccd14853ad260ec00ea043b2708d1fd1da3106dcd8d9df"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
