@@ -604,6 +604,10 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             })?
             .block_number();
 
+        // FIXME me im not actually so sure about this being correct each time, i think it should come from the output 
+        // of the consensus program which really performs the updates, there is a chance in 2/3rd consensus that helios might skip the update
+        // double check me (requires looking at the internals of helios)
+        // the finalized header is replaced only if the update's finalized slot is strictly newer than what's already in the store!
         let finalized_output_block_number = *validated_consensus_proof_inputs
             .finality_update
             .finalized_header()
