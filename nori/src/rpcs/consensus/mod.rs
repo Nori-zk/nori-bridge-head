@@ -520,7 +520,14 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     ) -> Result<ProofInputsWithWindow<S>> {
         // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
         // Deserves it own location
-        let (input_slot, output_slot, validated_consensus_proof_inputs, expected_output_store_hash, expected_execution_state_root) = multiplex(
+        let (
+            input_slot,
+            output_slot,
+            validated_consensus_proof_inputs,
+            expected_output_store_hash,
+            expected_execution_state_root,
+            expected_output_block_number,
+        ) = multiplex(
             |url| {
                 async move {
                     // Fetch proof_inputs
@@ -530,16 +537,19 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                     .await?;
 
                     // Run the CPU-heavy program and slot validation inside spawn_blocking
-                    let (output_slot, validated_proof_inputs, expected_output_store_hash, expected_execution_state_root) =
+                    let (
+                        output_slot,
+                        validated_proof_inputs,
+                        expected_output_store_hash,
+                        expected_execution_state_root,
+                        expected_output_block_number,
+                    ) =
                         tokio::task::spawn_blocking(move || {
                             // Run program logic
                             let proof_outputs = consensus_program(consensus_proof_inputs.clone())?;
 
                             // Convert newHead to u64
                             let output_slot = proof_outputs.output_slot;
-
-                            // The state root the window ends on
-                            let expected_execution_state_root = proof_outputs.execution_state_root;
 
                             // Validate progression
                             if validate && output_slot <= input_slot {
@@ -569,7 +579,13 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                                 ));
                             }
 
-                            Ok((output_slot, consensus_proof_inputs, proof_outputs.output_store_hash, expected_execution_state_root))
+                            Ok((
+                                output_slot,
+                                consensus_proof_inputs,
+                                proof_outputs.output_store_hash,
+                                proof_outputs.execution_state_root,
+                                proof_outputs.output_block_number,
+                            ))
                         })
                         .await??;
 
@@ -585,7 +601,14 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
                         }
 
 
-                    Ok((input_slot, output_slot, validated_proof_inputs, expected_output_store_hash, expected_execution_state_root))
+                    Ok((
+                        input_slot,
+                        output_slot,
+                        validated_proof_inputs,
+                        expected_output_store_hash,
+                        expected_execution_state_root,
+                        expected_output_block_number,
+                    ))
                 }
                 .boxed()
             },
@@ -594,8 +617,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         )
         .await?;
 
-        // Get input and output block numbers
-        let finalized_input_block_number = *validated_consensus_proof_inputs
+        // Input finalized block number.
+        let input_block_number = *validated_consensus_proof_inputs
             .store
             .finalized_header
             .execution()
@@ -604,25 +627,12 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             })?
             .block_number();
 
-        // FIXME me im not actually so sure about this being correct each time, i think it should come from the output 
-        // of the consensus program which really performs the updates, there is a chance in 2/3rd consensus that helios might skip the update
-        // double check me (requires looking at the internals of helios)
-        // the finalized header is replaced only if the update's finalized slot is strictly newer than what's already in the store!
-        let finalized_output_block_number = *validated_consensus_proof_inputs
-            .finality_update
-            .finalized_header()
-            .execution()
-            .map_err(|_| {
-                anyhow::Error::msg("Failed to get output finalized execution header".to_string())
-            })?
-            .block_number();
-
         let validated_consensus_mpt_proof_input_with_window = self.execution_proxy
             .prepare_consensus_mpt_proof_inputs(
                 input_slot,
                 output_slot,
-                finalized_input_block_number,
-                finalized_output_block_number,
+                input_block_number,
+                expected_output_block_number,
                 input_queue_cursor,
                 validated_consensus_proof_inputs,
                 expected_output_store_hash,

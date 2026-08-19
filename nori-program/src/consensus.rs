@@ -126,6 +126,7 @@ impl std::error::Error for ProgramError {}
 ///      (`B256::ZERO` if `next_sync_committee` is `None`)
 ///    - Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`
 ///      (fails with `MissingExecutionRoot` if execution header is absent)
+///    - Extract `output_block_number` = `store.finalized_header.execution()?.block_number()`
 ///
 /// 6. **Post-State Hashing**
 ///    - Compute `output_store_hash` = `SHA-256(serde_serialize(store))`, to be validated in the next round
@@ -133,7 +134,7 @@ impl std::error::Error for ProgramError {}
 /// 7. **Output Commitment**
 ///    - Pack `ConsensusProofOutputs` committing: `input_slot`, `input_store_hash`,
 ///      `output_slot`, `output_store_hash`, `execution_state_root`,
-///      `next_sync_committee_hash`, `genesis_root`
+///      `next_sync_committee_hash`, `output_block_number`
 ///
 /// # Outputs (All Values Are Hash Commitments)
 /// | Field                      | Type   | Description                                     |
@@ -144,7 +145,7 @@ impl std::error::Error for ProgramError {}
 /// | `output_store_hash`        | `B256` | Updated store hash                              |
 /// | `execution_state_root`     | `B256` | Execution layer state root                      |
 /// | `next_sync_committee_hash` | `B256` | Hash of the next sync committee state (or zero) |
-/// | `genesis_root`             | `B256` | Genesis validators root                         |
+/// | `output_block_number`      | `u64`  | Execution block number of finalized output      |
 ///
 /// # Error Conditions
 /// 1. **Store Hashing Error**
@@ -245,6 +246,7 @@ pub fn consensus_program<S: ConsensusSpec>(
     }
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
+    let output_block_number = *execution.block_number();
     debug!("output_slot, next_sync_committee_hash and execution_state_root captured.");
 
     // 6. Post-State Hashing - Calculate updated store hash to be validated in the next round
@@ -263,7 +265,7 @@ pub fn consensus_program<S: ConsensusSpec>(
         output_store_hash,
         execution_state_root,
         next_sync_committee_hash,
-        genesis_root,
+        output_block_number,
     };
     debug!("Packed outputs.");
 

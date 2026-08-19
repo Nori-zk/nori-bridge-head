@@ -288,11 +288,11 @@ pub struct ConsensusProofOutputs {
     pub output_store_hash: B256,        // [ 48.. 80] bytes32
     pub execution_state_root: B256,     // [ 80..112] bytes32
     pub next_sync_committee_hash: B256, // [112..144] bytes32
-    pub genesis_root: B256,             // [144..176] bytes32
+    pub output_block_number: u64,       // [144..152] u64
 }
 
 impl ConsensusProofOutputs {
-    pub const SIZE: usize = 176;
+    pub const SIZE: usize = 152;
 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut buf = [0u8; Self::SIZE];
@@ -303,7 +303,7 @@ impl ConsensusProofOutputs {
         buf[48..80].copy_from_slice(&self.output_store_hash.0);
         buf[80..112].copy_from_slice(&self.execution_state_root.0);
         buf[112..144].copy_from_slice(&self.next_sync_committee_hash.0);
-        buf[144..176].copy_from_slice(&self.genesis_root.0);
+        buf[144..152].copy_from_slice(&self.output_block_number.to_be_bytes());
 
         buf
     }
@@ -332,7 +332,11 @@ impl ConsensusProofOutputs {
         let output_store_hash = B256::from_slice(&bytes[48..80]);
         let execution_state_root = B256::from_slice(&bytes[80..112]);
         let next_sync_committee_hash = B256::from_slice(&bytes[112..144]);
-        let genesis_root = B256::from_slice(&bytes[144..176]);
+
+        let output_block_number_bytes: [u8; 8] = bytes[144..152]
+            .try_into()
+            .context("Failed to parse output_block_number bytes")?;
+        let output_block_number = u64::from_be_bytes(output_block_number_bytes);
 
         Ok(Self {
             input_slot,
@@ -341,7 +345,7 @@ impl ConsensusProofOutputs {
             output_store_hash,
             execution_state_root,
             next_sync_committee_hash,
-            genesis_root,
+            output_block_number,
         })
     }
 }
