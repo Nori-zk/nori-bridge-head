@@ -44,6 +44,7 @@ NORI_HELIOS_POLLING_INTERVAL=
 # Timeouts for proof input validation (in seconds) @TODO
 NORI_CONSENSUS_PROOF_INPUT_VALIDATION_TIMEOUT=
 NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT=
+NORI_EXECUTION_CHUNK_LIMIT=
 
 # Rust logging level.
 NORI_LOG=info
@@ -59,6 +60,7 @@ NORI_LOG=info
 - **NORI_HELIOS_POLLING_INTERVAL**: Polling interval for Helios client to check for new finality beacon slots
 - **NORI_CONSENSUS_PROOF_INPUT_VALIDATION_TIMEOUT**: Timeout (seconds) for consensus proof validation
 - **NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT**: Timeout (seconds) for MPT consensus proof validation
+- **NORI_EXECUTION_CHUNK_LIMIT**: Chunk size for eth_getProof execution rpc requests (default: 100)
 - **NORI_LOG**: Logging level (e.g., info, debug, warn)
 
 **SP1 Prover (Required):**

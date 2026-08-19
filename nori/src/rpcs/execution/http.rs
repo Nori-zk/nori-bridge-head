@@ -42,6 +42,7 @@ pub struct ExecutionHttpProxy<S: ConsensusSpec> {
     proof_queue_address: Address,
     _marker: PhantomData<S>,
     validation_timeout: Duration,
+    chunk_limit: usize,
 }
 
 impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
@@ -63,6 +64,20 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             .unwrap_or(300);
 
         let validation_timeout = Duration::from_secs(validation_timeout_sec);
+
+        // Parsing the per-request storage key chunk limit
+        let chunk_limit = std::env::var("NORI_EXECUTION_CHUNK_LIMIT")
+            .ok()
+            .map(|v| {
+                v.parse::<usize>().map_err(|e| {
+                    Error::msg(format!(
+                        "Failed to parse NORI_EXECUTION_CHUNK_LIMIT as usize: {}",
+                        e
+                    ))
+                })
+            })
+            .transpose()?
+            .unwrap_or(100);
 
         let source_execution_http_urls = env::var("NORI_SOURCE_EXECUTION_HTTP_RPCS")
             .context("Missing NORI_SOURCE_EXECUTION_HTTP_RPCS in environment")?;
@@ -107,6 +122,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             backup_providers: providers,
             _marker: PhantomData,
             validation_timeout,
+            chunk_limit,
         })
     }
 
@@ -203,51 +219,57 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         Ok(all_events)
     }
 
-    // This is the bulk eth_getProof helper: it forwards storage_keys.len() keys
-    // in one request with no chunking or cap. Two distinct RPC concerns apply.
-    //
-    // FIXME(request-queue): request batching. The queue caller can pass up to
-    // 1 + MAX_BATCH * QUEUE_ENTRY_WORDS = 327,681 keys, roughly a 20 MB JSON
-    // body, far over what vendors accept.
-    //   Request size, what vendors allow:
-    //     Chainstack: request body capped at 1 MB.
-    //       https://docs.chainstack.com/docs/limits
-    //     Infura and general JSON-RPC: batch payload near 1 MB.
-    //       https://docs.infura.io/api/networks/ethereum/json-rpc-methods
-    //     Alchemy: 1000 requests per JSON-RPC batch over HTTP.
-    //       https://www.alchemy.com/docs/reference/batch-requests
-    //   Request size, recommendation:
-    //     Ethereum execution-apis issue 752 (eth_getStorageValues) proposes a
-    //     default cap of 1024 storage slots per bulk request.
-    //       https://github.com/ethereum/execution-apis/issues/752
-    //   Rate limits, what vendors allow:
-    //     Chainstack: plan RPS tier is 25, 100, 250, 500, or 1000 RPS (Enterprise
-    //       unlimited); 1000 requests per HTTP connection; 500 open HTTP
-    //       connections. https://docs.chainstack.com/docs/limits
-    //     Infura: returns HTTP 429 when rate limited.
-    //       https://docs.infura.io/api/networks/ethereum/json-rpc-methods
-    //   Action: chunk storage_keys, then pace the chunks under the RPS tier.
-    //
-    // FIXME(request-queue): historical state. Proving an old block needs an
-    //   archive node, and eth_getProof history is itself capped by some backends.
-    //     Chainstack: on Erigon eth_getProof reaches 100,000 blocks back,
-    //       unbounded on Geth.
-    //       https://docs.chainstack.com/docs/deep-dive-into-merkle-proofs-and-eth-getproof-ethereum-rpc-method
+    /// eth_getProof for `storage_keys`, split into requests of at most
+    /// `chunk_limit` keys (NORI_EXECUTION_CHUNK_LIMIT) and merged. The account
+    /// proof is identical across chunks, so the first response is kept and each
+    /// chunk's storage_proof is appended.
     async fn _get_proof(
         provider: &RootProvider<Ethereum>,
         address: &Address,
         storage_keys: Vec<B256>,
         block_id: BlockId,
+        chunk_limit: usize,
     ) -> Result<EIP1186AccountProofResponse> {
-        let proof = provider
-            .get_proof(*address, storage_keys)
-            .block_id(block_id)
-            .await;
+        // An empty key set still needs one request for the account proof, and
+        // chunks(0) would panic.
+        let chunk_limit = chunk_limit.max(1);
+        let chunks: Vec<Vec<B256>> = if storage_keys.is_empty() {
+            vec![Vec::new()]
+        } else {
+            storage_keys.chunks(chunk_limit).map(|c| c.to_vec()).collect()
+        };
 
-        match proof {
-            Ok(proof) => Ok(proof),
-            Err(e) => Err(anyhow!("ExecutionHttp RPC error: {e}")),
+        let mut merged: Option<EIP1186AccountProofResponse> = None;
+        for chunk in chunks {
+            let mut retries = 0;
+            let proof = loop {
+                match provider
+                    .get_proof(*address, chunk.clone())
+                    .block_id(block_id)
+                    .await
+                {
+                    Ok(proof) => break proof,
+                    Err(e) if retries < MAX_RETRIES => {
+                        let delay = RETRY_BASE_DELAY * 2u32.pow(retries as u32);
+                        error!(
+                            "eth_getProof chunk failed (retry {} in {:?}): {:?}",
+                            retries + 1,
+                            delay,
+                            e
+                        );
+                        sleep(delay).await;
+                        retries += 1;
+                    }
+                    Err(e) => return Err(anyhow!("ExecutionHttp RPC error: {e}")),
+                }
+            };
+            match &mut merged {
+                None => merged = Some(proof),
+                Some(acc) => acc.storage_proof.extend(proof.storage_proof),
+            }
         }
+
+        Ok(merged.expect("at least one request is always issued"))
     }
 
     /// Reads a single storage word at `block`.
@@ -357,6 +379,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
         output_execution_state_root: FixedBytes<32>,
+        chunk_limit: usize,
     ) -> Result<ProofInputs<S>> {
         // Every read is pinned to the window's output block, the block whose state
         // root the guest verifies them against.
@@ -396,7 +419,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         let mut queue_keys = vec![queue_head_key];
         queue_keys.extend(entry_word_keys.iter().copied());
         let queue_proof =
-            Self::_get_proof(provider, proof_queue_address, queue_keys, block).await?;
+            Self::_get_proof(provider, proof_queue_address, queue_keys, block, chunk_limit).await?;
 
         let queue_words: HashMap<B256, (U256, Vec<Bytes>)> = queue_proof
             .storage_proof
@@ -448,7 +471,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         let mut targets: Vec<TargetStorageProof> = Vec::with_capacity(slots_by_target.len());
         for (address, slot_keys) in slots_by_target {
             let target_proof =
-                Self::_get_proof(provider, &address, slot_keys.clone(), block).await?;
+                Self::_get_proof(provider, &address, slot_keys.clone(), block, chunk_limit).await?;
             let account = Self::_account_witness(&target_proof, output_execution_state_root)?;
 
             let proved: HashMap<B256, (U256, Vec<Bytes>)> = target_proof
@@ -539,6 +562,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         expected_execution_state_root: FixedBytes<32>,
     ) -> Result<ProofInputsWithWindow<S>> {
         let proof_queue_address = self.proof_queue_address;
+        let chunk_limit = self.chunk_limit;
         let output = query_with_fallback(
             &self.principal_provider,
             &self.backup_providers,
@@ -552,7 +576,8 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                         input_queue_cursor,
                         output_block_number,
                         validated_consensus_proof_inputs,
-                        expected_execution_state_root
+                        expected_execution_state_root,
+                        chunk_limit,
                     )
                     .await
                 }
