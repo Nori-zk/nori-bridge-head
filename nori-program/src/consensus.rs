@@ -247,7 +247,7 @@ pub fn consensus_program<S: ConsensusSpec>(
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
     let output_block_number = *execution.block_number();
-    debug!("output_slot, next_sync_committee_hash and execution_state_root captured.");
+    debug!("output_slot, next_sync_committee_hash, execution_state_root and output_block_number captured.");
 
     // 6. Post-State Hashing - Calculate updated store hash to be validated in the next round
     debug!("Hashing updated store.");
