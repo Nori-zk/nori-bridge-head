@@ -60,6 +60,8 @@ pub fn get_merkle_zeros() -> [Fp; N_MERKLE_ZEROS] {
 ///
 /// # Examples
 /// ```
+/// use nori_hash::merkle_poseidon_fixed::compute_merkle_tree_depth_and_size;
+///
 /// assert_eq!(compute_merkle_tree_depth_and_size(0), (0, 1));
 /// assert_eq!(compute_merkle_tree_depth_and_size(1), (0, 1));
 /// assert_eq!(compute_merkle_tree_depth_and_size(2), (1, 2));
@@ -106,8 +108,16 @@ pub fn compute_merkle_tree_depth_and_size(n_leaves: usize) -> (usize, usize) {
 /// # Example
 ///
 /// ```rust
+/// use nori_hash::merkle_poseidon_fixed::{
+///     compute_merkle_tree_depth_and_size, fold_merkle_left, get_merkle_zeros,
+/// };
+/// use mina_curves::pasta::Fp;
+///
 /// // Assumes merkle_leaves is populated.
-/// let root = fold_merkle_left(&mut merkle_leaves, depth);
+/// let mut merkle_leaves: Vec<Fp> = vec![Fp::from(1u64), Fp::from(2u64), Fp::from(3u64)];
+/// let (depth, padded_size) = compute_merkle_tree_depth_and_size(merkle_leaves.len());
+/// let zeros = get_merkle_zeros();
+/// let root = fold_merkle_left(&mut merkle_leaves, padded_size, depth, &zeros);
 /// ```
 pub fn fold_merkle_left(
     merkle_leaves: &mut Vec<Fp>,
@@ -198,11 +208,21 @@ pub fn fold_merkle_left(
 /// # Example
 ///
 /// ```rust
-/// let mut leaves = vec![a, b, c];
+/// use nori_hash::merkle_poseidon_fixed::{
+///     build_merkle_tree, compute_merkle_tree_depth_and_size, get_merkle_zeros,
+/// };
+/// use mina_curves::pasta::Fp;
+///
+/// let a = Fp::from(1u64);
+/// let b = Fp::from(2u64);
+/// let c = Fp::from(3u64);
+/// let leaves = vec![a, b, c];
 /// let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
-/// let tree = build_merkle_tree(leaves, padded_size, depth, &ZERO_HASHES);
+/// let zeros = get_merkle_zeros();
+/// let tree = build_merkle_tree(leaves, padded_size, depth, &zeros);
 /// let root = tree[0][0];
-/// assert_eq!(tree[depth], vec![a, b, c, Fp::from(0)]);
+/// assert_eq!(tree[depth], vec![a, b, c, Fp::from(0u64)]);
+/// ```
 pub fn build_merkle_tree(
     mut merkle_leaves: Vec<Fp>,
     padded_size: usize,
@@ -289,9 +309,16 @@ pub fn build_merkle_tree(
 ///
 /// ## Example
 /// ```rust
-/// let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
+/// use nori_hash::merkle_poseidon_fixed::{
+///     compute_merkle_tree_depth_and_size, get_merkle_path_from_leaves, get_merkle_zeros,
+/// };
+/// use mina_curves::pasta::Fp;
+///
+/// let original_leaf_values: Vec<Fp> = vec![Fp::from(1u64), Fp::from(2u64), Fp::from(3u64)];
+/// let (depth, padded_size) = compute_merkle_tree_depth_and_size(original_leaf_values.len());
+/// let zeros = get_merkle_zeros();
 /// let mut leaves = original_leaf_values.clone();
-/// let path = get_merkle_path(&mut leaves, padded_size, depth, 2);
+/// let path = get_merkle_path_from_leaves(&mut leaves, padded_size, depth, 2, &zeros);
 /// ```
 pub fn get_merkle_path_from_leaves(
     merkle_leaves: &mut Vec<Fp>,
@@ -389,8 +416,13 @@ pub fn get_merkle_path_from_tree(merkle_tree: &[Vec<Fp>], mut index: u32) -> Vec
 ///
 /// ## Example
 /// ```rust
-/// let leaf = poseidon_hash(&[Fp::from(42)]);
-/// let root = compute_merkle_root_from_path(leaf, 2, &path);
+/// use nori_hash::merkle_poseidon_fixed::{compute_merkle_root_from_path, poseidon_hash};
+/// use mina_curves::pasta::Fp;
+///
+/// let leaf = poseidon_hash(&[Fp::from(42u64)]);
+/// let sibling = poseidon_hash(&[Fp::from(7u64)]);
+/// let path = vec![sibling];
+/// let root = compute_merkle_root_from_path(leaf, 0, &path);
 /// ```
 pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> Fp {
     let mut hash = leaf_hash;
@@ -437,8 +469,11 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
 ///
 /// # Example
 /// ```rust
-/// let code_challenge = U256::from_be_hex("0xdeadbeef...");
-/// let value = U256::from_be_hex("0xabcdef...");
+/// use nori_hash::merkle_poseidon_fixed::hash_storage_slot;
+/// use alloy_primitives::U256;
+///
+/// let code_challenge = U256::from(0xdeadbeefu64);
+/// let value = U256::from(0xabcdefu64);
 /// let leaf_hash = hash_storage_slot(&code_challenge, &value).unwrap();
 /// ```
 #[deprecated(
@@ -493,12 +528,10 @@ pub fn hash_storage_slot(
     Ok(hash)
 }
 
-/// Hashes one verified queue request into a Merkle leaf.
-///
 /// Packs 117 bytes of leaf data into four field elements, each kept below the
-/// 254-bit field size, then applies Poseidon. Byte handling matches
-/// `hash_storage_slot`: big-endian payload bytes are written from index 0 and
-/// read back little-endian by `Fp::from_bytes`.
+/// 254-bit field size. Byte handling matches `hash_storage_slot`: big-endian
+/// payload bytes are written from index 0 and read back little-endian by
+/// `Fp::from_bytes`.
 ///
 /// Field layout:
 /// - field 1: `target` (20) ++ `collection_keys_count` ++ `key_0[0]` ++ `key_1[0]` ++ `value[0]`
@@ -511,13 +544,13 @@ pub fn hash_storage_slot(
 ///
 /// The o1js `provableRequestLeafHash` must pack identically; the shared test
 /// vectors pin both implementations.
-pub fn hash_request_leaf(
+pub fn pack_request_leaf_fields(
     target: &Address,
     collection_keys_count: u8,
     collection_key_0: &B256,
     collection_key_1: &B256,
     value: &U256,
-) -> Result<Fp> {
+) -> Result<[Fp; 4]> {
     let target_bytes = target.as_slice();
     let key_0_bytes = collection_key_0.as_slice();
     let key_1_bytes = collection_key_1.as_slice();
@@ -539,17 +572,43 @@ pub fn hash_request_leaf(
     let mut fourth_field_bytes = [0u8; 32];
     fourth_field_bytes[0..31].copy_from_slice(&value_bytes[1..32]);
 
-    let first_field = Fp::from_bytes(&first_field_bytes)?;
-    let second_field = Fp::from_bytes(&second_field_bytes)?;
-    let third_field = Fp::from_bytes(&third_field_bytes)?;
-    let fourth_field = Fp::from_bytes(&fourth_field_bytes)?;
+    Ok([
+        Fp::from_bytes(&first_field_bytes)?,
+        Fp::from_bytes(&second_field_bytes)?,
+        Fp::from_bytes(&third_field_bytes)?,
+        Fp::from_bytes(&fourth_field_bytes)?,
+    ])
+}
 
-    Ok(poseidon_hash(&[
-        first_field,
-        second_field,
-        third_field,
-        fourth_field,
-    ]))
+/// Hashes one verified queue request into a Merkle leaf.
+///
+/// Packs 117 bytes of leaf data into four field elements via
+/// `pack_request_leaf_fields`, each kept below the 254-bit field size, then
+/// applies Poseidon.
+///
+/// Field layout:
+/// - field 1: `target` (20) ++ `collection_keys_count` ++ `key_0[0]` ++ `key_1[0]` ++ `value[0]`
+/// - field 2: `key_0[1..32]`
+/// - field 3: `key_1[1..32]`
+/// - field 4: `value[1..32]`
+///
+/// The o1js `provableRequestLeafHash` must pack identically; the shared test
+/// vectors pin both implementations.
+pub fn hash_request_leaf(
+    target: &Address,
+    collection_keys_count: u8,
+    collection_key_0: &B256,
+    collection_key_1: &B256,
+    value: &U256,
+) -> Result<Fp> {
+    let fields = pack_request_leaf_fields(
+        target,
+        collection_keys_count,
+        collection_key_0,
+        collection_key_1,
+        value,
+    )?;
+    Ok(poseidon_hash(&fields))
 }
 
 #[cfg(test)]
@@ -703,44 +762,47 @@ mod merkle_fixed_tests {
     use super::*;
     use anyhow::Result;
 
-    fn dummy_code_challenge(i: i32) -> U256 {
-        let mut bytes = [0u8; 32];
+    type RequestLeafArgs = (Address, u8, B256, B256, U256);
+
+    fn dummy_request(i: i32) -> RequestLeafArgs {
         let i_bytes = i.to_le_bytes();
-        bytes[0..4].copy_from_slice(&i_bytes);
+
+        let mut target_bytes = [0u8; 20];
+        target_bytes[0..4].copy_from_slice(&i_bytes);
+        let target = Address::from(target_bytes);
+
+        let count = (i.rem_euclid(3)) as u8;
+
+        let mut key_0_bytes = [0u8; 32];
+        key_0_bytes[0..4].copy_from_slice(&i_bytes);
+        let key_0 = B256::from(key_0_bytes);
+
+        let j_bytes = i.wrapping_add(1_000_000).to_le_bytes();
+        let mut key_1_bytes = [0u8; 32];
+        key_1_bytes[0..4].copy_from_slice(&j_bytes);
+        let key_1 = B256::from(key_1_bytes);
+
+        let mut value_bytes = [0u8; 32];
+        value_bytes[0..4].copy_from_slice(&i_bytes);
         // CHECKME: was U256::from_le_bytes when this was dummy_attestation. from_le_bytes causes
         // .to_be_bytes() to reverse the byte array, so byte[0] in the hash input differs from TS
         // (TS Bytes32.from(arr).toBytes() preserves order). Previously the old dummy_attestation also
         // used from_le_bytes and tests matched cross-language — needs investigation as to why that worked.
-        U256::from_be_bytes(bytes)
+        let value = U256::from_be_bytes(value_bytes);
+
+        (target, count, key_0, key_1, value)
     }
 
-    fn dummy_value(i: i32) -> U256 {
-        let mut bytes = [0u8; 32];
-        let i_bytes = i.to_le_bytes();
-        bytes[0..4].copy_from_slice(&i_bytes);
-        U256::from_be_bytes(bytes)
-    }
-
-    // Build leaf hashes from given (code_challenge, value) pairs.
-    //
-    // FIXME(request-queue): broken. This calls the deprecated hash_storage_slot
-    // (the old 2 field leaf). The live leaf is hash_request_leaf(target, count,
-    // key0, key1, value). This helper exists only to feed the Merkle
-    // build/fold/path tests below (test_large_slots and
-    // test_all_leaf_counts_and_indices_with_build_and_fold), whose real coverage
-    // is the tree machinery rather than the leaf. Regenerate the dummy inputs as
-    // request leaf arguments and call hash_request_leaf here, so that coverage
-    // moves onto the current leaf format. Do not simply delete these tests.
-    fn build_leaves(pairs: &[(U256, U256)]) -> Result<Vec<Fp>> {
+    fn build_leaves(pairs: &[RequestLeafArgs]) -> Result<Vec<Fp>> {
         let mut leaves = Vec::with_capacity(pairs.len());
-        for (code_challenge, val) in pairs {
-            leaves.push(hash_storage_slot(code_challenge, val)?);
+        for (target, count, key_0, key_1, value) in pairs {
+            leaves.push(hash_request_leaf(target, *count, key_0, key_1, value)?);
         }
         Ok(leaves)
     }
 
     // Full Merkle lifecycle test using actual hashed leaves
-    fn full_merkle_test(pairs: &[(U256, U256)], leaf_index: usize) -> Result<()> {
+    fn full_merkle_test(pairs: &[RequestLeafArgs], leaf_index: usize) -> Result<()> {
         let zeros = get_merkle_zeros();
         let leaves = build_leaves(pairs)?;
         let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
@@ -773,12 +835,8 @@ mod merkle_fixed_tests {
         println!("Root {:?}", root.to_biguint());
         Ok(())
     }
-    // FIXME(request-queue): broken. This exercises the deprecated
-    // hash_storage_slot. Adapt it to hash_request_leaf(target, count, key0,
-    // key1, value), carrying the fixed input vector and result assertion over to
-    // the new leaf format so the coverage is preserved.
     #[test]
-    fn rarg_test_hash_storage_slot() {
+    fn rarg_test_hash_request_leaf() {
         // Provided hex strings (without 0x prefix)
         let slot_key_code_challenge_str =
             "2f000000000000000000000000000000000000000000000000038d7ec293e52f";
@@ -817,8 +875,11 @@ mod merkle_fixed_tests {
             print!("{:02x}", b);
         }
         println!(" {:?}", value);
-        // Call hash_storage_slot function
-        let result = hash_storage_slot(&code_challenge, &value).unwrap();
+
+        let target = Address::ZERO;
+        let key_0 = B256::from(code_challenge.to_be_bytes::<32>());
+        let key_1 = B256::ZERO;
+        let result = hash_request_leaf(&target, 1, &key_0, &key_1, &value).unwrap();
 
         // Assert or print result as needed
         println!("Hash result big int: {:?}", result.to_bigint_positive());
@@ -836,21 +897,14 @@ mod merkle_fixed_tests {
     #[test]
     fn test_large_slots() -> Result<()> {
         let n = 1000;
-        let pairs: Vec<(U256, U256)> = (0..n)
-            .map(|i| (dummy_code_challenge(i), dummy_value(i)))
-            .collect();
+        let pairs: Vec<RequestLeafArgs> = (0..n).map(dummy_request).collect();
         full_merkle_test(&pairs, 543)
     }
 
-    // FIXME(request-queue): broken. This exercises the deprecated
-    // hash_storage_slot. Adapt it to hash_request_leaf(target, count, key0,
-    // key1, value), keeping the non zero leaf assertion so the coverage is
-    // preserved on the new leaf format.
     #[test]
-    fn test_hash_storage_slot_basic() -> Result<()> {
-        let code_challenge = dummy_code_challenge(2);
-        let value = dummy_value(3);
-        let leaf_hash = hash_storage_slot(&code_challenge, &value)?;
+    fn test_hash_request_leaf_basic() -> Result<()> {
+        let (target, count, key_0, key_1, value) = dummy_request(2);
+        let leaf_hash = hash_request_leaf(&target, count, &key_0, &key_1, &value)?;
         assert_ne!(leaf_hash, Fp::from(0));
         Ok(())
     }
@@ -864,9 +918,7 @@ mod merkle_fixed_tests {
             println!("→ Testing with {} leaves", n_leaves);
 
             // Build dummy pairs
-            let pairs: Vec<(U256, U256)> = (0..n_leaves)
-                .map(|i| (dummy_code_challenge(i), dummy_value(i)))
-                .collect();
+            let pairs: Vec<RequestLeafArgs> = (0..n_leaves).map(dummy_request).collect();
 
             let leaves = build_leaves(&pairs).expect("build_leaves failed");
             print!("   leaves=");
@@ -988,9 +1040,7 @@ mod merkle_fixed_tests {
         let zeros = get_merkle_zeros();
         let mut failures: Vec<String> = Vec::new();
         for &n_leaves in REGRESSION_LEAF_COUNTS {
-            let pairs: Vec<(U256, U256)> = (0..n_leaves)
-                .map(|i| (dummy_code_challenge(i), dummy_value(i)))
-                .collect();
+            let pairs: Vec<RequestLeafArgs> = (0..n_leaves).map(dummy_request).collect();
             let leaves = build_leaves(&pairs).expect("build_leaves failed");
             let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
 
@@ -1023,9 +1073,7 @@ mod merkle_fixed_tests {
         let zeros = get_merkle_zeros();
         let mut failures: Vec<String> = Vec::new();
         for &n_leaves in REGRESSION_LEAF_COUNTS {
-            let pairs: Vec<(U256, U256)> = (0..n_leaves)
-                .map(|i| (dummy_code_challenge(i), dummy_value(i)))
-                .collect();
+            let pairs: Vec<RequestLeafArgs> = (0..n_leaves).map(dummy_request).collect();
             let leaves = build_leaves(&pairs).expect("build_leaves failed");
             let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
 

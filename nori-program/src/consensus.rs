@@ -368,14 +368,16 @@ pub fn consensus_program<S: ConsensusSpec>(
 /// 5. **Missing Execution Root**
 ///    `store.finalized_header.execution()` is `Err` → Incomplete header data
 /// 6. **Invalid MPT Proof**
-///    `verify_storage_slot_proofs` may fail due to:
-///    - `InvalidAccountProof { address, reason }` → Contract account not found in state trie (always checked, even with 0 slots)
-///    - `InvalidStorageSlotProof { slot_key, reason }` → Storage slot proof failed
-///    - `InvalidStorageSlotCodeChallengeMapping { slot_key, code_challenge, computed_code_challenge_slot_key }` → Slot-to-code-challenge mapping invalid
-///    - `MerkleHashError { code_challenge, value, reason }` → Merkle hash computation error of verified slots
-///    - `ExceedsMaxTreeDepth { slots, requested_depth, max_depth }` → if the number of storage slots yields a merkle tree
-///       which is too large.
-///    Any of these returns a `MptError`, wrapped as `ProgramError::MptError`
+///    `verify_queue` may fail due to:
+///    - `InvalidProofRequestQueueAccountProof { address, reason }` → the queue account itself could not be proven against the execution state root
+///    - `InvalidTargetAccountProof { address, reason }` → a consumer contract named by a queue entry could not be proven present or absent
+///    - `InvalidStorageSlotProof { slot_key, reason }` → a storage slot proof failed
+///    - `LeafHashError { target, slot_key, value, reason }` → `hash_request_leaf` failed for a queue entry
+///    - `ExceedsMaxTreeDepth { slots, requested_depth, max_depth }` → the number of queue entries yields a Merkle tree that is too large
+///    - `CursorAheadOfHead { cursor, head }` → the destination-chain cursor is ahead of the proven queue head
+///    - `BatchSizeMismatch { expected, supplied }` → the witness supplied a different number of entries than the batch the queue state derives
+///    - `MissingTargetWitness { target }` / `MissingSlotWitness { target, slot_key }` → no account or slot proof was supplied for a target/slot an entry references
+///    Any of these returns an `MptError`, wrapped as `ProgramError::MptError`
 /// 7. **Non-Checkpoint Output Slot**
 ///    `output_slot % 32 != 0` (checked after `updates`/`finality_update` are applied) → `NonCheckpointOutputSlot`
 ///
