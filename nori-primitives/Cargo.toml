@@ -17,3 +17,4 @@ anyhow = { workspace = true }
 # Example-only; kept out of [dependencies] so the guest build does not pull it in.
 [dev-dependencies]
 serde_json = { workspace = true }
+alloy = { workspace = true }

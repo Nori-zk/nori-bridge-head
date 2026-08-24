@@ -10,7 +10,7 @@
 
 mod entry_location {
     use alloy_primitives::{hex, U256};
-    use nori_sp1_helios_primitives::types::{
+    use nori_sp1_helios_primitives::storage_layout::{
         mapping_entry_location, storage_slot_of_index, struct_word_slot, QUEUE_ENTRY_WORDS,
         QUEUE_HEAD_STORAGE_INDEX, QUEUE_REQUESTS_STORAGE_INDEX,
     };

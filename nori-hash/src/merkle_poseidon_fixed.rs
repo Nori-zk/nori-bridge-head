@@ -8,7 +8,7 @@ use mina_poseidon::{
 };
 use o1_utils::FieldHelpers;
 
-// FIXME(request-queue): this depth also drives MAX_BATCH (nori-primitives) =
+// FIXME(request-queue): this depth also drives MAX_BATCH below =
 // 2^MAX_TREE_DEPTH, the cap on queue entries N a single proof may cover. Each
 // entry makes the SP1 guest run verify_storage_word on its QUEUE_ENTRY_WORDS
 // words plus one target slot, and each distinct target adds one verify_account.
@@ -20,6 +20,9 @@ use o1_utils::FieldHelpers;
 // job, far beyond a single SP1 proof's cycle and memory budget. Size this depth
 // to what one SP1 proof can actually verify.
 pub const MAX_TREE_DEPTH: usize = 16;
+/// Maximum number of queue entries one proof batch may cover: the leaf
+/// capacity of a Merkle tree at `MAX_TREE_DEPTH`.
+pub const MAX_BATCH: usize = 1 << MAX_TREE_DEPTH;
 const N_MERKLE_ZEROS: usize = MAX_TREE_DEPTH + 1;
 const MERKLE_ZEROS: &[u8; N_MERKLE_ZEROS * 32] = include_bytes!("merkle-zeros.dat");
 
@@ -443,93 +446,8 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
     hash
 }
 
-/// Computes a Poseidon hash for a storage slot leaf node given a code challenge and a 32-byte value.
-///
-/// The storage slot leaf combines a 32-byte code challenge and a 32-byte value into three field
-/// elements, which are then hashed together using Poseidon. This process encodes the data carefully
-/// to avoid overflow issues due to the 254-bit field size (which cannot safely hold 256 bits).
-///
-/// Specifically:
-/// - The first field contains the first byte of the code challenge and the first byte of the value
-///   (total 2 bytes, padded to 32 with zeros).
-/// - The second field contains the remaining 31 bytes of the code challenge.
-/// - The third field contains the remaining 31 bytes of the value.
-/// - All three are converted from bytes to field elements and then hashed.
-///
-/// # Parameters
-/// - `code_challenge`: A 256-bit `U256` representing the SCRAM code challenge.
-/// - `value`: The 32-byte slot value.
-///
-/// # Returns
-/// Returns a `Result<Fp>` containing the Poseidon hash of the concatenated first, second, and third fields,
-/// or an error if the byte-to-field conversion fails.
-///
-/// # Errors
-/// Returns an error if the byte slices cannot be converted into field elements (e.g., invalid byte encoding).
-///
-/// # Example
-/// ```rust
-/// use nori_hash::merkle_poseidon_fixed::hash_storage_slot;
-/// use alloy_primitives::U256;
-///
-/// let code_challenge = U256::from(0xdeadbeefu64);
-/// let value = U256::from(0xabcdefu64);
-/// let leaf_hash = hash_storage_slot(&code_challenge, &value).unwrap();
-/// ```
-#[deprecated(
-    note = "Superseded by hash_request_leaf (proof request queue leaf packing). Retained only for the deprecated verify_storage_slot_proofs path until the Mina-side cutover."
-)]
-pub fn hash_storage_slot(
-    code_challenge: &U256,
-    value: &U256,
-) -> Result<Fp> {
-    let code_challenge_bytes = code_challenge.to_be_bytes::<32>();
-    let value_bytes = value.to_be_bytes::<32>();
-
-    // Left here for debugging purposes
-    /*print!("0x");
-    for b in code_challenge.to_be_bytes::<32>().iter() {
-        print!("{:02x}", b);
-    }
-    print!(" ");
-    for b in value.to_be_bytes::<32>().iter() {
-        print!("{:02x}", b);
-    }
-    println!();*/
-
-    // 64 bytes total (32 + 32), max 31 bytes per field → 3 fields
-    // firstFieldBytes: 1 byte from codeChallenge + 1 byte from value + 30 zeros
-    let mut first_field_bytes = [0u8; 32];
-    first_field_bytes[0] = code_challenge_bytes[0];
-    first_field_bytes[1] = value_bytes[0];
-
-    // secondFieldBytes: remaining 31 bytes from codeChallenge (1 to 31)
-    let mut second_field_bytes = [0u8; 32];
-    second_field_bytes[0..31].copy_from_slice(&code_challenge_bytes[1..32]);
-
-    // thirdFieldBytes: remaining 31 bytes from value (1 to 31)
-    let mut third_field_bytes = [0u8; 32];
-    third_field_bytes[0..31].copy_from_slice(&value_bytes[1..32]);
-
-    let first_field = Fp::from_bytes(&first_field_bytes)?;
-    let second_field = Fp::from_bytes(&second_field_bytes)?;
-    let third_field = Fp::from_bytes(&third_field_bytes)?;
-
-    // Left here for debugging purposes
-    /*println!("first_field {:?}", first_field);
-    println!("second_field {:?}", second_field);
-    println!("third_field {:?}", third_field);*/
-
-    let hash = poseidon_hash(&[first_field, second_field, third_field]);
-
-    // Left here for debugging purposes
-    //println!("hash {:?}", hash);
-
-    Ok(hash)
-}
-
 /// Packs 117 bytes of leaf data into four field elements, each kept below the
-/// 254-bit field size. Byte handling matches `hash_storage_slot`: big-endian
+/// 254-bit field size. Byte handling matches the storage-slot leaf scheme: big-endian
 /// payload bytes are written from index 0 and read back little-endian by
 /// `Fp::from_bytes`.
 ///

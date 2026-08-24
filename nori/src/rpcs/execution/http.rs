@@ -1,33 +1,34 @@
 use crate::{
-    contract::{get_proof_queue_address, get_source_contract_address},
+    contract::get_proof_queue_address,
     rpcs::query_with_fallback,
 };
 use alloy::{
     eips::BlockId,
     network::Ethereum,
     providers::{Provider, ProviderBuilder, RootProvider},
-    rpc::types::{EIP1186AccountProofResponse, Filter},
-    sol_types::SolEvent,
+    rpc::types::EIP1186AccountProofResponse,
 };
-use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, Log, B256, U256};
+use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{Nibbles, TrieAccount};
 use anyhow::{anyhow, Context, Error, Result};
 use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, warn};
+use nori_hash::merkle_poseidon_fixed::MAX_BATCH;
+use nori_sp1_helios_primitives::storage_layout::{
+    mapping_entry_location, storage_slot_of_index, struct_word_slot, QUEUE_ENTRY_WORDS,
+    QUEUE_HEAD_STORAGE_INDEX, QUEUE_REQUESTS_STORAGE_INDEX,
+};
 use nori_sp1_helios_primitives::types::{
-    mapping_entry_location, storage_slot_of_index, struct_word_slot, ConsensusProofInputs,
-    ProofInputs, ProofInputsWithWindow, QueueEntryProof, QueueStorage, TargetSlotProof,
-    TargetStorageProof, MAX_BATCH, QUEUE_ENTRY_WORDS, QUEUE_HEAD_STORAGE_INDEX,
-    QUEUE_REQUESTS_STORAGE_INDEX,
+    ConsensusProofInputs, ProofInputs, ProofInputsWithWindow, QueueEntryProof, QueueStorage,
+    TargetSlotProof, TargetStorageProof,
 };
 use nori_sp1_helios_program::consensus::consensus_mpt_program;
 use reqwest::Url;
 use std::{collections::HashMap, env, marker::PhantomData};
 use tokio::time::{sleep, Duration};
 
-const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const EXECUTION_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
@@ -35,10 +36,6 @@ const EXECUTION_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
 pub struct ExecutionHttpProxy<S: ConsensusSpec> {
     principal_provider: RootProvider<Ethereum>,
     backup_providers: Vec<RootProvider<Ethereum>>,
-    #[deprecated(
-        note = "Superseded by the proof request queue; only read by the deprecated source-contract event path. The prover anchors on proof_queue_address."
-    )]
-    source_state_bridge_contract_address: Address,
     proof_queue_address: Address,
     _marker: PhantomData<S>,
     validation_timeout: Duration,
@@ -110,13 +107,9 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
         let principal_provider = providers.remove(0);
 
-        // FIXME(request-queue): only the superseded event path reads this field.
-        // Remove this line and the field once that path is deleted.
-        let source_state_bridge_contract_address = get_source_contract_address()?;
         let proof_queue_address = get_proof_queue_address()?;
 
         Ok(ExecutionHttpProxy {
-            source_state_bridge_contract_address,
             proof_queue_address,
             principal_provider,
             backup_providers: providers,
@@ -128,95 +121,6 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
     pub fn try_from_env() -> Self {
         ExecutionHttpProxy::from_env().unwrap()
-    }
-
-    #[deprecated(
-        note = "Superseded by the proof request queue; the host reads queue storage directly instead of scanning TokensLocked events. No longer used in the proving path."
-    )]
-    async fn _get_source_contract_event_chunk<T>(
-        provider: &RootProvider<Ethereum>,
-        source_state_bridge_contract_address: &Address,
-        start: u64,
-        end: u64,
-    ) -> Result<Vec<Log<T>>>
-    where
-        T: SolEvent + 'static,
-    {
-        let event_signature = T::SIGNATURE;
-
-        let filter = Filter::new()
-            .address(*source_state_bridge_contract_address)
-            .event(event_signature)
-            .from_block(start)
-            .to_block(end);
-
-        let logs = provider.get_logs(&filter).await?;
-
-        let events: Vec<Log<T>> = logs
-            .into_iter()
-            .filter_map(|log| T::decode_log(&log.inner).ok())
-            .collect();
-
-        Ok(events)
-    }
-
-    #[deprecated(
-        note = "Superseded by the proof request queue, which reads queue storage directly instead of scanning TokensLocked events. No longer used in the proving path."
-    )]
-    #[allow(deprecated)]
-    async fn _get_source_contract_events<T>(
-        provider: &RootProvider<Ethereum>,
-        source_state_bridge_contract_address: &Address,
-        start_block: u64,
-        end_block: u64,
-    ) -> Result<Vec<Log<T>>>
-    where
-        T: SolEvent + 'static,
-    {
-        let mut all_events = Vec::new();
-        let mut current_block = start_block;
-
-        while current_block <= end_block {
-            let chunk_end = (current_block + CHUNK_SIZE).min(end_block);
-
-            debug!(
-                "Loading source contract event '{}' from blocks '{}'->'{}'.",
-                T::SIGNATURE,
-                current_block,
-                chunk_end
-            );
-
-            let mut retries = 0;
-            let events = loop {
-                match Self::_get_source_contract_event_chunk(
-                    provider,
-                    source_state_bridge_contract_address,
-                    current_block,
-                    chunk_end,
-                )
-                .await
-                {
-                    Ok(events) => break events,
-                    Err(e) if retries < MAX_RETRIES => {
-                        let delay = RETRY_BASE_DELAY * 2u32.pow(retries as u32);
-                        error!(
-                            "Error fetching chunk (retry {} in {:?}): {:?}",
-                            retries + 1,
-                            delay,
-                            e
-                        );
-                        sleep(delay).await;
-                        retries += 1;
-                    }
-                    Err(e) => return Err(e),
-                }
-            };
-
-            all_events.extend(events);
-            current_block = chunk_end + 1; // Move to next chunk immediately
-        }
-
-        Ok(all_events)
     }
 
     /// eth_getProof for `storage_keys`, split into requests of at most
@@ -603,38 +507,5 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         };
 
         Ok(output_with_blocks)
-    }
-
-    #[deprecated(
-        note = "Superseded by the proof request queue, which reads queue storage directly instead of scanning TokensLocked events. No longer used in the proving path."
-    )]
-    #[allow(deprecated)]
-    pub async fn get_source_contract_events<T>(
-        &self,
-        start_block: u64,
-        end_block: u64,
-    ) -> Result<Vec<Log<T>>>
-    where
-        T: SolEvent + Send + 'static,
-    {
-        let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
-        query_with_fallback(
-            &self.principal_provider,
-            &self.backup_providers,
-            |provider| {
-                async move {
-                    Self::_get_source_contract_events(
-                        &provider,
-                        &source_state_bridge_contract_address,
-                        start_block,
-                        end_block,
-                    )
-                    .await
-                }
-                .boxed()
-            },
-            EXECUTION_PROVIDER_TIMEOUT,
-        )
-        .await
     }
 }

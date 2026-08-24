@@ -1,61 +1,11 @@
-use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, B256, U256};
+use crate::storage_layout::{MAX_COLLECTION_KEYS, QUEUE_ENTRY_WORDS};
+use alloy_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use alloy_trie::TrieAccount;
 use anyhow::{bail, Context, Result};
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use helios_consensus_core::types::Forks;
 use helios_consensus_core::types::{FinalityUpdate, LightClientStore, Update};
-use nori_hash::merkle_poseidon_fixed::MAX_TREE_DEPTH;
 use serde::{Deserialize, Serialize};
-
-// TODO FIX ME FIND A BETTER PLACE FOR THIS!
-#[deprecated(
-    note = "Superseded by the proof request queue storage layout (QUEUE_HEAD_STORAGE_INDEX, QUEUE_REQUESTS_STORAGE_INDEX). Only referenced by the deprecated legacy storage slot path."
-)]
-pub const SOURCE_CONTRACT_LOCKED_TOKENS_STORAGE_INDEX: u8 = 2u8;
-
-#[deprecated(
-    note = "Superseded by the proof request queue types (QueueStorage, QueueEntryProof, TargetStorageProof). Only used by the deprecated verify_storage_slot_proofs path."
-)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct StorageSlot {
-    pub key: B256, // raw 32 byte storage slot key e.g. for slot 0: 0x000...00
-    pub slot_key_code_challenge: U256, // code challenge associated with the slot key
-    pub expected_value: U256, // raw `keccak256(abi.encode(target, data));`
-    pub mpt_proof: Vec<Bytes>, // contract-specific MPT proof
-}
-
-#[deprecated(
-    note = "Superseded by QueueStorage, along with the StorageSlot entries it holds. Only used by the deprecated verify_storage_slot_proofs path."
-)]
-#[allow(deprecated)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ContractStorage {
-    pub address: Address,
-    pub expected_value: TrieAccount,
-    pub mpt_proof: Vec<Bytes>, // global MPT proof
-    pub storage_slots: Vec<StorageSlot>,
-}
-
-// -----------------------------------------------------------------------------
-// NoriProofRequestQueue storage layout.
-//
-// Mirrors NoriProofRequestQueue.sol. The guest derives storage keys from these
-// indices, so they must match the deployed contract exactly.
-// -----------------------------------------------------------------------------
-
-/// Slot index of `head`.
-pub const QUEUE_HEAD_STORAGE_INDEX: u8 = 0;
-/// Slot index of the `_requests` mapping.
-pub const QUEUE_REQUESTS_STORAGE_INDEX: u8 = 1;
-/// Consecutive storage words per entry: target, slotKey, count, key0, key1.
-pub const QUEUE_ENTRY_WORDS: usize = 5;
-/// Collection keys carried by one request.
-pub const MAX_COLLECTION_KEYS: usize = 2;
-/// Entries drained by a single update.
-///
-/// A batch folds into one Merkle tree, so its ceiling is that tree's capacity.
-/// Lowering it trades backlog latency for proving time per update.
-pub const MAX_BATCH: usize = 1 << MAX_TREE_DEPTH;
 
 /// One queue entry: the claimed field values plus one MPT proof per storage
 /// word. The values are witness data; each is pinned by verifying its word
@@ -158,16 +108,6 @@ pub struct ExecutionStateProof {
     pub gindex: String,
 }
 
-// TODO do we need the contract address here.
-#[deprecated(
-    note = "Superseded by VerifiedRequest in the proof request queue path. No remaining references."
-)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct VerifiedContractStorageSlot {
-    pub slot_key_code_challenge: U256,
-    pub value: U256,
-}
-
 /// One verified request, carrying everything its leaf is hashed from.
 ///
 /// Published in cursor order so a consumer can rebuild the committed tree and
@@ -187,7 +127,7 @@ pub struct ProofOutputs {
     pub output_slot: u64,                           // [ 40.. 48] u64
     pub output_store_hash: B256,                    // [ 48.. 80] bytes32
     pub execution_state_root: B256,                 // [ 80..112] bytes32
-    pub verified_contract_storage_slots_root: B256, // [112..144] bytes32
+    pub verified_requests_root: B256,               // [112..144] bytes32
     pub next_sync_committee_hash: B256,             // [144..176] bytes32
     /// NoriProofRequestQueue address; the account every storage proof anchors on.
     pub proof_request_queue_address: Address,       // [176..196] bytes20
@@ -211,7 +151,7 @@ impl ProofOutputs {
         buf[40..48].copy_from_slice(&self.output_slot.to_be_bytes());
         buf[48..80].copy_from_slice(&self.output_store_hash.0);
         buf[80..112].copy_from_slice(&self.execution_state_root.0);
-        buf[112..144].copy_from_slice(&self.verified_contract_storage_slots_root.0);
+        buf[112..144].copy_from_slice(&self.verified_requests_root.0);
         buf[144..176].copy_from_slice(&self.next_sync_committee_hash.0);
         buf[176..196].copy_from_slice(self.proof_request_queue_address.as_slice()); // BE
         buf[196..204].copy_from_slice(&self.input_queue_cursor.to_be_bytes());
@@ -245,7 +185,7 @@ impl ProofOutputs {
 
         let output_store_hash = B256::from_slice(&bytes[48..80]);
         let execution_state_root = B256::from_slice(&bytes[80..112]);
-        let verified_contract_storage_slots_root = B256::from_slice(&bytes[112..144]);
+        let verified_requests_root = B256::from_slice(&bytes[112..144]);
         let next_sync_committee_hash = B256::from_slice(&bytes[144..176]);
         let proof_request_queue_address = Address::from_slice(&bytes[176..196]);
 
@@ -270,7 +210,7 @@ impl ProofOutputs {
             output_slot,
             output_store_hash,
             execution_state_root,
-            verified_contract_storage_slots_root,
+            verified_requests_root,
             next_sync_committee_hash,
             proof_request_queue_address,
             input_queue_cursor,
@@ -350,49 +290,6 @@ impl ConsensusProofOutputs {
     }
 }
 
-// -----------------------------------------------------------------------------
-// Solidity storage layout arithmetic.
-//
-// Shared by the guest, which derives the keys it verifies, and the host, which
-// fetches those same keys over RPC.
-//
-// FIXME(request-queue): these functions are not types and are misplaced. Move them to a new sibling module, storage_layout.rs.
-// -----------------------------------------------------------------------------
-
-/// Storage slot of a value-type state variable declared at `index`.
-pub fn storage_slot_of_index(index: u8) -> B256 {
-    B256::from(U256::from(index))
-}
-
-/// Storage slot of `mapping(uint256 => T)` entry `key`, for a mapping declared
-/// at `mapping_slot_index`. For a struct value this is the entry's first word.
-///
-/// Solidity's rule: `keccak256(abi.encode(key, mapping_slot_index))`, where
-/// `abi.encode` of two `uint256` is their 32-byte big-endian words concatenated.
-pub fn mapping_entry_location(key: U256, mapping_slot_index: u8) -> B256 {
-    let mut encoded = [0u8; 64];
-    encoded[0..32].copy_from_slice(&key.to_be_bytes::<32>());
-    encoded[32..64].copy_from_slice(&U256::from(mapping_slot_index).to_be_bytes::<32>());
-    keccak256(encoded)
-}
-
-/// Slot of word `word_index` of a struct stored at `base`. Struct members
-/// occupy consecutive slots, so this is integer addition on the key.
-pub fn struct_word_slot(base: B256, word_index: u8) -> B256 {
-    B256::from(U256::from_be_bytes(base.0).wrapping_add(U256::from(word_index)))
-}
-
-/// Storage-word value of an `address` member, which Solidity stores
-/// right-aligned.
-pub fn word_of_address(address: Address) -> U256 {
-    U256::from_be_slice(address.as_slice())
-}
-
-/// Storage-word value of a `bytes32` member.
-pub fn word_of_b256(word: B256) -> U256 {
-    U256::from_be_bytes(word.0)
-}
-
 #[cfg(test)]
 mod proof_outputs_tests {
     use super::*;
@@ -404,7 +301,7 @@ mod proof_outputs_tests {
             output_slot: 2,
             output_store_hash: B256::repeat_byte(0x22),
             execution_state_root: B256::repeat_byte(0x33),
-            verified_contract_storage_slots_root: B256::repeat_byte(0x44),
+            verified_requests_root: B256::repeat_byte(0x44),
             next_sync_committee_hash: B256::repeat_byte(0x55),
             proof_request_queue_address: Address::repeat_byte(0x66),
             input_queue_cursor: 3,

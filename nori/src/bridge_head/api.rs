@@ -42,7 +42,7 @@ pub struct ProofMessage {
     pub output_store_hash: FixedBytes<32>,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
-    pub verified_contract_storage_slots_root: FixedBytes<32>,
+    pub verified_requests_root: FixedBytes<32>,
     pub next_sync_committee_hash: FixedBytes<32>,
     pub proof_request_queue_address: alloy_primitives::Address,
     pub verified_requests: Vec<VerifiedRequest>,
@@ -122,6 +122,8 @@ pub struct BridgeHead {
     event_tx: mpsc::Sender<BridgeHeadEvent>,
     /// FixedBytes representing the store hash
     store_hash: FixedBytes<32>,
+    /// Current queue cursor position
+    queue_cursor: u64,
 }
 
 impl BridgeHead {
@@ -129,7 +131,7 @@ impl BridgeHead {
         validate_env(&[
             "NORI_SOURCE_EXECUTION_HTTP_RPCS",
             "NORI_SOURCE_CONSENSUS_HTTP_RPCS",
-            "NORI_TOKEN_BRIDGE_ADDRESS",
+            "NORI_PROOF_QUEUE_ADDRESS",
             "NORI_SOURCE_CHAIN_ID"
         ]);
 
@@ -137,6 +139,7 @@ impl BridgeHead {
         let current_slot = 0u64;
         // let init_latest_beacon_slot = 0u64;
         let store_hash = FixedBytes::<32>::ZERO;
+        let queue_cursor = 0u64;
 
         // Setup command mpsc
         let (command_tx, command_rx) = mpsc::channel(2);
@@ -165,6 +168,7 @@ impl BridgeHead {
                 job_tx,
                 event_tx,
                 store_hash,
+                queue_cursor,
             },
         )
     }
@@ -286,6 +290,7 @@ impl BridgeHead {
                     expected_output_block_number: proof_inputs_with_window
                         .expected_output_block_number,
                     input_store_hash: store_hash,
+                    input_queue_cursor: self.queue_cursor,
                 },
             ))
             .await?;
@@ -377,7 +382,7 @@ impl BridgeHead {
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
                     output_store_hash: proof_outputs.output_store_hash,
-                    verified_contract_storage_slots_root: proof_outputs.verified_contract_storage_slots_root,
+                    verified_requests_root: proof_outputs.verified_requests_root,
                     next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
                     proof_request_queue_address: proof_outputs.proof_request_queue_address,
                     verified_requests: verified_requests.clone(),
@@ -397,7 +402,7 @@ impl BridgeHead {
                 output_store_hash,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
-                verified_contract_storage_slots_root: proof_outputs.verified_contract_storage_slots_root,
+                verified_requests_root: proof_outputs.verified_requests_root,
                 next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
                 proof_request_queue_address: proof_outputs.proof_request_queue_address,
                 verified_requests,
@@ -459,6 +464,7 @@ impl BridgeHead {
         &mut self,
         slot: u64,
         store_hash: FixedBytes<32>,
+        queue_cursor: u64,
     ) -> Result<(), mpsc::error::SendError<BridgeHeadEvent>> {
         // Update current head
         self.current_slot = slot;
@@ -466,9 +472,12 @@ impl BridgeHead {
         // Update the store hash
         self.store_hash = store_hash;
 
+        // Update the queue cursor
+        self.queue_cursor = queue_cursor;
+
         // Notify of head advanced
         self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::HeadAdvanced(
-                TransitionNoticeExtensionBridgeHeadAdvanced { slot, store_hash },
+                TransitionNoticeExtensionBridgeHeadAdvanced { slot, store_hash, queue_cursor },
             ))
             .await?;
 
@@ -546,6 +555,7 @@ impl BridgeHead {
         // Update current_slot and store_hash to init values
         self.current_slot = current_slot;
         self.store_hash = store_hash;
+        self.queue_cursor = queue_cursor;
 
         // Move finality_stage_input_tx to self
         self.finality_stage_input_tx = Some(finality_stage_input_tx);
@@ -562,6 +572,7 @@ impl BridgeHead {
                     latest_beacon_slot: init_latest_beacon_slot,
                     current_slot: self.current_slot,
                     store_hash: self.store_hash,
+                    queue_cursor: self.queue_cursor,
                 },
             ))
             .await
@@ -602,7 +613,7 @@ impl BridgeHead {
                                     break;
                                 }
                                 // Deal with advance invocation
-                                if let Err(err) = self.advance(message.slot, message.store_hash).await {
+                                if let Err(err) = self.advance(message.slot, message.store_hash, message.queue_cursor).await {
                                     error!("Bridge Head API Error: Failed to send head advanced event - observer receiver dropped: {:?}", err);
                                     break;
                                 }

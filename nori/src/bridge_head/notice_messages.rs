@@ -48,6 +48,7 @@ pub struct TransitionNoticeExtensionBridgeHeadStarted {
     pub latest_beacon_slot: u64,
     pub current_slot: u64,
     pub store_hash: FixedBytes<32>,
+    pub queue_cursor: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadWarning {
@@ -59,6 +60,7 @@ pub struct TransitionNoticeExtensionBridgeHeadJobCreated {
     pub input_slot: u64,
     pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
+    pub input_queue_cursor: u64,
     pub expected_output_slot: u64,
     pub expected_output_block_number: u64,
 }
@@ -72,7 +74,7 @@ pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
     pub output_block_number: u64,
     pub output_store_hash: FixedBytes<32>,
     pub execution_state_root: FixedBytes<32>,
-    pub verified_contract_storage_slots_root: FixedBytes<32>,
+    pub verified_requests_root: FixedBytes<32>,
     pub next_sync_committee_hash: FixedBytes<32>,
     pub proof_request_queue_address: alloy_primitives::Address,
     pub verified_requests: Vec<VerifiedRequest>,
@@ -111,7 +113,8 @@ pub struct TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadAdvanced {
     pub slot: u64,
-    pub store_hash: FixedBytes<32>
+    pub store_hash: FixedBytes<32>,
+    pub queue_cursor: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

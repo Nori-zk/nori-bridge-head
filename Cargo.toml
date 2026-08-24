@@ -1,5 +1,5 @@
 [workspace]
-members = ["nori/src/contract_bindings", "nori", "nori-hash", "nori-program", "nori-build-zk", "nori-test-fixtures"]
+members = ["nori", "nori-hash", "nori-program", "nori-build-zk", "nori-test-fixtures"]
 resolver = "2"
 
 [workspace.package]
@@ -12,7 +12,6 @@ repository = "https://github.com/succinctlabs/sp1-helios"
 [workspace.dependencies]
 
 # nori
-nori-contract-bindings = { path = "nori/src/contract_bindings" }
 nori = { path = "nori" }
 nori-hash = { path = "nori-hash" }
 nori-sp1-helios-primitives = { path = "nori-primitives" }

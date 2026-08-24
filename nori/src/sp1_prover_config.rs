@@ -31,7 +31,7 @@ fn ensure_crypto_provider() {
 // Environment variable names for SP1 prover configuration
 // SDK-defined environment variables:
 // Reference: sp1-sdk-5.2.2/src/env/mod.rs:39-42,45 (EnvProver::new)
-const ENV_SP1_PROVER: &str = "SP1_PROVER"; // Required: validated in nori/src/bridge_head/api.rs:123
+const ENV_SP1_PROVER: &str = "SP1_PROVER"; // Required: no default, errors below if missing or invalid (line 607)
 
 // Reference: sp1-sdk-5.2.2/src/network/builder.rs:32,50,166,178 (NetworkProverBuilder)
 const ENV_NETWORK_PRIVATE_KEY: &str = "SP1_NETWORK_PRIVATE_KEY"; // Required when SP1_PROVER=network (line 166)

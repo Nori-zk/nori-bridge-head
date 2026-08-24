@@ -252,7 +252,7 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// let updated_store = get_store_with_next_sync_committee(
     ///     expected_slot,
     ///     original_store,

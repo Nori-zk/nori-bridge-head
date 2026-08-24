@@ -39,7 +39,7 @@ mod proof_outputs {
                     output_slot: 0,
                     output_store_hash: B256::ZERO,
                     execution_state_root: B256::ZERO,
-                    verified_contract_storage_slots_root: B256::ZERO,
+                    verified_requests_root: B256::ZERO,
                     next_sync_committee_hash: B256::ZERO,
                     proof_request_queue_address: Address::ZERO,
                     input_queue_cursor: 0,
@@ -56,7 +56,7 @@ mod proof_outputs {
                     output_slot: 3,
                     output_store_hash: byte_filled(0x04),
                     execution_state_root: byte_filled(0x05),
-                    verified_contract_storage_slots_root: byte_filled(0x06),
+                    verified_requests_root: byte_filled(0x06),
                     next_sync_committee_hash: byte_filled(0x07),
                     proof_request_queue_address: Address::repeat_byte(0x08),
                     input_queue_cursor: 9,
@@ -74,7 +74,7 @@ mod proof_outputs {
                     output_slot: u64::MAX,
                     output_store_hash: byte_filled(0xff),
                     execution_state_root: byte_filled(0xff),
-                    verified_contract_storage_slots_root: byte_filled(0xff),
+                    verified_requests_root: byte_filled(0xff),
                     next_sync_committee_hash: byte_filled(0xff),
                     proof_request_queue_address: Address::repeat_byte(0xff),
                     input_queue_cursor: 0x0000_0001_0000_0000,
@@ -97,7 +97,7 @@ mod proof_outputs {
                     execution_state_root: B256::from(hex!(
                         "4b6e1f3f718c9daebf2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80"
                     )),
-                    verified_contract_storage_slots_root: B256::from(hex!(
+                    verified_requests_root: B256::from(hex!(
                         "5c7f2040829daebfc03b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091"
                     )),
                     next_sync_committee_hash: B256::from(hex!(
@@ -129,9 +129,9 @@ mod proof_outputs {
                     "outputSlot": outputs.output_slot.to_string(),
                     "outputStoreHash": format!("0x{}", hex::encode(outputs.output_store_hash)),
                     "executionStateRoot": format!("0x{}", hex::encode(outputs.execution_state_root)),
-                    "verifiedContractDepositsRoot": format!(
+                    "verifiedRequestsRoot": format!(
                         "0x{}",
-                        hex::encode(outputs.verified_contract_storage_slots_root)
+                        hex::encode(outputs.verified_requests_root)
                     ),
                     "nextSyncCommitteeHash": format!(
                         "0x{}",
