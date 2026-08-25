@@ -63,6 +63,7 @@ pub struct TransitionNoticeExtensionBridgeHeadJobCreated {
     pub input_queue_cursor: u64,
     pub expected_output_slot: u64,
     pub expected_output_block_number: u64,
+    pub expected_output_queue_cursor: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
@@ -70,18 +71,16 @@ pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
     pub input_slot: u64,
     pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
+    pub input_queue_cursor: u64,
     pub output_slot: u64,
     pub output_block_number: u64,
     pub output_store_hash: FixedBytes<32>,
+    pub output_queue_cursor: u64,
     pub execution_state_root: FixedBytes<32>,
     pub verified_requests_root: FixedBytes<32>,
     pub next_sync_committee_hash: FixedBytes<32>,
     pub proof_request_queue_address: alloy_primitives::Address,
     pub verified_requests: Vec<VerifiedRequest>,
-    /// Queue cursor this proof resumed from.
-    pub input_queue_cursor: u64,
-    /// Queue cursor after this proof settles.
-    pub output_queue_cursor: u64,
     pub elapsed_sec: f64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -90,8 +89,10 @@ pub struct TransitionNoticeExtensionBridgeHeadJobFailed {
     pub input_slot: u64,
     pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
+    pub input_queue_cursor: u64,
     pub expected_output_slot: u64,
     pub expected_output_block_number: u64,
+    pub expected_output_queue_cursor: u64,
     pub error: String,
     pub elapsed_sec: f64,
     pub n_job_in_buffer: u64,

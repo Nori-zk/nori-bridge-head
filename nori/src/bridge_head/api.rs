@@ -37,19 +37,17 @@ pub struct ProofMessage {
     pub input_slot: u64,
     pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
+    pub input_queue_cursor: u64,
     pub output_slot: u64,
     pub output_block_number: u64,
     pub output_store_hash: FixedBytes<32>,
+    pub output_queue_cursor: u64,
     pub proof: SP1ProofWithPublicValues,
     pub execution_state_root: FixedBytes<32>,
     pub verified_requests_root: FixedBytes<32>,
     pub next_sync_committee_hash: FixedBytes<32>,
     pub proof_request_queue_address: alloy_primitives::Address,
     pub verified_requests: Vec<VerifiedRequest>,
-    /// Queue cursor this proof resumed from.
-    pub input_queue_cursor: u64,
-    /// Queue cursor after this proof settles.
-    pub output_queue_cursor: u64,
     pub elapsed_sec: f64,
 }
 
@@ -283,14 +281,15 @@ impl BridgeHead {
         // Notify of a job created
         self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobCreated(
                 TransitionNoticeExtensionBridgeHeadJobCreated {
+                    job_id,
                     input_slot: self.current_slot,
                     input_block_number: proof_inputs_with_window.input_block_number,
-                    job_id,
+                    input_store_hash: store_hash,
+                    input_queue_cursor: self.queue_cursor,
                     expected_output_slot: self.next_slot,
                     expected_output_block_number: proof_inputs_with_window
                         .expected_output_block_number,
-                    input_store_hash: store_hash,
-                    input_queue_cursor: self.queue_cursor,
+                    expected_output_queue_cursor,
                 },
             ))
             .await?;
@@ -376,18 +375,18 @@ impl BridgeHead {
                     input_slot,
                     input_block_number: inputs_with_window.input_block_number,
                     input_store_hash,
+                    input_queue_cursor: proof_outputs.input_queue_cursor,
                     output_slot,
                     output_block_number: proof_outputs.output_block_number,
+                    output_store_hash: proof_outputs.output_store_hash,
+                    output_queue_cursor: proof_outputs.output_queue_cursor,
                     job_id,
                     elapsed_sec,
                     execution_state_root: proof_outputs.execution_state_root,
-                    output_store_hash: proof_outputs.output_store_hash,
                     verified_requests_root: proof_outputs.verified_requests_root,
                     next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
                     proof_request_queue_address: proof_outputs.proof_request_queue_address,
                     verified_requests: verified_requests.clone(),
-                    input_queue_cursor: proof_outputs.input_queue_cursor,
-                    output_queue_cursor: proof_outputs.output_queue_cursor,
                 },
             ))
             .await?;
@@ -397,17 +396,17 @@ impl BridgeHead {
                 input_slot,
                 input_block_number: inputs_with_window.input_block_number,
                 input_store_hash,
+                input_queue_cursor: proof_outputs.input_queue_cursor,
                 output_slot,
                 output_block_number: proof_outputs.output_block_number,
                 output_store_hash,
+                output_queue_cursor: proof_outputs.output_queue_cursor,
                 proof,
                 execution_state_root: proof_outputs.execution_state_root,
                 verified_requests_root: proof_outputs.verified_requests_root,
                 next_sync_committee_hash: proof_outputs.next_sync_committee_hash,
                 proof_request_queue_address: proof_outputs.proof_request_queue_address,
                 verified_requests,
-                input_queue_cursor: proof_outputs.input_queue_cursor,
-                output_queue_cursor: proof_outputs.output_queue_cursor,
                 elapsed_sec,
             })
             .await?;
@@ -441,12 +440,14 @@ impl BridgeHead {
         // Notify of a job failure
         self.trigger_listener_with_notice(TransitionNoticeBridgeHeadMessageExtension::JobFailed(
                 TransitionNoticeExtensionBridgeHeadJobFailed {
+                    job_id: err.job_id,
                     input_slot: inputs_with_window.input_slot,
                     input_block_number: inputs_with_window.input_block_number,
                     input_store_hash: inputs_with_window.proof_inputs.store_hash,
+                    input_queue_cursor: inputs_with_window.proof_inputs.queue_storage.input_cursor,
                     expected_output_slot: inputs_with_window.expected_output_slot,
                     expected_output_block_number: inputs_with_window.expected_output_block_number,
-                    job_id: err.job_id,
+                    expected_output_queue_cursor: inputs_with_window.expected_output_queue_cursor,
                     error: message,
                     elapsed_sec,
                     n_job_in_buffer: n_jobs as u64,
