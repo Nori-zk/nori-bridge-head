@@ -469,9 +469,12 @@ mod storage_proof_tests {
         verify_storage_word(root, slot(0xaa), U256::from(43u64), &proof).unwrap_err();
     }
 
+    /// Absence at an empty branch child: the key's first nibble indexes a slot
+    /// of the root branch that holds nothing.
     #[test]
     fn empty_slot_claimed_zero_verifies_by_exclusion() {
         let (root, proof) = populated_storage_trie(slot(0xcc));
+        assert_eq!(proof_node_kinds(&proof), vec!["Branch"]);
         verify_storage_word(root, slot(0xcc), U256::ZERO, &proof).unwrap();
     }
 
@@ -481,10 +484,13 @@ mod storage_proof_tests {
         verify_storage_word(root, slot(0xcc), U256::from(1u64), &proof).unwrap_err();
     }
 
-    /// A zero-valued entry word is simply absent from the trie.
+    /// A zero-valued entry word is simply absent from the trie. Absence
+    /// resolved to another key's leaf: this key shares a first nibble with
+    /// slot 0xaa, so the path ends on that leaf, whose remaining path differs.
     #[test]
     fn zero_entry_word_reads_as_zero() {
         let (root, proof) = populated_storage_trie(B256::ZERO);
+        assert_eq!(proof_node_kinds(&proof), vec!["Branch", "Leaf"]);
         verify_storage_word(root, B256::ZERO, U256::ZERO, &proof).unwrap();
     }
 
