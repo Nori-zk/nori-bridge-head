@@ -1,31 +1,34 @@
 use crate::{
-    contract::{
-        code_challenge_to_storage_slots, get_source_contract_address,
-    },
+    contract::get_proof_queue_address,
     rpcs::query_with_fallback,
 };
-use nori_contract_bindings::NoriTokenBridge;
-use nori_sp1_helios_primitives::types::{
-    ConsensusProofInputs, ContractStorage, ProofInputs, ProofInputsWithWindow, StorageSlot,
-};
-use nori_sp1_helios_program::consensus::consensus_mpt_program;
 use alloy::{
     eips::BlockId,
     network::Ethereum,
     providers::{Provider, ProviderBuilder, RootProvider},
-    rpc::types::{EIP1186AccountProofResponse, Filter},
-    sol_types::SolEvent
+    rpc::types::EIP1186AccountProofResponse,
 };
-use alloy_primitives::{Address, FixedBytes, Log, B256};
+use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, B256, U256};
+use alloy_rlp::Encodable;
+use alloy_trie::{Nibbles, TrieAccount};
 use anyhow::{anyhow, Context, Error, Result};
 use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, warn};
+use nori_hash::merkle_poseidon_fixed::MAX_BATCH;
+use nori_sp1_helios_primitives::storage_layout::{
+    mapping_entry_location, storage_slot_of_index, struct_word_slot, QUEUE_ENTRY_WORDS,
+    QUEUE_HEAD_STORAGE_INDEX, QUEUE_REQUESTS_STORAGE_INDEX,
+};
+use nori_sp1_helios_primitives::types::{
+    ConsensusProofInputs, ProofInputs, ProofInputsWithWindow, QueueEntryProof, QueueStorage,
+    TargetSlotProof, TargetStorageProof,
+};
+use nori_sp1_helios_program::consensus::consensus_mpt_program;
 use reqwest::Url;
-use std::{env, marker::PhantomData};
+use std::{collections::HashMap, env, marker::PhantomData};
 use tokio::time::{sleep, Duration};
 
-const CHUNK_SIZE: u64 = 100;
 const MAX_RETRIES: usize = 3;
 const RETRY_BASE_DELAY: Duration = Duration::from_secs(1);
 const EXECUTION_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
@@ -33,9 +36,10 @@ const EXECUTION_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
 pub struct ExecutionHttpProxy<S: ConsensusSpec> {
     principal_provider: RootProvider<Ethereum>,
     backup_providers: Vec<RootProvider<Ethereum>>,
-    source_state_bridge_contract_address: Address,
+    proof_queue_address: Address,
     _marker: PhantomData<S>,
     validation_timeout: Duration,
+    chunk_limit: usize,
 }
 
 impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
@@ -57,6 +61,20 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             .unwrap_or(300);
 
         let validation_timeout = Duration::from_secs(validation_timeout_sec);
+
+        // Parsing the per-request storage key chunk limit
+        let chunk_limit = std::env::var("NORI_EXECUTION_CHUNK_LIMIT")
+            .ok()
+            .map(|v| {
+                v.parse::<usize>().map_err(|e| {
+                    Error::msg(format!(
+                        "Failed to parse NORI_EXECUTION_CHUNK_LIMIT as usize: {}",
+                        e
+                    ))
+                })
+            })
+            .transpose()?
+            .unwrap_or(100);
 
         let source_execution_http_urls = env::var("NORI_SOURCE_EXECUTION_HTTP_RPCS")
             .context("Missing NORI_SOURCE_EXECUTION_HTTP_RPCS in environment")?;
@@ -89,14 +107,15 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
         let principal_provider = providers.remove(0);
 
-        let source_state_bridge_contract_address = get_source_contract_address()?;
+        let proof_queue_address = get_proof_queue_address()?;
 
         Ok(ExecutionHttpProxy {
-            source_state_bridge_contract_address,
+            proof_queue_address,
             principal_provider,
             backup_providers: providers,
             _marker: PhantomData,
             validation_timeout,
+            chunk_limit,
         })
     }
 
@@ -104,70 +123,40 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         ExecutionHttpProxy::from_env().unwrap()
     }
 
-    async fn _get_source_contract_event_chunk<T>(
+    /// eth_getProof for `storage_keys`, split into requests of at most
+    /// `chunk_limit` keys (NORI_EXECUTION_CHUNK_LIMIT) and merged. The account
+    /// proof is identical across chunks, so the first response is kept and each
+    /// chunk's storage_proof is appended.
+    async fn _get_proof(
         provider: &RootProvider<Ethereum>,
-        source_state_bridge_contract_address: &Address,
-        start: u64,
-        end: u64,
-    ) -> Result<Vec<Log<T>>>
-    where
-        T: SolEvent + 'static,
-    {
-        let event_signature = T::SIGNATURE;
+        address: &Address,
+        storage_keys: Vec<B256>,
+        block_id: BlockId,
+        chunk_limit: usize,
+    ) -> Result<EIP1186AccountProofResponse> {
+        // An empty key set still needs one request for the account proof, and
+        // chunks(0) would panic.
+        let chunk_limit = chunk_limit.max(1);
+        let chunks: Vec<Vec<B256>> = if storage_keys.is_empty() {
+            vec![Vec::new()]
+        } else {
+            storage_keys.chunks(chunk_limit).map(|c| c.to_vec()).collect()
+        };
 
-        let filter = Filter::new()
-            .address(*source_state_bridge_contract_address)
-            .event(event_signature)
-            .from_block(start)
-            .to_block(end);
-
-        let logs = provider.get_logs(&filter).await?;
-
-        let events: Vec<Log<T>> = logs
-            .into_iter()
-            .filter_map(|log| T::decode_log(&log.inner).ok())
-            .collect();
-
-        Ok(events)
-    }
-
-    async fn _get_source_contract_events<T>(
-        provider: &RootProvider<Ethereum>,
-        source_state_bridge_contract_address: &Address,
-        start_block: u64,
-        end_block: u64,
-    ) -> Result<Vec<Log<T>>>
-    where
-        T: SolEvent + 'static,
-    {
-        let mut all_events = Vec::new();
-        let mut current_block = start_block;
-
-        while current_block <= end_block {
-            let chunk_end = (current_block + CHUNK_SIZE).min(end_block);
-
-            debug!(
-                "Loading source contract event '{}' from blocks '{}'->'{}'.",
-                T::SIGNATURE,
-                current_block,
-                chunk_end
-            );
-
+        let mut merged: Option<EIP1186AccountProofResponse> = None;
+        for chunk in chunks {
             let mut retries = 0;
-            let events = loop {
-                match Self::_get_source_contract_event_chunk(
-                    provider,
-                    source_state_bridge_contract_address,
-                    current_block,
-                    chunk_end,
-                )
-                .await
+            let proof = loop {
+                match provider
+                    .get_proof(*address, chunk.clone())
+                    .block_id(block_id)
+                    .await
                 {
-                    Ok(events) => break events,
+                    Ok(proof) => break proof,
                     Err(e) if retries < MAX_RETRIES => {
                         let delay = RETRY_BASE_DELAY * 2u32.pow(retries as u32);
                         error!(
-                            "Error fetching chunk (retry {} in {:?}): {:?}",
+                            "eth_getProof chunk failed (retry {} in {:?}): {:?}",
                             retries + 1,
                             delay,
                             e
@@ -175,103 +164,264 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                         sleep(delay).await;
                         retries += 1;
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(anyhow!("ExecutionHttp RPC error: {e}")),
                 }
             };
-
-            all_events.extend(events);
-            current_block = chunk_end + 1; // Move to next chunk immediately
+            match &mut merged {
+                None => merged = Some(proof),
+                Some(acc) => acc.storage_proof.extend(proof.storage_proof),
+            }
         }
 
-        Ok(all_events)
+        Ok(merged.expect("at least one request is always issued"))
     }
 
-    async fn _get_proof(
+    /// Reads a single storage word at `block`.
+    async fn _get_storage_word(
         provider: &RootProvider<Ethereum>,
-        source_state_bridge_contract_address: &Address,
-        storage_keys: Vec<B256>,
-        block_id: BlockId,
-    ) -> Result<EIP1186AccountProofResponse> {
-        let proof = provider
-            .get_proof(*source_state_bridge_contract_address, storage_keys)
-            .block_id(block_id)
-            .await;
-
-        match proof {
-            Ok(proof) => Ok(proof),
-            Err(e) => Err(anyhow!("ExecutionHttp RPC error: {e}")),
-        }
+        address: &Address,
+        key: B256,
+        block: BlockId,
+    ) -> Result<U256> {
+        provider
+            .get_storage_at(*address, key.into())
+            .block_id(block)
+            .await
+            .map_err(|e| anyhow!("ExecutionHttp RPC error reading storage: {e}"))
     }
 
-    // TODO Doc string
+    /// Reads the proof request queue `head` at `block` on the given provider, so
+    /// a caller assembling one preparation reads it from the same provider as the
+    /// rest of its reads.
+    async fn _get_queue_head(
+        provider: &RootProvider<Ethereum>,
+        proof_queue_address: &Address,
+        block: BlockId,
+    ) -> Result<u64> {
+        let head_key = storage_slot_of_index(QUEUE_HEAD_STORAGE_INDEX);
+        Self::_get_storage_word(provider, proof_queue_address, head_key, block)
+            .await?
+            .try_into()
+            .map_err(|_| anyhow!("Queue head exceeds u64"))
+    }
+
+    /// Reads the proof request queue `head` at `block`, with provider fallback,
+    /// for standalone callers that have no provider of their own.
+    pub async fn get_queue_head(&self, block: BlockId) -> Result<u64> {
+        let proof_queue_address = self.proof_queue_address;
+        query_with_fallback(
+            &self.principal_provider,
+            &self.backup_providers,
+            |provider| {
+                async move { Self::_get_queue_head(&provider, &proof_queue_address, block).await }
+                    .boxed()
+            },
+            EXECUTION_PROVIDER_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Decides whether an account exists by verifying its proof both ways.
+    ///
+    /// Clients disagree on what an absent account looks like in an
+    /// `eth_getProof` response, so the response is not trusted: the inclusion
+    /// proof is checked first, then the exclusion proof. Whichever verifies is
+    /// what the guest will be given.
+    fn _account_witness(
+        proof: &EIP1186AccountProofResponse,
+        execution_state_root: B256,
+    ) -> Result<Option<TrieAccount>> {
+        let account = TrieAccount {
+            nonce: proof.nonce,
+            balance: proof.balance,
+            storage_root: proof.storage_hash,
+            code_hash: proof.code_hash,
+        };
+        let address_nibbles = Nibbles::unpack(keccak256(proof.address.as_slice()));
+
+        let mut rlp_encoded_account = Vec::new();
+        account.encode(&mut rlp_encoded_account);
+
+        if alloy_trie::proof::verify_proof(
+            execution_state_root,
+            address_nibbles,
+            Some(rlp_encoded_account),
+            &proof.account_proof,
+        )
+        .is_ok()
+        {
+            return Ok(Some(account));
+        }
+
+        alloy_trie::proof::verify_proof(
+            execution_state_root,
+            address_nibbles,
+            None,
+            &proof.account_proof,
+        )
+        .map_err(|e| {
+            anyhow!(
+                "Account proof for {:?} verifies neither as present nor absent: {e}",
+                proof.address
+            )
+        })?;
+
+        Ok(None)
+    }
+
+    /// Builds the queue witness for entries `queue_cursor` up to `head`, exclusive of `head`.
+    ///
+    /// The key set is not chosen here: `head` is read from queue storage,
+    /// entry locations are derived from their index, and each entry names its
+    /// own target and slot. The host only fetches what the queue already
+    /// committed to, so a bug here yields an unprovable input rather than a
+    /// silently pruned tree.
     async fn _prepare_consensus_mpt_proof_inputs(
         provider: &RootProvider<Ethereum>,
-        source_state_bridge_contract_address: &Address,
-        input_block_number: u64,
+        proof_queue_address: &Address,
+        input_queue_cursor: u64,
         output_block_number: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
+        output_execution_state_root: FixedBytes<32>,
+        chunk_limit: usize,
     ) -> Result<ProofInputs<S>> {
-        let contract_events = Self::_get_source_contract_events::<NoriTokenBridge::TokensLocked>(
-            provider,
-            source_state_bridge_contract_address,
-            input_block_number,
-            output_block_number,
-        )
-        .await?;
+        // Every read is pinned to the window's output block, the block whose state
+        // root the guest verifies them against.
+        let block = BlockId::number(output_block_number);
 
-        let storage_slot_code_challenge_map = code_challenge_to_storage_slots(contract_events);
+        // 1. Queue head, and the batch it derives with the cursor.
+        let queue_head_key = storage_slot_of_index(QUEUE_HEAD_STORAGE_INDEX);
+        let queue_head = Self::_get_queue_head(provider, proof_queue_address, block).await?;
 
-        for (storage_slot, code_challenge) in storage_slot_code_challenge_map.iter() {
-            debug!(
-                "Storage slots obtained code_challenge '{:?}' storage_slot '{:?}'",
-                code_challenge, storage_slot
+        if input_queue_cursor > queue_head {
+            return Err(anyhow!(
+                "Request cursor {input_queue_cursor} is ahead of queue head {queue_head}"
+            ));
+        }
+        let batch = std::cmp::min(queue_head - input_queue_cursor, MAX_BATCH as u64);
+        debug!("Queue head {queue_head}, cursor {input_queue_cursor}, batch {batch}");
+
+        // 2. Entry fields, read from their index-derived locations.
+        let mut entry_word_keys: Vec<B256> = Vec::with_capacity(batch as usize * QUEUE_ENTRY_WORDS);
+        for offset in 0..batch {
+            let base = mapping_entry_location(
+                U256::from(input_queue_cursor + offset),
+                QUEUE_REQUESTS_STORAGE_INDEX,
             );
+            entry_word_keys.push(base);
+            for word_index in 1..QUEUE_ENTRY_WORDS as u8 {
+                entry_word_keys.push(struct_word_slot(base, word_index));
+            }
         }
 
-        // Get mpt proof
-        let mpt_account_proof = Self::_get_proof(
-            provider,
-            source_state_bridge_contract_address, //get_source_contract_address()?,
-            storage_slot_code_challenge_map.keys().cloned().collect(),
-            BlockId::number(output_block_number),
-        )
-        .await?;
+        // 3. One proof request covering head and every entry word. eth_getProof
+        //    returns each key's value alongside its proof, so the entry fields
+        //    are read from this response rather than fetched separately. With an
+        //    empty batch this is a single key: the proof that head == cursor,
+        //    which the circuit still requires before it will commit an empty
+        //    root.
+        let mut queue_keys = vec![queue_head_key];
+        queue_keys.extend(entry_word_keys.iter().copied());
+        let queue_proof =
+            Self::_get_proof(provider, proof_queue_address, queue_keys, block, chunk_limit).await?;
 
-        debug!(
-            "mpt_account_proof {:?}",
-            serde_json::to_string(&mpt_account_proof)
-        );
-
-        let mut storage_slots: Vec<StorageSlot> = mpt_account_proof
+        let queue_words: HashMap<B256, (U256, Vec<Bytes>)> = queue_proof
             .storage_proof
             .iter()
-            .map(|slot| {
-                let code_challenge = storage_slot_code_challenge_map
-                    .get(&slot.key.as_b256())
-                    .copied()
-                    .expect("Missing code challenge for storage slot");
-                StorageSlot {
-                    slot_key_code_challenge: code_challenge,
-                    key: slot.key.as_b256(),
-                    expected_value: slot.value,
-                    mpt_proof: slot.proof.clone(),
-                }
-            })
+            .map(|slot| (slot.key.as_b256(), (slot.value, slot.proof.clone())))
             .collect();
+        let word_at = |key: &B256| -> Result<(U256, Vec<Bytes>)> {
+            queue_words
+                .get(key)
+                .cloned()
+                .ok_or_else(|| anyhow!("Queue proof missing storage key {key:?}"))
+        };
 
-        // Sort by code challenge for stability (in case rpc returns strange order)
-        storage_slots.sort_by_key(|s| s.slot_key_code_challenge);
+        // 4. Assemble entries, and collect the slots each target must prove.
+        let mut entries: Vec<QueueEntryProof> = Vec::with_capacity(batch as usize);
+        let mut slots_by_target: HashMap<Address, Vec<B256>> = HashMap::new();
+        for offset in 0..batch as usize {
+            let keys =
+                &entry_word_keys[offset * QUEUE_ENTRY_WORDS..(offset + 1) * QUEUE_ENTRY_WORDS];
+            let words = keys.iter().map(word_at).collect::<Result<Vec<_>>>()?;
 
-        let contract_storage = ContractStorage {
-            address: mpt_account_proof.address,
-            expected_value: alloy_trie::TrieAccount {
-                nonce: mpt_account_proof.nonce,
-                balance: mpt_account_proof.balance,
-                storage_root: mpt_account_proof.storage_hash,
-                code_hash: mpt_account_proof.code_hash,
+            let target = Address::from_slice(&words[0].0.to_be_bytes::<32>()[12..32]);
+            let slot_key = B256::from(words[1].0.to_be_bytes::<32>());
+
+            entries.push(QueueEntryProof {
+                target,
+                slot_key,
+                collection_keys_count: words[2].0.to::<u8>(),
+                collection_keys: [
+                    B256::from(words[3].0.to_be_bytes::<32>()),
+                    B256::from(words[4].0.to_be_bytes::<32>()),
+                ],
+                word_proofs: words
+                    .into_iter()
+                    .map(|(_, proof)| proof)
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .map_err(|_| anyhow!("Expected {QUEUE_ENTRY_WORDS} word proofs"))?,
+            });
+
+            let target_slots = slots_by_target.entry(target).or_default();
+            if !target_slots.contains(&slot_key) {
+                target_slots.push(slot_key);
+            }
+        }
+
+        // 5. One proof request per distinct target. None are issued for an
+        //    empty batch.
+        let mut targets: Vec<TargetStorageProof> = Vec::with_capacity(slots_by_target.len());
+        for (address, slot_keys) in slots_by_target {
+            let target_proof =
+                Self::_get_proof(provider, &address, slot_keys.clone(), block, chunk_limit).await?;
+            let account = Self::_account_witness(&target_proof, output_execution_state_root)?;
+
+            let proved: HashMap<B256, (U256, Vec<Bytes>)> = target_proof
+                .storage_proof
+                .iter()
+                .map(|slot| (slot.key.as_b256(), (slot.value, slot.proof.clone())))
+                .collect();
+
+            let slots = slot_keys
+                .iter()
+                .map(|key| {
+                    let (value, mpt_proof) = proved
+                        .get(key)
+                        .cloned()
+                        .ok_or_else(|| anyhow!("Target proof missing storage key {key:?}"))?;
+                    Ok(TargetSlotProof {
+                        key: *key,
+                        value,
+                        mpt_proof,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            targets.push(TargetStorageProof {
+                target_address: address,
+                account,
+                account_mpt_proof: target_proof.account_proof,
+                slots,
+            });
+        }
+
+        // The queue always exists; a wrong claim fails in-circuit.
+        let queue_storage = QueueStorage {
+            proof_request_queue_address: queue_proof.address,
+            proof_request_queue_account: TrieAccount {
+                nonce: queue_proof.nonce,
+                balance: queue_proof.balance,
+                storage_root: queue_proof.storage_hash,
+                code_hash: queue_proof.code_hash,
             },
-            mpt_proof: mpt_account_proof.account_proof,
-            storage_slots,
+            proof_request_queue_account_mpt_proof: queue_proof.account_proof,
+            head: queue_head,
+            head_mpt_proof: word_at(&queue_head_key)?.1,
+            input_cursor: input_queue_cursor,
+            entries,
+            targets,
         };
 
         let consensus_mpt_proof_input: ProofInputs<S> = ProofInputs::<S> {
@@ -282,7 +432,7 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             genesis_root: validated_consensus_proof_inputs.genesis_root,
             forks: validated_consensus_proof_inputs.forks,
             store_hash: validated_consensus_proof_inputs.store_hash,
-            contract_storage,
+            queue_storage,
         };
 
         let consensus_mpt_proof_input_clone = consensus_mpt_proof_input.clone();
@@ -310,10 +460,13 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         output_slot: u64,
         input_block_number: u64,
         output_block_number: u64,
+        input_queue_cursor: u64,
         validated_consensus_proof_inputs: ConsensusProofInputs<S>,
         expected_output_store_hash: FixedBytes<32>,
+        expected_execution_state_root: FixedBytes<32>,
     ) -> Result<ProofInputsWithWindow<S>> {
-        let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
+        let proof_queue_address = self.proof_queue_address;
+        let chunk_limit = self.chunk_limit;
         let output = query_with_fallback(
             &self.principal_provider,
             &self.backup_providers,
@@ -323,10 +476,12 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
                 async move {
                     Self::_prepare_consensus_mpt_proof_inputs(
                         &provider,
-                        &source_state_bridge_contract_address,
-                        input_block_number,
+                        &proof_queue_address,
+                        input_queue_cursor,
                         output_block_number,
                         validated_consensus_proof_inputs,
+                        expected_execution_state_root,
+                        chunk_limit,
                     )
                     .await
                 }
@@ -336,6 +491,11 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
         )
         .await?;
 
+        // Output cursor the proof will commit: the input cursor plus the entries
+        // this batch drains. entries.len() is the MAX_BATCH-capped batch, so this
+        // advances by at most MAX_BATCH.
+        let expected_output_queue_cursor =
+            input_queue_cursor + output.queue_storage.entries.len() as u64;
         let output_with_blocks = ProofInputsWithWindow::<S> {
             input_slot,
             expected_output_slot: output_slot,
@@ -343,37 +503,9 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             expected_output_block_number: output_block_number,
             proof_inputs: output,
             expected_output_store_hash,
+            expected_output_queue_cursor,
         };
 
         Ok(output_with_blocks)
-    }
-
-    pub async fn get_source_contract_events<T>(
-        &self,
-        start_block: u64,
-        end_block: u64,
-    ) -> Result<Vec<Log<T>>>
-    where
-        T: SolEvent + Send + 'static,
-    {
-        let source_state_bridge_contract_address = self.source_state_bridge_contract_address;
-        query_with_fallback(
-            &self.principal_provider,
-            &self.backup_providers,
-            |provider| {
-                async move {
-                    Self::_get_source_contract_events(
-                        &provider,
-                        &source_state_bridge_contract_address,
-                        start_block,
-                        end_block,
-                    )
-                    .await
-                }
-                .boxed()
-            },
-            EXECUTION_PROVIDER_TIMEOUT,
-        )
-        .await
     }
 }

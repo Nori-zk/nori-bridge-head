@@ -26,8 +26,9 @@ NORI_SOURCE_CONSENSUS_HTTP_RPCS=https://ethereum-mainnet.core.chainstack.com/bea
 NORI_SOURCE_CHAIN_ID=1
 NORI_SOURCE_EXECUTION_HTTP_RPCS=https://ethereum-mainnet.core.chainstack.com/...,<another execution rpc url>
 
-# Source contract address.
-NORI_TOKEN_BRIDGE_ADDRESS=0x0..
+# NoriProofRequestQueue contract address; the account every storage proof is
+# anchored on and the address committed to the destination chain.
+NORI_PROOF_QUEUE_ADDRESS=0x0..
 
 # SP1 Prover configuration (REQUIRED)
 SP1_PROVER=mock
@@ -44,6 +45,7 @@ NORI_HELIOS_POLLING_INTERVAL=
 # Timeouts for proof input validation (in seconds) @TODO
 NORI_CONSENSUS_PROOF_INPUT_VALIDATION_TIMEOUT=
 NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT=
+NORI_EXECUTION_CHUNK_LIMIT=
 
 # Rust logging level.
 NORI_LOG=info
@@ -55,10 +57,11 @@ NORI_LOG=info
 - **NORI_SOURCE_CONSENSUS_HTTP_RPCS**: Comma-delimited consensus RPC URLs
 - **NORI_SOURCE_CHAIN_ID**: Source chain identifier (e.g., 1 for Ethereum mainnet)
 - **NORI_SOURCE_EXECUTION_HTTP_RPCS**: Comma-delimited execution RPC URLs
-- **NORI_TOKEN_BRIDGE_ADDRESS**: Source contract address on the source chain
+- **NORI_PROOF_QUEUE_ADDRESS**: NoriProofRequestQueue contract address on the source chain
 - **NORI_HELIOS_POLLING_INTERVAL**: Polling interval for Helios client to check for new finality beacon slots
 - **NORI_CONSENSUS_PROOF_INPUT_VALIDATION_TIMEOUT**: Timeout (seconds) for consensus proof validation
 - **NORI_EXECUTION_PROOF_INPUT_VALIDATION_TIMEOUT**: Timeout (seconds) for MPT consensus proof validation
+- **NORI_EXECUTION_CHUNK_LIMIT**: Chunk size for eth_getProof execution rpc requests (default: 100)
 - **NORI_LOG**: Logging level (e.g., info, debug, warn)
 
 **SP1 Prover (Required):**

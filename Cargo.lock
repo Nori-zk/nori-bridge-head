@@ -1962,7 +1962,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -4999,7 +4999,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.53.5",
 ]
 
 [[package]]
@@ -5355,10 +5355,11 @@ dependencies = [
 
 [[package]]
 name = "nori"
-version = "10.0.8"
+version = "10.0.11"
 dependencies = [
  "alloy",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-trie",
  "anyhow",
  "async-trait",
@@ -5371,7 +5372,6 @@ dependencies = [
  "helios-consensus-core",
  "helios-ethereum",
  "log",
- "nori-contract-bindings",
  "nori-hash",
  "nori-sp1-helios-primitives",
  "nori-sp1-helios-program",
@@ -5398,14 +5398,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nori-contract-bindings"
-version = "0.1.0"
-dependencies = [
- "alloy",
- "reqwest",
-]
-
-[[package]]
 name = "nori-hash"
 version = "0.1.0"
 dependencies = [
@@ -5427,12 +5419,15 @@ dependencies = [
 name = "nori-sp1-helios-primitives"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "alloy-primitives",
  "alloy-sol-types",
  "alloy-trie",
  "anyhow",
  "helios-consensus-core",
+ "nori-hash",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

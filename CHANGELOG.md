@@ -1,5 +1,198 @@
 # Changelog
 
+## 25/8/26 - Finding a3850: The committed deposit root is not constrained to be complete
+
+### Finding (verbatim)
+
+#### Description
+
+To bridge from Ethereum to Mina, a user locks funds on the Ethereum `NoriTokenBridge`, which records the deposit in the cumulative mapping `lockedTokens[codeChallenge]` and emits a `TokensLocked` event. On the Mina side, `noriMint` lets that user mint, gated on the user's deposit being a member of a rolling window of up to `maxWindow` (32) verified deposit roots. Each root is committed to Mina by an `update` call carrying an SP1 proof whose output `verified_contract_storage_slots_root` (surfaced on Mina as `verifiedContractDepositsRoot`) is dispatched into that window.
+
+The issue discussed in this finding stems centrally from the fact that this deposit root need not include all deposits. Instead, it is a freshly built Poseidon Merkle tree over whatever storage slots the prover supplies, and the SP1 guest verifies only the inclusion of those slots; it never enforces that the tree is complete.
+
+The root is produced by `verify_storage_slot_proofs`. After verifying the contract account against the execution state root, it builds the tree purely from the supplied `contract_storage.storage_slots`, returning the all-zero hash when the prover supplies none:
+
+```rust
+// nori-bridge-head/nori-program/src/mpt.rs
+// (source excerpt elided — see verify_storage_slot_proofs)
+```
+
+Each supplied slot is checked to exist under the contract's storage root, but nothing constrains what is omitted, so a proof carrying zero deposit slots, and hence the zero-hash root, is valid.
+
+As `update` is permissionless, any party, not only the operator, can advance the bridge head with a valid proof carrying an empty or pruned deposit root.
+
+#### Impact
+
+**Active preemption of the mint path.**
+Each `update` must advance the Ethereum slot (`latestHead`):
+
+```ts
+// nori-bridge-sdk/contracts/mina/src/NoriTokenBridge.ts
+// (source excerpt elided — see the slot progress assertion in update)
+```
+
+Thus if an attacker frontruns the legitimate operator's update that would advance `latestHead` to \( N \) with an update advancing `latestHead` to \( N \) or a larger value, the operator's transaction will be rejected.
+Note that construction of a proof with an empty deposit root will require less compute than a proof with a non-empty deposit root. Furthermore, the attacker can begin working on a proof that will update `latestHead` from \( N - 1 \) to \( N \) before the `update` that advances the on-chain state of `latestHead` to \( N - 1 \) got finalized on Mina. Indeed, if they anticipate that the next `update` will advance `latestHead` to \( N - 1 \) and slot \( N \) has been finalized on Ethereum, they can already begin computing the proof.
+It thus appears plausible that a determined attacker can preempt legitimate updates and persist in landing `update` calls with empty deposit root on-chain, preventing the legitimate operator or other parties from placing non-empty deposit roots.
+
+Under such a sustained attack, the mint path is denied to all users for as long as the attack continues. The funds are not permanently burned, however.
+The Ethereum contract's `lockedTokens[codeChallenge]` is cumulative and never deleted: the deposit still exists in Ethereum storage at any later output block, and the guest checks each slot against the output block's storage root rather than the block at which it was locked.
+Because of this, once the attacker stops, an unopposed self-rescue or the operator can drain the backlog. Thus the impact is an attacker-controlled outage of the mint path rather than irreversible loss.
+
+**Passive omission.** Even without an attacker there is no guarantee that any given deposit is ever committed. A selectively censoring, buggy, or offline operator can omit a deposit, so that it is never mintable via updates submitted by the operator. The user's only recourse is a self-rescue run in which they race the operator with an `update` of their own that includes their deposit, a high bar for an ordinary user, though possible when unopposed.
+
+**Data-availability dependency.** To mint against an update, a user needs the exact leaf set and order of that update's tree. Data availability is thus a point to consider, though out of scope for this audit.
+
+#### Recommendations
+
+The root cause is that the committed deposit root is not required to encompass all intended deposits as reflected by the Ethereum state. The fix is to enforce such a requirement in the SP1 guest program, so that any valid `update` must carry the deposits that Ethereum state records.
+
+How to adjust the design of the guest program and potentially also the Ethereum contract is a significant design question. There is however one concrete footgun to be aware of. Completeness must be enforced incrementally rather than all-at-once. A rule of "include everything since the last update" is itself a denial-of-service vector: by spamming cheap locks, an attacker can either exceed the Merkle tree's \( 2^{16} \)-leaf limit for a single update, or produce deposits faster than the operator can prove them.
+
+### Response
+
+The finding is correct and the recommendation is accepted. The guest no longer accepts a prover-chosen set of storage slots. The deposit set is now an on-chain, append-only **proof request queue** on Ethereum (`NoriProofRequestQueue`), which the guest is required to drain in order.
+
+`verify_storage_slot_proofs` is replaced by `verify_queue`. The queue holds a monotonic `head` counter and a mapping of numbered request records; the destination chain holds a `queueCursor` recording how many requests have been settled. From those two values the batch is fully determined:
+
+- the start is the cursor, which the destination chain asserts against its own stored value,
+- `head` is read out of the queue's storage by Merkle-Patricia proof against the execution state root the same proof commits,
+- the size is `min(head - cursor, MAX_BATCH)`, and a witness whose entry count disagrees is rejected with `BatchSizeMismatch`,
+- each entry's five storage words are located from its index by Solidity's mapping and struct-member rules, not read from the witness.
+
+Requests that forms a batch supplied by the prover has to be derived from on-chain data. The all-zero root is reachable only when `head == cursor`, and that equality is itself proven — at genesis by an exclusion proof that the head slot is absent from the storage trie.
+
+Completeness is total rather than best-effort: every entry in the range contributes exactly one leaf. A populated slot is pinned by an inclusion proof of its true value; an empty slot, or a target account that does not exist, by an exclusion proof, contributing a leaf with value zero. In a Merkle-Patricia trie "holds zero" and "absent from the trie" are the same fact, and for a given root and key exactly one of the two proofs can verify, so the claim is pinned in either direction. A junk request therefore proves as zero and the queue advances past it — it can neither stall the queue nor be silently dropped. A proof that verifies as neither aborts the entire run: a committable failure outcome would reintroduce exactly the omission this finding describes.
+
+This also addresses the footgun raised in the recommendation. Completeness is enforced **incrementally**, not all-at-once: a batch is the outstanding backlog, capped at `MAX_BATCH`, and anything beyond that cap drains across consecutive updates, in order, with no entry skipped. `MAX_BATCH` currently is set to 2^16, the same as the Merkle tree's leaf limit. 2^16 is fesable in the o1js circuts but this value is a parameter that must be lower based on what is possible for SP1 circuit to handle (given memory constraint circuit size etc).
+
+Forcing a large batch is bounded by what enqueueing costs. Every `requestProof` writes three to five cold storage words and pays `proofRequestQueueFee` on top, a fee that accrues to the protocol rather than being burned. That fee is the economic guard against spamming the queue: entries cannot be added cheaply (fee monitored and controlled by the admin), and an attacker pays the protocol for the proving work each one causes.
+
+On the preemption scenario, a frontrunner must resume from the same cursor and carry the same entries, so a competing proof can no longer advance the head while omitting deposits. On the data-availability point the audit places out of scope, the queue is append-only and never deleted, so the leaf set of any committed batch is reconstructible from Ethereum state by any party; the proof pipeline additionally publishes the verified request set in cursor order.
+
+### Changes
+
+- **`verify_queue`** (`nori-program/src/mpt.rs`): replaces `verify_storage_slot_proofs`. Takes the execution state root and the queue witness, and returns the output cursor and the requests root. Verifies the queue account, then the `head` slot, then bounds the cursor, then derives the batch, then each entry's five words at index-derived locations, then each distinct target account and the requested slot beneath it, and finally folds one leaf per entry into the Merkle tree.
+- **Inclusion / exclusion handling** (`nori-program/src/mpt.rs`): `verify_storage_word` selects the required proof from the claimed value — a non-zero value requires an inclusion proof of its RLP encoding, a zero value requires an exclusion proof. `verify_account` takes `Option<TrieAccount>`: `Some` requires an inclusion proof and promotes the account's storage root, `None` requires an exclusion proof and yields `EMPTY_ROOT_HASH`, under which only zero-valued slot proofs can verify.
+- **Error surface** (`nori-program/src/mpt.rs`): `MptError` now carries `CursorAheadOfHead`, `BatchSizeMismatch`, `MissingTargetWitness` and `MissingSlotWitness` for the queue-specific failures. Account-proof failures are branded by a `ProvenAccount` selector into `InvalidProofRequestQueueAccountProof` and `InvalidTargetAccountProof`, so a failure identifies which account it concerns without comparing addresses.
+- **Queue witness types** (`nori-primitives/src/types.rs`): `QueueStorage`, `QueueEntryProof`, `TargetStorageProof`, `TargetSlotProof` and `VerifiedRequest` added; `ProofInputs.contract_storage` replaced by `queue_storage`. `StorageSlot`, `ContractStorage` and `VerifiedContractStorageSlot` are removed.
+- **Storage layout module** (`nori-primitives/src/storage_layout.rs`): new home for the queue layout constants (`QUEUE_HEAD_STORAGE_INDEX`, `QUEUE_REQUESTS_STORAGE_INDEX`, `QUEUE_ENTRY_WORDS`, `MAX_COLLECTION_KEYS`) and the Solidity slot arithmetic (`storage_slot_of_index`, `mapping_entry_location`, `struct_word_slot`, `word_of_address`, `word_of_b256`). These are shared by the guest, which derives the keys it verifies, and the host, which fetches those same keys — so there is one definition per rule rather than two that can drift.
+- **Public outputs** (`nori-primitives/src/types.rs`): `ProofOutputs` gains `input_queue_cursor`, `output_queue_cursor` and `output_block_number`; `contract_address` becomes `proof_request_queue_address` (the proof now anchors on the queue, not the bridge) and `verified_contract_storage_slots_root` is renamed `verified_requests_root`. With the `genesis_root` removal recorded separately under Finding d3034, the encoding moves from 228 to 220 bytes. `output_block_number` is committed so that any party can identify the block every storage read was taken at and reconstruct the batch independently.
+- **Leaf format** (`nori-hash/src/merkle_poseidon_fixed.rs`): `hash_request_leaf` replaces `hash_storage_slot`, packing 117 bytes into four field elements — `target` (20 bytes) together with `collection_keys_count` and the leading byte of each collection key and of the value, then the three 31-byte tails. The count is hashed so that an unused trailing key, which is zero, cannot collide with a request that supplied a zero key. Namespacing each leaf by `target` is what allows a consumer to reject leaves enqueued by a different contract. `MAX_BATCH` lives alongside `MAX_TREE_DEPTH`, from which it derives.
+- **Guest wiring** (`nori-program/src/consensus.rs`): `consensus_mpt_program` calls `verify_queue` and commits the queue address, both cursors and the requests root. `execution_state_root` and `output_block_number` are read from a single `store.finalized_header.execution()` call on the post-apply finalized header, so the committed pair cannot disagree about which block the storage reads describe.
+- **Host witness assembly** (`nori/src/rpcs/execution/http.rs`): `_prepare_consensus_mpt_proof_inputs` no longer scans `TokensLocked` events to choose slots. It reads `head`, derives the batch and every entry location, then issues one `eth_getProof` against the queue covering the head slot and all entry words, and one per distinct target address. Every read is pinned to the window's output block. An empty batch costs two RPC calls and still proves `head == cursor`. Account existence is decided by verifying the inclusion proof and then the exclusion proof locally rather than inferring it from the response shape, because clients disagree on how an absent account is represented.
+- **RPC resilience** (`nori/src/rpcs/execution/http.rs`): `NORI_EXECUTION_CHUNK_LIMIT` (default 100) caps how many storage keys go into a single `eth_getProof`; requests are chunked and retried with exponential backoff, replacing a hardcoded chunk size.
+- **Cursor plumbing** (`nori/src/bridge_head/`): the queue cursor is carried end to end — `BridgeHead` tracks it, `advance` and `run` take it, `AdvanceMessage` and the checkpoint persist it (with a `serde` default so checkpoints written before the queue still load), and the started, job-created, job-succeeded, job-failed and advanced notices all report it. `ProofMessage` and the job-succeeded notice additionally publish `verified_requests`, the committed leaf set in cursor order.
+- **Environment** (`nori/src/contract.rs`, `.env.example`, `README.md`): `NORI_TOKEN_BRIDGE_ADDRESS` becomes `NORI_PROOF_QUEUE_ADDRESS`, since the address the proof anchors on is now the queue. The event-scanning helpers and the `nori-contract-bindings` crate they were the last consumer of are deleted.
+- **Cross-language test vectors** (`test-vectors/proof-request-queue/`): three fixtures rendered by Rust tests and vendored into the SDK — the Poseidon leaf packing, the public-output byte encoding, and the storage locations of `head` and of each entry's five words. These three encodings must agree bit-for-bit between the SP1 guest and the Mina circuit, so they are pinned rather than reimplemented independently on each side.
+
+### Results
+
+- Guest: **40 passing** — `cargo test -p nori-sp1-helios-program --lib`. `nori-hash`: **20 passing** — `cargo test -p nori-hash` (14 unit, 1 integration, 5 doctests).
+- Adversarial coverage for `verify_queue` (`nori-program/src/mpt.rs`) is built on fixture tries constructed in-process with `alloy-trie`, requiring no network. It covers the cases where the distinction matters: a populated slot claimed as zero, an empty slot claimed non-zero, an empty slot correctly claimed zero, zero-valued entry words, an absent target account claimed absent, a live account claimed absent, an absent account with a non-zero claim, and the genesis case of `head == 0` yielding an empty batch and the zero root. Batch derivation is covered for a cursor ahead of head and for an entry count that disagrees with the derived batch, along with duplicate-slot deduplication.
+- Exclusion proofs are exercised across all three trie shapes an absence can take — an empty branch child, another key's leaf, and a diverging extension node — the last being a historically error-prone corner of Merkle-Patricia verifiers. Each test asserts the node shape its fixture actually produces, so a change to the fixture keys fails rather than silently dropping a shape from the coverage.
+- The leaf packing is additionally verified byte by byte: each of the 117 payload bytes is routed through `pack_request_leaf_fields` and checked against the documented field layout by independent arithmetic, so a transposed byte cannot pass unnoticed.
+
+## 25/8/26 - Finding d3034: Compromised admin is not prevented from minting or unlocking illegitimately
+
+### Finding (verbatim)
+
+#### Description
+
+The Mina bridge is designed to hold up even against a compromised or malicious governance: a compromised admin should not be able to mint tokens that are not backed by real Ethereum deposits. The project describes the intended assumptions as follows:
+
+> Using AdminKey (multisig), [the admin account] can update the values here: [...]. Worst case, [the admin] could maliciously set these to wrong values and "brick" the bridge. The Ethereum smart contract address is set at deployment and can't be modified, and since the Solidity contract is not upgradable, [they] can't create fake locks, so [..] shouldn't be able to mint tokens maliciously on the Mina side.
+> In the code, this intent is also stated, most explicitly in the doc comment on the immutable `genesisRoot` field, which singles out one way a compromised governance could otherwise mint unbacked tokens --- redirecting the bridge to an attacker-controlled chain --- and aims to prevent it:
+
+```ts
+// nori-bridge-sdk: contracts/mina/src/NoriTokenBridge.ts
+// (doc comment on the immutable genesisRoot field elided)
+```
+
+The claimed guarantee is that, although the store hash must stay admin-upgradable and is opaque, `update` checks the genesis validators root emitted by each proof against the immutable `genesisRoot`, so a rotated store hash cannot point the bridge at a different chain.
+
+This protection does not work: the genesis root is not an anchor to the real chain. The bridge-head guest program performs an incremental store-to-store transition and never verifies that the store descends from genesis. The store, the genesis root, and the previous store hash are all witness inputs; the only check binding the store is its hash against the chained value:
+
+```rust
+// nori-bridge-head: nori-program/src/consensus.rs (consensus_mpt_program)
+// (source excerpt elided — witness destructuring, store hash chain check,
+//  verify_update / verify_finality_update calls, and the ProofOutputs packing)
+```
+
+Both `verify_update` and `verify_finality_update` only pass `genesis_root` onwards to `verify_generic_update`, where the genesis root is used purely to derive the BLS signing domain.
+
+The real root of trust is therefore the store-hash chain, seeded once at deploy. The genesis root only fixes the signing domain; it does not establish that the store's sync committees or headers belong to the real Ethereum chain. That trust would normally come from bootstrapping the store from a trusted checkpoint, which this program does not do --- it accepts the store as an unauthenticated input.
+
+**Store-hash rotation.**
+
+A compromised admin can weaponize this directly, using only the power the comment considers safe. `updateStoreHash` sets the on-chain store hash to any value on an admin signature:
+
+```ts
+// nori-bridge-sdk: contracts/mina/src/NoriTokenBridge.ts
+// (source excerpt elided — see updateStoreHash)
+```
+
+A compromised admin generates their own BLS sync committee, builds a `LightClientStore` containing it together with a fabricated finalized header carrying an attacker-chosen execution state root, and sets the on-chain store hash to that store's hash. They then submit an `update` whose finality update (and any sync-committee updates) are signed by the fabricated committee, using the genuine `genesis_root` for the domain. As the attacker controls the fabricated committee's keys, they can produce the required signatures, and can thus produce a proof for the guest program with arbitrary deposit root contents. Using such a proof in an `update` transaction, the on-chain `genesisRoot` check will be passed, and `latestVerifiedContractDepositsRoot` updated to contain the fake deposits of their choosing. This is precisely the redirect to a fake chain that `genesisRoot` immutability was meant to prevent.
+
+**Program and recursion verification key swap.**
+
+The genesis-root failure is not even required for a takeover. Separately from it, the admin holds powers that were presumably not meant to allow unbacked minting but do. One is that the identity of the accepted guest program is itself admin-mutable, giving a more direct route:
+
+```ts
+// nori-bridge-sdk: contracts/mina/src/NoriTokenBridge.ts
+// (source excerpt elided — see updateNoriHeliosProgramPi0 and updateProofConversionPO2)
+```
+
+In `ethVerify` the converted proof is verified against a fixed verification key, which is intended to be for the `node` compressor circuit in `src/compressor/compressor.ts` in `proof-conversion`. However, this circuit bakes in neither the verification keys it recursively verifies proofs against, nor which guest program the SP1 proof is ultimately verified against. Only commitments are exposed, which need to be pinned on-chain. This is done against `noriHeliosProgramPi0` for pinning the guest program and against `proofConversionPO2` for pinning the recursion verification keys.
+
+An admin can change both commitments. Changing either lets the on-chain checks accept a constraint-less recursion circuit or guest program, allowing a compromised admin to produce accepted `update`s carrying deposit roots with arbitrary contents.
+
+By any of these routes a compromised admin can produce an `update` carrying a deposit root with contents of their choosing, then use `noriMint` to mint an arbitrary amount, for the invented deposits, to an address they control. Those tokens could then be withdrawn on the Ethereum side using the usual mechanism, draining the bridge.
+
+This list is not exhaustive: a compromised admin may have further avenues to mint themselves illegitimate tokens, for instance by changing the `FungibleToken` verification key.
+
+**Ethereum side.**
+
+The same structural pattern exists on the Ethereum bridge. The function `unlockTokens` trusts two contracts for verification, `stateSettlement` and `accountValidation`, and `setAlignedContracts` lets the operator repoint the bridge at replacements, which could include contracts that approve any input, which would then allow the compromised admin to drain the locked pool.
+
+#### Impact
+
+The intention that a compromised admin should not be able to drain the bridge on the Ethereum side, or mint illegitimately on the Mina side, but at worst can only brick the bridge, is not achieved by the current design. The admin account/contract has several independent avenues to drain the bridge.
+
+#### Recommendations
+
+Document for the project and for users what trust assumptions are made regarding the admin. To achieve the intended threat model, in which the admin account/contract should not be able to mint/unlock illegitimately, design changes are necessary.
+
+### Response
+
+The finding is correct, including that the list is not exhaustive. We are taking the first of the two recommended paths: documenting the trust assumptions that govern the admin role.
+
+Three on-chain commitments have to remain updatable for the bridge to stay operable. `noriHeliosProgramPi0` and `proofConversionPO2` pin the accepted guest program and the recursion verification keys; the guest program changes as the Helios light client evolves, and the conversion keys rotate on major SP1 upgrades. `latestHeliusStoreInputHash*` pins the Helios store, which must be replaceable because the store and/or its' serialization can change - that depends on Helios internals that we inherit, as well as changes to Ethereum consensus layer spec that Helios itself inherits. An extended finality failure on Ethereum may itself require a forced store reconstruction. Freezing any of the three would turn a routine upgrade into a redeployment and state migration of the whole bridge.
+
+Each of those commitments is also, as the finding sets out, a route by which a compromised admin could have an `update` accepted that carries a deposit root of their choosing, and mint against it. The bridge consequently does not guarantee that a compromised admin can only halt it; it can mint unbacked tokens and drain the locked pool with current design of Aligned Layer
+
+What constrains the role is procedural rather than cryptographic. The admin is FROST-based multisig, so a change to any of these values requires commitment from a quorum of the signers. The project has a governance process for approving upgrades, and the multisig is held by a set of parties that are expected to be independent and to follow that process. The trust assumption is that the multisig signers will not collude to approve an upgrade that would allow them to mint unbacked tokens or unlock illegitimately.
+
+Two admin surfaces named in the finding are not live routes to minting. `updateVerificationKey` cannot succeed: the bridge account is deployed with `setVerificationKey` set to `impossibleDuringCurrentVersion()` and `setPermissions` set to `impossible()`, so the account's own verification key is fixed for the current protocol version and the permission cannot be relaxed. `canChangeAdmin` returns `Bool(false)`, and `canMint` is gated on the single-use `mintLock` flag that `noriMint` clears immediately before calling `token.mint`, not on an admin signature. The `FungibleToken` verification key is governed by that token's own deploy-time `allowUpdates` setting.
+
+`genesis_root` is a guest input. It is passed to `verify_update` and `verify_finality_update`, which use it to derive the BLS signing domain; it is not compared against the store, and the store is bound instead by the store-hash chain. It is not committed as a public output anymore (as it wasn't fit for purpose as envisaged) and the corresponding on-chain field and assertion are removed.
+
+As part of a solution to this finding, a standalone document is being prepared to record the trust assumptions that govern the admin role, and to describe the procedures that are expected to be followed to maintain the bridge's integrity. This document will serve as a reference for users and developers, clarifying the limits of what a compromised admin can do and the safeguards in place to prevent abuse.
+
+### Changes
+
+- **`ProofOutputs`** (`nori-primitives/src/types.rs`): `genesis_root` removed from the committed outputs and from `to_bytes`/`from_bytes`. Together with the queue changes recorded under Finding a3850, the encoding moves from 228 to 220 bytes.
+- **`ConsensusProofOutputs`** (`nori-primitives/src/types.rs`): `genesis_root` removed and `output_block_number` added, mirroring `ProofOutputs`; the encoding moves from 176 to 152 bytes.
+- **`consensus_program` and `consensus_mpt_program`** (`nori-program/src/consensus.rs`): neither commits `genesis_root`. Both continue to accept it as an input and pass it to `verify_update` and `verify_finality_update` for the BLS signing domain. The doc blocks and output tables are updated to match.
+- **Downstream messages** (`nori/src/bridge_head/api.rs`, `notice_messages.rs`): `genesis_root` dropped from `ProofMessage` and from the job-succeeded transition notice, since it is no longer a proof output.
+- **Documentation**: the guest doc blocks in `nori-program/src/consensus.rs` describing the committed outputs no longer list `genesis_root`. The admin trust assumptions set out in the response above are recorded in this entry, which is the reference for them until they are carried into the future deployment documentation.
+- **Corresponding changes to the SDK** : the changelog entry for this finding is added to the SDK repo at `nori-bridge-sdk/CHANGELOG.md`
+
+### Results
+
+- `nori-primitives`: **6 passing** — `cargo test -p nori-sp1-helios-primitives`. The public-output encoding is covered by a round-trip test and by an offset test asserting the byte positions the destination chain's verifier reads, both of which move with the layout. The shared byte-encoding vectors are rendered by a Rust test and asserted by the Mina-side circuit, so a divergence between the two implementations fails on one side rather than producing proofs that verify inconsistently.
+- No behavioural test accompanies the trust statement itself; it records an accepted assumption rather than a code constraint.
+
 ## 8/7/26 - Audit 1eb72: `output_slot % 32 == 0` checkpoint constraint not enforced in ZK program or on-chain
 
 ### Finding (verbatim)
@@ -15,9 +208,9 @@ That check there appears to strongly suggest that it would a problem for the hon
 
 // Block non-checkpoint slots (they prevent bootstrapping on restart)
 // We need the validate_progress guard as its used as a flag to allow
-// the proof anyway. And for vk building (and zk change detection) we need to be able to arbirarily bypass this 
+// the proof anyway. And for vk building (and zk change detection) we need to be able to arbirarily bypass this
 // sort of validation.
-if validate && output_slot % 32 > 0 { 
+if validate && output_slot % 32 > 0 {
     return Err(anyhow::anyhow!(
         "Output slot {} was a non-checkpoint slot. Preventing this as it prevents bootstrapping if we go offline.",
         output_slot,
@@ -229,17 +422,17 @@ In buildMerkleTree (and also foldMerkleLeft and getMerklePathFromLeaves), zeros 
  * Generate zero hashes array of length depth + 1
  */
 export function getMerkleZeros(depth: number): Field[] {
-    const zeros: Field[] = [];
+	const zeros: Field[] = [];
 
-    // Start with zeros[0] = Field(0)
-    zeros.push(Field(0));
+	// Start with zeros[0] = Field(0)
+	zeros.push(Field(0));
 
-    for (let i = 1; i < depth + 1; i++) {
-        // Each next zero is hash of the previous zero with itself
-        zeros.push(Poseidon.hash([zeros[i - 1], zeros[i - 1]]));
-    }
+	for (let i = 1; i < depth + 1; i++) {
+		// Each next zero is hash of the previous zero with itself
+		zeros.push(Poseidon.hash([zeros[i - 1], zeros[i - 1]]));
+	}
 
-    return zeros;
+	return zeros;
 }
 ```
 
@@ -249,19 +442,19 @@ However, in buildMerkleTree, when utilizing the zeros array, the following snipp
 
 ```typescript
 for (let level = depth; level > 0; level--) {
-    // Omitted...
+	// Omitted...
 
-    for (let i = 0; i < parentWidth; i++) {
-        const leftIdx = 2 * i;
+	for (let i = 0; i < parentWidth; i++) {
+		const leftIdx = 2 * i;
 
-        if (leftIdx >= nNonDummyNodes) {
-            // Both left and right dummy nodes, use zeros cache
-            parentLevel[i] = zeros[level];
-        } else {
-            // Omitted...
-        }
-    }
-    // Omitted...
+		if (leftIdx >= nNonDummyNodes) {
+			// Both left and right dummy nodes, use zeros cache
+			parentLevel[i] = zeros[level];
+		} else {
+			// Omitted...
+		}
+	}
+	// Omitted...
 }
 ```
 

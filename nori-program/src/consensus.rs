@@ -11,7 +11,7 @@ use nori_sp1_helios_primitives::types::{
 use std::fmt;
 use tree_hash::TreeHash;
 
-use crate::mpt::{verify_storage_slot_proofs, MptError};
+use crate::mpt::{verify_queue, MptError};
 
 /// Custom error type for program execution failures
 #[derive(Debug)]
@@ -126,6 +126,7 @@ impl std::error::Error for ProgramError {}
 ///      (`B256::ZERO` if `next_sync_committee` is `None`)
 ///    - Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`
 ///      (fails with `MissingExecutionRoot` if execution header is absent)
+///    - Extract `output_block_number` = `store.finalized_header.execution()?.block_number()`
 ///
 /// 6. **Post-State Hashing**
 ///    - Compute `output_store_hash` = `SHA-256(serde_serialize(store))`, to be validated in the next round
@@ -133,7 +134,7 @@ impl std::error::Error for ProgramError {}
 /// 7. **Output Commitment**
 ///    - Pack `ConsensusProofOutputs` committing: `input_slot`, `input_store_hash`,
 ///      `output_slot`, `output_store_hash`, `execution_state_root`,
-///      `next_sync_committee_hash`, `genesis_root`
+///      `next_sync_committee_hash`, `output_block_number`
 ///
 /// # Outputs (All Values Are Hash Commitments)
 /// | Field                      | Type   | Description                                     |
@@ -144,7 +145,7 @@ impl std::error::Error for ProgramError {}
 /// | `output_store_hash`        | `B256` | Updated store hash                              |
 /// | `execution_state_root`     | `B256` | Execution layer state root                      |
 /// | `next_sync_committee_hash` | `B256` | Hash of the next sync committee state (or zero) |
-/// | `genesis_root`             | `B256` | Genesis validators root                         |
+/// | `output_block_number`      | `u64`  | Execution block number of finalized output      |
 ///
 /// # Error Conditions
 /// 1. **Store Hashing Error**
@@ -245,7 +246,8 @@ pub fn consensus_program<S: ConsensusSpec>(
     }
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
-    debug!("output_slot, next_sync_committee_hash and execution_state_root captured.");
+    let output_block_number = *execution.block_number();
+    debug!("output_slot, next_sync_committee_hash, execution_state_root and output_block_number captured.");
 
     // 6. Post-State Hashing - Calculate updated store hash to be validated in the next round
     debug!("Hashing updated store.");
@@ -263,26 +265,26 @@ pub fn consensus_program<S: ConsensusSpec>(
         output_store_hash,
         execution_state_root,
         next_sync_committee_hash,
-        genesis_root,
+        output_block_number,
     };
     debug!("Packed outputs.");
 
     Ok(proof_outputs)
 }
 
-/// Zero-Knowledge Consensus State Transition Proof with MPT storage slot verification for Ethereum Light Client Updates with Result type
+/// Zero-Knowledge Consensus State Transition Proof with MPT proof-request-queue verification for Ethereum Light Client Updates with Result type
 ///
-/// Extends the basic consensus program by verifying Merkle Patricia Trie (MPT) proofs of contract storage slots
-/// against the finalized execution state root. Ensures that contract storage is consistent with the execution state.
+/// Extends the basic consensus program by verifying Merkle Patricia Trie (MPT) proofs of the proof request queue
+/// against the finalized execution state root. Ensures that the queue is consistent with the execution state.
 ///
 /// # Critical Path
 /// ```text
-/// prev_store_hash → process updates → verify storage proofs → new_store_hash
-///      │               │                   │               │
-///      │               │                   │               │
-///      └               ┤                   ┴               ┘
-/// Initial State     Updates         Storage Proofs     Final State
-///     Validation     Applied           Verified         Commitment
+/// prev_store_hash → process updates → verify queue proofs → new_store_hash
+///        │                 │                   │                   │
+///        │                 │                   │                   │
+///        └                 ┤                   ┴                   ┘
+///  Initial State        Updates          Queue Proofs         Final State
+///   Validation          Applied            Verified           Commitment
 /// ```
 ///
 /// # Inputs (All Values Must Be Precomputed Hashes)
@@ -295,7 +297,7 @@ pub fn consensus_program<S: ConsensusSpec>(
 /// | `genesis_root`          | `B256`             | Genesis block root                     |
 /// | `forks`                 | `ForkData`         | Network fork versions                  |
 /// | `store_hash`            | `B256`             | SHA-256(store) from last proof         |
-/// | `contract_storage`      | `ContractStorage`  | Contract account & storage slot proofs |
+/// | `queue_storage`         | `QueueStorage`     | Proof request queue account & entry proofs |
 ///
 /// # Operations (In Exact Execution Order)
 /// 1. **Last Store Hash Validation** (Irreversible Check)
@@ -311,12 +313,13 @@ pub fn consensus_program<S: ConsensusSpec>(
 /// 4. **Finality Proof** (Header Finalization)
 ///    - Verify and apply `finality_update`
 ///
-/// 5. **Verify Contract Account & Storage Slot Proofs**
+/// 5. **Verify Proof Request Queue**
 ///    - Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`
 ///      (fails with `MissingExecutionRoot` if execution header is absent)
-///    - Extract `contract_address` from `contract_storage.address`
-///    - Verify contract account exists in global state trie (always, even with 0 storage slots)
-///    - Verify MPT proofs for each storage slot, producing `verified_contract_storage_slots_root`
+///    - Extract `proof_request_queue_address` from `queue_storage.proof_request_queue_address`
+///    - Verify the queue account, its `head`, every queued entry, and each entry's target
+///      account and storage word via `verify_queue`
+///    - Produces `(output_queue_cursor, verified_requests_root)`
 ///
 /// 6. **State Capture** (Post-Update Snapshot)
 ///    - Record `output_slot` = `store.finalized_header.beacon().slot`
@@ -338,21 +341,24 @@ pub fn consensus_program<S: ConsensusSpec>(
 /// 9. **Output Commitment**
 ///    - Pack `ProofOutputs` committing: `input_slot`, `input_store_hash`,
 ///      `output_slot`, `output_store_hash`, `execution_state_root`,
-///      `verified_contract_storage_slots_root`, `next_sync_committee_hash`,
-///      `contract_address`, `genesis_root`
+///      `verified_requests_root`, `next_sync_committee_hash`,
+///      `proof_request_queue_address`, `input_queue_cursor`, `output_queue_cursor`,
+///      `output_block_number`
 ///
 /// # Outputs (All Values Are Hash Commitments)
-/// | Field                                  | Type      | Description                                     |
-/// |----------------------------------------|-----------|-------------------------------------------------|
-/// | `input_slot`                           | `u64`     | Slot before updates                             |
-/// | `input_store_hash`                     | `B256`    | Input store hash                                |
-/// | `output_slot`                          | `u64`     | Slot after updates                              |
-/// | `output_store_hash`                    | `B256`    | Updated store hash                              |
-/// | `execution_state_root`                 | `B256`    | Execution layer state root                      |
-/// | `verified_contract_storage_slots_root` | `B256`    | Merkle root of verified storage slots           |
-/// | `next_sync_committee_hash`             | `B256`    | Hash of the next sync committee state (or zero) |
-/// | `contract_address`                     | `Address` | Ethereum contract address (20 bytes, BE)        |
-/// | `genesis_root`                         | `B256`    | Genesis validators root                         |
+/// | Field                         | Type      | Description                                     |
+/// |-------------------------------|-----------|-------------------------------------------------|
+/// | `input_slot`                  | `u64`     | Slot before updates                             |
+/// | `input_store_hash`            | `B256`    | Input store hash                                |
+/// | `output_slot`                 | `u64`     | Slot after updates                              |
+/// | `output_store_hash`           | `B256`    | Updated store hash                              |
+/// | `execution_state_root`        | `B256`    | Execution layer state root                      |
+/// | `verified_requests_root`      | `B256`    | Merkle root of verified requests                |
+/// | `next_sync_committee_hash`    | `B256`    | Hash of the next sync committee state (or zero) |
+/// | `proof_request_queue_address` | `Address` | NoriProofRequestQueue address (20 bytes, BE)    |
+/// | `input_queue_cursor`          | `u64`     | Cursor this proof resumed from                  |
+/// | `output_queue_cursor`         | `u64`     | Cursor after draining this batch                |
+/// | `output_block_number`         | `u64`     | Execution block number of finalized output      |
 ///
 /// # Error Conditions
 /// 1. **Store Hashing Error**
@@ -366,14 +372,16 @@ pub fn consensus_program<S: ConsensusSpec>(
 /// 5. **Missing Execution Root**
 ///    `store.finalized_header.execution()` is `Err` → Incomplete header data
 /// 6. **Invalid MPT Proof**
-///    `verify_storage_slot_proofs` may fail due to:
-///    - `InvalidAccountProof { address, reason }` → Contract account not found in state trie (always checked, even with 0 slots)
-///    - `InvalidStorageSlotProof { slot_key, reason }` → Storage slot proof failed
-///    - `InvalidStorageSlotCodeChallengeMapping { slot_key, code_challenge, computed_code_challenge_slot_key }` → Slot-to-code-challenge mapping invalid
-///    - `MerkleHashError { code_challenge, value, reason }` → Merkle hash computation error of verified slots
-///    - `ExceedsMaxTreeDepth { slots, requested_depth, max_depth }` → if the number of storage slots yields a merkle tree
-///       which is too large.
-///    Any of these returns a `MptError`, wrapped as `ProgramError::MptError`
+///    `verify_queue` may fail due to:
+///    - `InvalidProofRequestQueueAccountProof { address, reason }` → the queue account itself could not be proven against the execution state root
+///    - `InvalidTargetAccountProof { address, reason }` → a consumer contract named by a queue entry could not be proven present or absent
+///    - `InvalidStorageSlotProof { slot_key, reason }` → a storage slot proof failed
+///    - `LeafHashError { target, slot_key, value, reason }` → `hash_request_leaf` failed for a queue entry
+///    - `ExceedsMaxTreeDepth { slots, requested_depth, max_depth }` → the number of queue entries yields a Merkle tree that is too large
+///    - `CursorAheadOfHead { cursor, head }` → the destination-chain cursor is ahead of the proven queue head
+///    - `BatchSizeMismatch { expected, supplied }` → the witness supplied a different number of entries than the batch the queue state derives
+///    - `MissingTargetWitness { target }` / `MissingSlotWitness { target, slot_key }` → no account or slot proof was supplied for a target/slot an entry references
+///    Any of these returns an `MptError`, wrapped as `ProgramError::MptError`
 /// 7. **Non-Checkpoint Output Slot**
 ///    `output_slot % 32 != 0` (checked after `updates`/`finality_update` are applied) → `NonCheckpointOutputSlot`
 ///
@@ -390,9 +398,12 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         genesis_root,
         forks,
         store_hash: input_store_hash,
-        contract_storage,
+        queue_storage,
     } = proof_inputs;
-    let contract_address = contract_storage.address;
+    // The queue is the account the storage proofs anchor on, so it is the
+    // address committed to the destination chain.
+    let proof_request_queue_address = queue_storage.proof_request_queue_address;
+    let input_queue_cursor = queue_storage.input_cursor;
     // @AUDIT - We should consider whether we want to enforce that there are no best valid updates in the store here.
     // 0. we should not proceed if we have a best valid update in our store
     // as we have a next_sync_committe non zero assertion in the verifier contract on Mina
@@ -481,23 +492,25 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
 
     // Should do an assertion here to ensure we have increased our head (we do check this downstream later)
 
-    // 5. Verify Contract Account & Storage Slot Proofs - execution_state_root, contract_address, MPT proofs
+    // 5. Verify Proof Request Queue - execution_state_root, proof_request_queue_address, MPT proofs
     let execution_state_root_result = store.finalized_header.execution();
     if execution_state_root_result.is_err() {
         return Err(ProgramError::MissingExecutionRoot);
     }
     let execution = execution_state_root_result.unwrap();
     let execution_state_root = *execution.state_root();
+    let output_block_number = *execution.block_number();
     if debug_print {
-        println!("Verifying contract storage slots.");
+        println!("Verifying proof request queue.");
     }
-    let verified_slots_result = verify_storage_slot_proofs(execution_state_root, contract_storage);
-    if let Err(verified_slots_err) = verified_slots_result {
-        return Err(ProgramError::MptError(verified_slots_err));
-    }
-    let verified_contract_storage_slots_root = verified_slots_result.unwrap();
+    let (output_queue_cursor, verified_requests_root) =
+        verify_queue(execution_state_root, queue_storage)
+            .map_err(ProgramError::MptError)?;
     if debug_print {
-        println!("Contract storage slots are valid.");
+        println!(
+            "Proof request queue is valid, cursor {} -> {}.",
+            input_queue_cursor, output_queue_cursor
+        );
     }
 
     // 6. State Capture (Post-Update Snapshot) - output_slot, next_sync_committee_hash
@@ -539,10 +552,12 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         output_slot,
         output_store_hash,
         execution_state_root,
-        verified_contract_storage_slots_root,
+        verified_requests_root,
         next_sync_committee_hash,
-        contract_address,
-        genesis_root,
+        proof_request_queue_address,
+        input_queue_cursor,
+        output_queue_cursor,
+        output_block_number,
     };
     if debug_print {
         println!("Packed outputs.");

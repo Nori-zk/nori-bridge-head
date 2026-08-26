@@ -249,8 +249,8 @@ pub async fn finality_update_job(
     inputs: ProofInputs<MainnetConsensusSpec>,
 ) -> Result<ProverJobOutput> {
     info!(
-        "Contract storage {:?}",
-        serde_json::to_string(&inputs.contract_storage)
+        "Queue storage {:?}",
+        serde_json::to_string(&inputs.queue_storage)
     );
 
     // Encode proof inputs
