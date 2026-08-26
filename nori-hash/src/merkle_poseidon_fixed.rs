@@ -8,21 +8,17 @@ use mina_poseidon::{
 };
 use o1_utils::FieldHelpers;
 
-// This depth also drives MAX_BATCH below = 2^MAX_TREE_DEPTH, the cap on queue
-// entries N a single proof may cover. Each entry makes the SP1 guest run
-// verify_storage_word on its QUEUE_ENTRY_WORDS words plus one target slot, and
-// each distinct target adds one verify_account. So the MPT proofs one SP1 job
-// must verify is:
+// FIXME(request-queue): this depth also drives MAX_BATCH below =
+// 2^MAX_TREE_DEPTH, the cap on queue entries N a single proof may cover. Each
+// entry makes the SP1 guest run verify_storage_word on its QUEUE_ENTRY_WORDS
+// words plus one target slot, and each distinct target adds one verify_account.
+// So the MPT proofs one SP1 job must verify is:
 //     2 + N * (QUEUE_ENTRY_WORDS + 1) + T,   with 1 <= T <= N distinct targets
 // that is a fixed 2 (queue account and head), plus QUEUE_ENTRY_WORDS + 1 = 6 per
-// entry, plus T target accounts.
-//
-// 2^16 is a ceiling on the tree, not an operating point. A batch is the whole
-// outstanding backlog and the queue drains every update window (32 slots), so
-// meeting the cap means enqueueing 65,536 requests inside roughly 32 blocks.
-// Each requestProof writes three to five cold storage words, which puts that
-// several times over the blockspace those blocks have, before
-// proofRequestQueueFee is charged on every one of them.
+// entry, plus T target accounts. Worst case T = N gives 2 + 7N. At
+// MAX_TREE_DEPTH = 16, N = 65,536 and that is 458,754 MPT verifications in one
+// job, far beyond a single SP1 proof's cycle and memory budget. Size this depth
+// to what one SP1 proof can actually verify.
 pub const MAX_TREE_DEPTH: usize = 16;
 /// Maximum number of queue entries one proof batch may cover: the leaf
 /// capacity of a Merkle tree at `MAX_TREE_DEPTH`.
