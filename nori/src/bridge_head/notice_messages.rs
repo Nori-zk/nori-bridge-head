@@ -1,6 +1,6 @@
 use alloy_primitives::FixedBytes;
 use helios_consensus_core::consensus_spec::MainnetConsensusSpec;
-use nori_sp1_helios_primitives::types::{ProofInputsWithWindow, VerifiedContractStorageSlot};
+use nori_sp1_helios_primitives::types::{ProofInputsWithWindow, VerifiedRequest};
 use serde::de::Error;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
@@ -48,6 +48,7 @@ pub struct TransitionNoticeExtensionBridgeHeadStarted {
     pub latest_beacon_slot: u64,
     pub current_slot: u64,
     pub store_hash: FixedBytes<32>,
+    pub queue_cursor: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadWarning {
@@ -59,8 +60,10 @@ pub struct TransitionNoticeExtensionBridgeHeadJobCreated {
     pub input_slot: u64,
     pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
+    pub input_queue_cursor: u64,
     pub expected_output_slot: u64,
     pub expected_output_block_number: u64,
+    pub expected_output_queue_cursor: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
@@ -68,15 +71,16 @@ pub struct TransitionNoticeExtensionBridgeHeadJobSucceeded {
     pub input_slot: u64,
     pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
+    pub input_queue_cursor: u64,
     pub output_slot: u64,
     pub output_block_number: u64,
     pub output_store_hash: FixedBytes<32>,
+    pub output_queue_cursor: u64,
     pub execution_state_root: FixedBytes<32>,
-    pub verified_contract_storage_slots_root: FixedBytes<32>,
+    pub verified_requests_root: FixedBytes<32>,
     pub next_sync_committee_hash: FixedBytes<32>,
-    pub contract_address: alloy_primitives::Address,
-    pub genesis_root: FixedBytes<32>,
-    pub contract_storage_slots: Vec<VerifiedContractStorageSlot>,
+    pub proof_request_queue_address: alloy_primitives::Address,
+    pub verified_requests: Vec<VerifiedRequest>,
     pub elapsed_sec: f64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -85,8 +89,10 @@ pub struct TransitionNoticeExtensionBridgeHeadJobFailed {
     pub input_slot: u64,
     pub input_block_number: u64,
     pub input_store_hash: FixedBytes<32>,
+    pub input_queue_cursor: u64,
     pub expected_output_slot: u64,
     pub expected_output_block_number: u64,
+    pub expected_output_queue_cursor: u64,
     pub error: String,
     pub elapsed_sec: f64,
     pub n_job_in_buffer: u64,
@@ -108,7 +114,8 @@ pub struct TransitionNoticeExtensionBridgeHeadFinalityTransitionDetected {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TransitionNoticeExtensionBridgeHeadAdvanced {
     pub slot: u64,
-    pub store_hash: FixedBytes<32>
+    pub store_hash: FixedBytes<32>,
+    pub queue_cursor: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

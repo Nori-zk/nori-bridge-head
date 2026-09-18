@@ -8,6 +8,8 @@ use tokio::sync::mpsc::{error::SendError, Sender};
 pub struct AdvanceMessage {
     pub slot: u64,
     pub store_hash: FixedBytes<32>,
+    /// Queue cursor the destination chain stored for the settled update.
+    pub queue_cursor: u64,
 }
 
 pub enum Command {
@@ -39,15 +41,20 @@ impl CommandHandle {
             .await;
     }
 
-    /// Send a message to the bridge head to inform it of a finality advancement after it has been settled on Mina
+    /// Send a message to the bridge head to inform it of a finality advancement after it has been settled on the destination chain
     pub async fn advance(
         &self,
         slot: u64,
         store_hash: FixedBytes<32>,
+        queue_cursor: u64,
     ) -> Result<(), SendError<Command>> {
         return self
             .command_tx
-            .send(Command::Advance(AdvanceMessage { slot, store_hash }))
+            .send(Command::Advance(AdvanceMessage {
+                slot,
+                store_hash,
+                queue_cursor,
+            }))
             .await;
     }
 }
