@@ -1,5 +1,58 @@
 use alloy_primitives::{keccak256, Address, B256, Bytes, FixedBytes, Uint, U256};
 use alloy_rlp::Encodable;
+// AUDIT REMEDIATION: Zellic has little confidence in the alloy-trie
+// package as a whole. A general review of alloy-trie is needed. Three
+// defects in it and its RLP dependency bear on the two verify_proof
+// calls in this file.
+//
+// (1) False exclusion proofs. We need alloy-rs/trie PR #134 merged:
+// https://github.com/alloy-rs/trie/pull/134. verify_proof here can
+// incorrectly accept a claim that a key does not exist, even when the key
+// does in fact exist in the trie. A proof truncated to its first node,
+// passed with expected_value None, walks a path too short to match the
+// key, which nulls the decoded result and compares None against None. In
+// this file that means a prover can claim any storage word is zero
+// (verify_storage_word) or that any account is absent (verify_account),
+// and the guest commits to it. Until #134 lands upstream this needs a
+// pinned patched build or a vendored verify_proof that checks the walk
+// reached the key.
+//
+// (2) A leaf decoded as an internal node. verify_proof can continue
+// walking one level past where the trie actually ends. TrieNode::decode
+// picks leaf, extension or branch purely from flag bits and item count
+// inside the bytes it is handed, with nothing external pinning what a
+// given byte string is meant to represent. After a leaf decodes, the loop
+// holds that leaf's value as its expected next reference, and
+// RlpNode::from_rlp returns any input under 32 bytes unchanged, so
+// re-supplying the value bytes as a further proof element satisfies the
+// continuity check and gets them decoded as a fresh node.
+//
+// (3) Unchecked trailing bytes. alloy-rlp's Header::decode only checks
+// that the buffer holds at least payload_length bytes, never exactly that
+// many, and no caller checks afterwards either. Bytes trailing a decoded
+// payload are left unconsumed and unchecked, so distinct byte strings can
+// decode to the same node, and any reasoning that treats proof node bytes
+// as canonical rather than comparing decoded content is unsound.
+//
+// (2) and (3) do not reach this code, for two independent reasons.
+//
+// First, the shapes proved here are rejected outright. A storage word is
+// a U256, which RLP-encodes as a string rather than a list, and
+// TrieNode::decode rejects it. A TrieAccount RLP-encodes as a list of
+// exactly 4 items, while TrieNode::decode accepts only 2 items (leaf or
+// extension) or 17 items (branch), so it is rejected too. Both rejections
+// hold unconditionally and owe nothing to hash preimage difficulty.
+//
+// Second, the byte budget forecloses the useful version of (2) even where
+// a decode succeeds. Re-supplying value bytes only passes the continuity
+// check below 32 bytes, since at 32 or more RlpNode::from_rlp keccaks the
+// input into a 33-byte form that cannot equal the raw value. Under 32
+// bytes there is no room for a genuine 33-byte hash reference and its
+// framing: a branch needs 16 empty slot bytes plus a 33-byte child plus
+// list framing, over 50 bytes, and an extension needs an encoded key plus
+// a 33-byte child plus framing, around 37. Anything decodable within that
+// budget is self-contained and cannot reference real data elsewhere in
+// the trie, so the confusion cannot be steered at another account or slot.
 use alloy_trie::{proof, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
 use anyhow::Result;
 use nori_hash::merkle_poseidon_fixed::{
@@ -166,6 +219,9 @@ fn verify_storage_word(
     let key_nibbles = Nibbles::unpack(keccak256(key.as_slice()));
 
     let expected_value = if value.is_zero() {
+        // AUDIT REMEDIATION: defect (1) on the alloy_trie import applies at
+        // this call. A truncated proof passed with None lets a prover claim
+        // this storage word is zero when it is not.
         None
     } else {
         let mut rlp_encoded_value = Vec::new();
@@ -197,6 +253,10 @@ fn verify_account(
 ) -> Result<B256, MptError> {
     let address_nibbles = Nibbles::unpack(keccak256(address.as_slice()));
 
+    // AUDIT REMEDIATION: defect (1) on the alloy_trie import applies at this
+    // call. A truncated proof passed with a None account lets a prover claim
+    // this account is absent when it exists, yielding EMPTY_ROOT_HASH as its
+    // storage root and making every slot under it read as zero.
     let expected_value = account.as_ref().map(|account| {
         let mut rlp_encoded_trie_account = Vec::new();
         account.encode(&mut rlp_encoded_trie_account);
