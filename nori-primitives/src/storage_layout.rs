@@ -44,8 +44,18 @@ pub fn mapping_entry_location(key: U256, mapping_slot_index: u8) -> B256 {
     keccak256(encoded)
 }
 
-/// Slot of word `word_index` of a struct stored at `base`. Struct members
-/// occupy consecutive slots, so this is integer addition on the key.
+/// Slot of word `word_index` of the queue's `Request` struct stored at
+/// `base`, by integer addition on the key.
+///
+/// Members pack into a shared slot when
+/// they fit. It holds for `Request` only because of its field order —
+/// `target` (20 bytes) is followed by the 32-byte `slotKey`, which cannot
+/// share a slot, and `collectionKeysCount` (1 byte) is followed by the
+/// 32-byte `collectionKeys` array, so every member starts a fresh word.
+/// Moving `collectionKeysCount` ahead of `slotKey` would pack it with
+/// `target` into one word and silently break this arithmetic, the entry
+/// layout documented in NoriProofRequestQueue.sol, and every call site
+/// (`QUEUE_ENTRY_WORDS` included).
 pub fn struct_word_slot(base: B256, word_index: u8) -> B256 {
     B256::from(U256::from_be_bytes(base.0).wrapping_add(U256::from(word_index)))
 }
