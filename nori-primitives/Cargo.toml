@@ -7,8 +7,14 @@ authors.workspace = true
 
 [dependencies]
 serde = { workspace = true }
+nori-hash = { workspace = true }
 helios-consensus-core = { workspace = true }
 alloy-sol-types = { workspace = true }
 alloy-primitives = { workspace = true, features = ["sha3-keccak"] }
 alloy-trie = { workspace = true }
 anyhow = { workspace = true }
+
+# Example-only; kept out of [dependencies] so the guest build does not pull it in.
+[dev-dependencies]
+serde_json = { workspace = true }
+alloy = { workspace = true }

@@ -9,7 +9,11 @@ const NB_CHECKPOINT_FILE: &str = "./checkpoint/nb_checkpoint.json";
 #[derive(Serialize, Deserialize)]
 pub struct NoriBridgeCheckpoint {
     pub slot: u64,
-    pub store_hash: FixedBytes<32>
+    pub store_hash: FixedBytes<32>,
+    /// Queue cursor settled on the destination chain at `slot`. Defaults to 0 so checkpoints
+    /// written before the proof request queue still load.
+    #[serde(default)]
+    pub queue_cursor: u64,
 }
 
 /// Static method to check if the checkpoint file exists
@@ -35,9 +39,9 @@ pub fn load_nb_checkpoint() -> Result<NoriBridgeCheckpoint> {
 }
 
 /// Static method to save a checkpoint file
-pub fn save_nb_checkpoint(slot: u64, store_hash: FixedBytes<32>) {
+pub fn save_nb_checkpoint(slot: u64, store_hash: FixedBytes<32>, queue_cursor: u64) {
     info!("Saving checkpoint.");
-    
+
     // Create dir if nessesary
     let checkpoint_dir = Path::new(NB_CHECKPOINT_FILE).parent().unwrap();
 
@@ -47,7 +51,8 @@ pub fn save_nb_checkpoint(slot: u64, store_hash: FixedBytes<32>) {
     // Define the current checkpoint
     let checkpoint = NoriBridgeCheckpoint {
         slot,
-        store_hash
+        store_hash,
+        queue_cursor
     };
 
     // Serialize the checkpoint to a byte vector

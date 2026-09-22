@@ -68,6 +68,8 @@ pub struct ExampleBridgeHeadEventObserver {
     current_slot: u64,
     /// FixedBytes representing the store hash
     store_hash: FixedBytes<32>,
+    /// Queue cursor settled alongside `store_hash`
+    queue_cursor: u64,
     /// Boolean for indicating a job should be issued on the next beacon slot change event
     stage_transition_proof: bool,
     /// Latest validated proof input for the current window
@@ -84,6 +86,7 @@ impl ExampleBridgeHeadEventObserver {
             started: false,
             current_slot: 0,
             store_hash: FixedBytes::default(),
+            queue_cursor: 0,
             stage_transition_proof: false,
             latest_current_window_validated_proof_input: None,
             latest_next_window_validated_proof_input: None,
@@ -91,17 +94,18 @@ impl ExampleBridgeHeadEventObserver {
     }
 
     // Advance nori head
-    async fn advance(&mut self, slot: u64, store_hash: FixedBytes<32>) {
+    async fn advance(&mut self, slot: u64, store_hash: FixedBytes<32>, queue_cursor: u64) {
         // Update our state and the bridge heads state
         self.current_slot = slot;
         self.store_hash = store_hash;
+        self.queue_cursor = queue_cursor;
         // Save the checkpoint
-        save_nb_checkpoint(self.current_slot, self.store_hash);
+        save_nb_checkpoint(self.current_slot, self.store_hash, self.queue_cursor);
 
         // Advance the bridge head
         if self
             .bridge_head_handle
-            .advance(slot, store_hash)
+            .advance(slot, store_hash, queue_cursor)
             .await
             .is_err()
         {
@@ -135,7 +139,7 @@ impl EventObserver for ExampleBridgeHeadEventObserver {
         }
         // Advance the head
         info!("Advancing the bridge head.");
-        self.advance(proof_data.output_slot, proof_data.output_store_hash)
+        self.advance(proof_data.output_slot, proof_data.output_store_hash, proof_data.output_queue_cursor)
             .await;
 
         // Here we should check if we have prepared finality proof inputs for the next window. If we do we don't need
