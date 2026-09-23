@@ -30,7 +30,8 @@ async fn main() -> Result<()> {
     loop {
         println!("Preparing proof inputs from slot {}...", input_slot);
         let proof_inputs_with_window = match consensus_client
-            .prepare_consensus_mpt_proof_inputs(input_slot, store_hash, false)
+            // request cursor 0: drain the queue from its start for a self-contained fixture
+            .prepare_consensus_mpt_proof_inputs(input_slot, store_hash, 0, false)
             .await
         {
             Ok(v) => v,

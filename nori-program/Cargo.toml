@@ -9,6 +9,11 @@ authors.workspace = true
 #path = "src/lib.rs"
 #name = "nori-program"
 
+[[bin]]
+name = "nori-sp1-helios-program"
+path = "src/main.rs"
+test = false
+
 [dependencies]
 sp1-zkvm = "6.1.0"
 helios-consensus-core = { workspace = true }

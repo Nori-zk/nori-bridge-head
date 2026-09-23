@@ -19,6 +19,8 @@ async fn main() -> Result<()> {
     let current_slot;
     let store_hash;
 
+    let queue_cursor;
+
     // Start procedure
     if nb_checkpoint_exists() {
         // Warm start procedure
@@ -27,6 +29,7 @@ async fn main() -> Result<()> {
         let nb_checkpoint = load_nb_checkpoint().unwrap();
         current_slot = nb_checkpoint.slot;
         store_hash = nb_checkpoint.store_hash;
+        queue_cursor = nb_checkpoint.queue_cursor;
     } else {
         // Cold start procedure
         // FIXME we should be going from a trusted checkpoint TODO
@@ -36,6 +39,10 @@ async fn main() -> Result<()> {
                 .get_latest_finality_slot_and_store_hash()
                 .await
                 .unwrap();
+        // The cursor lives on Mina and is not readable from here. Zero is only
+        // correct against a queue that has never been drained; a cold start
+        // against a live bridge must seed this from the Mina contract.
+        queue_cursor = 0;
     }
 
     // Create bridge head and get event receiver
@@ -52,7 +59,7 @@ async fn main() -> Result<()> {
 
     // Start the bridge head
     info!("Starting nori event loop, with observer.");
-    tokio::spawn(bridge_head.run(current_slot, store_hash, None));
+    tokio::spawn(bridge_head.run(current_slot, store_hash, queue_cursor, None));
     info!("Started nori event loop.");
 
     // Wait for ctrl-c

@@ -1,1 +1,0 @@
-// @generated: build.rs will overwrite this with alloy::sol! bindings.
