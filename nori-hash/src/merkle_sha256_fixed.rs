@@ -1,12 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
-use anyhow::Result;
-use mina_curves::pasta::Fp;
-use mina_poseidon::{
-    constants::PlonkSpongeConstantsKimchi,
-    pasta::{fp_kimchi, FULL_ROUNDS},
-    poseidon::{ArithmeticSponge as Poseidon, Sponge as _},
-};
-use o1_utils::FieldHelpers;
+use sha2_v0_10_8::{Digest, Sha256};
 
 // FIXME(request-queue): this depth also drives MAX_BATCH below =
 // 2^MAX_TREE_DEPTH, the cap on queue entries N a single proof may cover. Each
@@ -26,20 +19,22 @@ pub const MAX_BATCH: usize = 1 << MAX_TREE_DEPTH;
 const N_MERKLE_ZEROS: usize = MAX_TREE_DEPTH + 1;
 const MERKLE_ZEROS: &[u8; N_MERKLE_ZEROS * 32] = include_bytes!("merkle-zeros.dat");
 
-// Kimchi poseidon hash
+// SHA-256 hash
 
-pub fn poseidon_hash(input: &[Fp]) -> Fp {
-    let mut hash = Poseidon::<Fp, PlonkSpongeConstantsKimchi, FULL_ROUNDS>::new(fp_kimchi::static_params());
-    hash.absorb(input);
-    hash.squeeze()
+pub fn sha256_hash(input: &[B256]) -> B256 {
+    let mut hash = Sha256::new();
+    for element in input {
+        hash.update(element);
+    }
+    B256::from_slice(&hash.finalize())
 }
 
 // Merkle zeros
 
-pub fn get_merkle_zeros() -> [Fp; N_MERKLE_ZEROS] {
-    let mut zeros = [Fp::from(0); N_MERKLE_ZEROS];
+pub fn get_merkle_zeros() -> [B256; N_MERKLE_ZEROS] {
+    let mut zeros = [B256::ZERO; N_MERKLE_ZEROS];
     for (i, chunk) in MERKLE_ZEROS.chunks(32).enumerate() {
-        zeros[i] = Fp::from_bytes(chunk).expect("invalid Fp bytes");
+        zeros[i] = B256::from_slice(chunk);
     }
     zeros
 }
@@ -63,7 +58,7 @@ pub fn get_merkle_zeros() -> [Fp; N_MERKLE_ZEROS] {
 ///
 /// # Examples
 /// ```
-/// use nori_hash::merkle_poseidon_fixed::compute_merkle_tree_depth_and_size;
+/// use nori_hash::merkle_sha256_fixed::compute_merkle_tree_depth_and_size;
 ///
 /// assert_eq!(compute_merkle_tree_depth_and_size(0), (0, 1));
 /// assert_eq!(compute_merkle_tree_depth_and_size(1), (0, 1));
@@ -98,7 +93,7 @@ pub fn compute_merkle_tree_depth_and_size(n_leaves: usize) -> (usize, usize) {
 ///
 /// # Parameters
 ///
-/// - `merkle_leaves`: mutable reference to a vector of `Fp` elements representing
+/// - `merkle_leaves`: mutable reference to a vector of `B256` elements representing
 ///   the leaf nodes; padded in-place to length `padded_size`.
 /// - `padded_size`: the total number of leaves after padding (must be a power of two).
 /// - `depth`: the depth of the tree (log2 of `padded_size`).
@@ -106,31 +101,31 @@ pub fn compute_merkle_tree_depth_and_size(n_leaves: usize) -> (usize, usize) {
 ///
 /// # Returns
 ///
-/// The computed Merkle root as an `Fp` element.
+/// The computed Merkle root as a `B256` element.
 ///
 /// # Example
 ///
 /// ```rust
-/// use nori_hash::merkle_poseidon_fixed::{
+/// use nori_hash::merkle_sha256_fixed::{
 ///     compute_merkle_tree_depth_and_size, fold_merkle_left, get_merkle_zeros,
 /// };
-/// use mina_curves::pasta::Fp;
+/// use alloy_primitives::B256;
 ///
 /// // Assumes merkle_leaves is populated.
-/// let mut merkle_leaves: Vec<Fp> = vec![Fp::from(1u64), Fp::from(2u64), Fp::from(3u64)];
+/// let mut merkle_leaves: Vec<B256> = vec![B256::with_last_byte(1), B256::with_last_byte(2), B256::with_last_byte(3)];
 /// let (depth, padded_size) = compute_merkle_tree_depth_and_size(merkle_leaves.len());
 /// let zeros = get_merkle_zeros();
 /// let root = fold_merkle_left(&mut merkle_leaves, padded_size, depth, &zeros);
 /// ```
 pub fn fold_merkle_left(
-    merkle_leaves: &mut Vec<Fp>,
+    merkle_leaves: &mut Vec<B256>,
     padded_size: usize,
     depth: usize,
-    zeros: &[Fp; N_MERKLE_ZEROS],
-) -> Fp {
+    zeros: &[B256; N_MERKLE_ZEROS],
+) -> B256 {
     // Deal with no leaves.
     if merkle_leaves.is_empty() {
-        return Fp::from(0);
+        return B256::ZERO;
     }
 
     // Number of leaves
@@ -138,7 +133,7 @@ pub fn fold_merkle_left(
 
     // Pad to nearest power of 2
     let missing = padded_size - merkle_leaves.len();
-    merkle_leaves.extend(std::iter::repeat_n(Fp::from(0), missing));
+    merkle_leaves.extend(std::iter::repeat_n(B256::ZERO, missing));
 
     let merkle_nodes = merkle_leaves;
 
@@ -157,13 +152,13 @@ pub fn fold_merkle_left(
             // Need to work out here if our left and right are dummies
             if left_idx >= n_non_dummy_nodes {
                 // We are a dummy node and by virtue so is right_idx
-                // rather than computing the posiedon hash we can look it up.
+                // rather than computing the sha256 hash we can look it up.
                 merkle_nodes[i] = zeros[depth + 1 - level];
                 //println!("Optimisation made 💪");
             } else {
                 let right_idx = i2 + 1;
                 // Atleast one is a real node
-                merkle_nodes[i] = poseidon_hash(&[merkle_nodes[left_idx], merkle_nodes[right_idx]]);
+                merkle_nodes[i] = sha256_hash(&[merkle_nodes[left_idx], merkle_nodes[right_idx]]);
             }
         }
         n_non_dummy_nodes = n_non_dummy_nodes.div_ceil(2);
@@ -174,7 +169,7 @@ pub fn fold_merkle_left(
 /// Constructs a full Merkle tree by iteratively hashing sibling pairs bottom-up.
 ///
 /// This function builds every level of the tree, storing each layer in its own
-/// `Vec<Fp>`, and returns a `Vec<Vec<Fp>>` from root (index 0) to leaves (index `depth`).
+/// `Vec<B256>`, and returns a `Vec<Vec<B256>>` from root (index 0) to leaves (index `depth`).
 /// It takes input leaves, pads them to `padded_size`, and then folds siblings
 /// into parent nodes one level at a time, collecting each layer separately.
 ///
@@ -186,7 +181,7 @@ pub fn fold_merkle_left(
 ///
 /// # Parameters
 ///
-/// - `merkle_leaves`: Owned vector of field elements representing the leaf nodes.
+/// - `merkle_leaves`: Owned vector of `B256` elements representing the leaf nodes.
 ///   The vector is padded with zeros (dummy leaves) to reach `padded_size` before building.
 /// - `padded_size`: The target number of leaves after padding (must be a power of two).
 /// - `depth`: The depth of the tree (log₂ of `padded_size`).
@@ -195,7 +190,7 @@ pub fn fold_merkle_left(
 ///
 /// # Returns
 ///
-/// A `Vec<Vec<Fp>>` of length `depth + 1`, where:
+/// A `Vec<Vec<B256>>` of length `depth + 1`, where:
 /// - `tree[0]` is a single-element vector containing the Merkle root.
 /// - `tree[1]` is the next layer of parent hashes.
 /// - …
@@ -211,27 +206,27 @@ pub fn fold_merkle_left(
 /// # Example
 ///
 /// ```rust
-/// use nori_hash::merkle_poseidon_fixed::{
+/// use nori_hash::merkle_sha256_fixed::{
 ///     build_merkle_tree, compute_merkle_tree_depth_and_size, get_merkle_zeros,
 /// };
-/// use mina_curves::pasta::Fp;
+/// use alloy_primitives::B256;
 ///
-/// let a = Fp::from(1u64);
-/// let b = Fp::from(2u64);
-/// let c = Fp::from(3u64);
+/// let a = B256::with_last_byte(1);
+/// let b = B256::with_last_byte(2);
+/// let c = B256::with_last_byte(3);
 /// let leaves = vec![a, b, c];
 /// let (depth, padded_size) = compute_merkle_tree_depth_and_size(leaves.len());
 /// let zeros = get_merkle_zeros();
 /// let tree = build_merkle_tree(leaves, padded_size, depth, &zeros);
 /// let root = tree[0][0];
-/// assert_eq!(tree[depth], vec![a, b, c, Fp::from(0u64)]);
+/// assert_eq!(tree[depth], vec![a, b, c, B256::ZERO]);
 /// ```
 pub fn build_merkle_tree(
-    mut merkle_leaves: Vec<Fp>,
+    mut merkle_leaves: Vec<B256>,
     padded_size: usize,
     depth: usize,
-    zeros: &[Fp; N_MERKLE_ZEROS],
-) -> Vec<Vec<Fp>> {
+    zeros: &[B256; N_MERKLE_ZEROS],
+) -> Vec<Vec<B256>> {
     // Same as above but build all levels
 
     // Number of leaves
@@ -239,7 +234,7 @@ pub fn build_merkle_tree(
 
     // Pad to nearest power of 2
     let missing = padded_size - merkle_leaves.len();
-    merkle_leaves.extend(std::iter::repeat_n(Fp::from(0), missing));
+    merkle_leaves.extend(std::iter::repeat_n(B256::ZERO, missing));
 
     // Need to identify dummies so we can cheaply look them up
     // n_leaves = merkle_leaves.len() (before padding)
@@ -253,20 +248,20 @@ pub fn build_merkle_tree(
     for level in (1..=depth).rev() {
         let child_level = &merkle_tree[level];
         let parent_width = 1 << (level - 1);
-        let mut parent_level: Vec<Fp> = Vec::with_capacity(parent_width);
+        let mut parent_level: Vec<B256> = Vec::with_capacity(parent_width);
         for i in 0..(parent_width) {
             let i2 = 2 * i;
             let left_idx = i2;
             // Need to work out here if our left and right are dummies
             if left_idx >= n_non_dummy_nodes {
                 // We are a dummy node and by virtue so is right_idx
-                // rather than computing the posiedon hash we can look it up.
+                // rather than computing the sha256 hash we can look it up.
                 parent_level.push(zeros[depth + 1 - level]);
                 //println!("Optimisation made 💪");
             } else {
                 let right_idx = i2 + 1;
                 // Atleast one is a real node
-                parent_level.push(poseidon_hash(&[
+                parent_level.push(sha256_hash(&[
                     child_level[left_idx],
                     child_level[right_idx],
                 ]));
@@ -295,7 +290,7 @@ pub fn build_merkle_tree(
 /// - The caller must ensure that `index` refers to a valid leaf index within the padded tree.
 ///
 /// ## Parameters
-/// - `merkle_leaves`: A mutable vector of `Fp` elements representing the leaf nodes of the tree.
+/// - `merkle_leaves`: A mutable vector of `B256` elements representing the leaf nodes of the tree.
 ///   This vector will be padded with zeroes (if needed) and overwritten during processing.
 /// - `padded_size`: The expected number of leaves after padding (must be a power of two).
 /// - `depth`: The depth of the tree (log₂ of `padded_size`; zero for trees with ≤1 leaf).
@@ -304,7 +299,7 @@ pub fn build_merkle_tree(
 ///   cheaply instead of hashing two zero leaves each time.
 ///
 /// ## Returns
-/// A vector of `Fp` elements, each representing a sibling node in the Merkle path.
+/// A vector of `B256` elements, each representing a sibling node in the Merkle path.
 /// The path contains exactly `depth` elements.
 ///
 /// ## Panics
@@ -312,24 +307,24 @@ pub fn build_merkle_tree(
 ///
 /// ## Example
 /// ```rust
-/// use nori_hash::merkle_poseidon_fixed::{
+/// use nori_hash::merkle_sha256_fixed::{
 ///     compute_merkle_tree_depth_and_size, get_merkle_path_from_leaves, get_merkle_zeros,
 /// };
-/// use mina_curves::pasta::Fp;
+/// use alloy_primitives::B256;
 ///
-/// let original_leaf_values: Vec<Fp> = vec![Fp::from(1u64), Fp::from(2u64), Fp::from(3u64)];
+/// let original_leaf_values: Vec<B256> = vec![B256::with_last_byte(1), B256::with_last_byte(2), B256::with_last_byte(3)];
 /// let (depth, padded_size) = compute_merkle_tree_depth_and_size(original_leaf_values.len());
 /// let zeros = get_merkle_zeros();
 /// let mut leaves = original_leaf_values.clone();
 /// let path = get_merkle_path_from_leaves(&mut leaves, padded_size, depth, 2, &zeros);
 /// ```
 pub fn get_merkle_path_from_leaves(
-    merkle_leaves: &mut Vec<Fp>,
+    merkle_leaves: &mut Vec<B256>,
     padded_size: usize,
     depth: usize,
     index: u32,
-    zeros: &[Fp; N_MERKLE_ZEROS],
-) -> Vec<Fp> {
+    zeros: &[B256; N_MERKLE_ZEROS],
+) -> Vec<B256> {
     if merkle_leaves.is_empty() {
         return vec![];
     }
@@ -339,10 +334,10 @@ pub fn get_merkle_path_from_leaves(
 
     // Pad to nearest power of 2
     let missing = padded_size - merkle_leaves.len();
-    merkle_leaves.extend(std::iter::repeat_n(Fp::from(0), missing));
+    merkle_leaves.extend(std::iter::repeat_n(B256::ZERO, missing));
 
     let merkle_nodes = merkle_leaves;
-    let mut path: Vec<Fp> = Vec::with_capacity(depth);
+    let mut path: Vec<B256> = Vec::with_capacity(depth);
     let mut position = index as usize;
 
     let mut n_non_dummy_nodes = n_leaves;
@@ -364,12 +359,12 @@ pub fn get_merkle_path_from_leaves(
             // Need to work out here if our left and right are dummies
             if left_idx >= n_non_dummy_nodes {
                 // We are a dummy node and by virtue so is right_idx
-                // rather than computing the posiedon hash we can look it up.
+                // rather than computing the sha256 hash we can look it up.
                 merkle_nodes[i] = zeros[depth + 1 - level];
             } else {
                 let right_idx = i2 + 1;
                 // Atleast one is a real node
-                merkle_nodes[i] = poseidon_hash(&[merkle_nodes[left_idx], merkle_nodes[right_idx]]);
+                merkle_nodes[i] = sha256_hash(&[merkle_nodes[left_idx], merkle_nodes[right_idx]]);
             }
         }
 
@@ -380,9 +375,9 @@ pub fn get_merkle_path_from_leaves(
     path
 }
 
-pub fn get_merkle_path_from_tree(merkle_tree: &[Vec<Fp>], mut index: u32) -> Vec<Fp> {
+pub fn get_merkle_path_from_tree(merkle_tree: &[Vec<B256>], mut index: u32) -> Vec<B256> {
     let depth = merkle_tree.len() - 1;
-    let mut path: Vec<Fp> = Vec::with_capacity(depth);
+    let mut path: Vec<B256> = Vec::with_capacity(depth);
     // We can pick our nodes along the path by looking at the bit
     // starting with the leaves.
     for level in (1..=depth).rev() {
@@ -399,7 +394,7 @@ pub fn get_merkle_path_from_tree(merkle_tree: &[Vec<Fp>], mut index: u32) -> Vec
 /// This function traverses the Merkle authentication path bottom-up, using the provided
 /// leaf hash and sibling hashes to reconstruct the Merkle root. At each level, it combines
 /// the current hash with its sibling according to the corresponding bit of the index,
-/// then applies the Poseidon hash.
+/// then applies the SHA-256 hash.
 ///
 /// ## Path Semantics
 /// - The `path` slice contains sibling hashes starting from the leaf level up to the root level.
@@ -407,27 +402,27 @@ pub fn get_merkle_path_from_tree(merkle_tree: &[Vec<Fp>], mut index: u32) -> Vec
 /// - The `index` is the 0-based leaf index in the padded Merkle tree.
 ///
 /// ## Parameters
-/// - `leaf_hash`: Poseidon hash of the leaf value.
+/// - `leaf_hash`: SHA-256 hash of the leaf value.
 /// - `index`: The leaf index within the tree.
 /// - `path`: Slice of sibling hashes for each level of the tree.
 ///
 /// ## Returns
-/// The Merkle root as an `Fp` element.
+/// The Merkle root as a `B256` element.
 ///
 /// ## Panics
 /// Panics if `path.len()` is larger than 64 bits (index must fit in u64).
 ///
 /// ## Example
 /// ```rust
-/// use nori_hash::merkle_poseidon_fixed::{compute_merkle_root_from_path, poseidon_hash};
-/// use mina_curves::pasta::Fp;
+/// use nori_hash::merkle_sha256_fixed::{compute_merkle_root_from_path, sha256_hash};
+/// use alloy_primitives::B256;
 ///
-/// let leaf = poseidon_hash(&[Fp::from(42u64)]);
-/// let sibling = poseidon_hash(&[Fp::from(7u64)]);
+/// let leaf = sha256_hash(&[B256::with_last_byte(42)]);
+/// let sibling = sha256_hash(&[B256::with_last_byte(7)]);
 /// let path = vec![sibling];
 /// let root = compute_merkle_root_from_path(leaf, 0, &path);
 /// ```
-pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> Fp {
+pub fn compute_merkle_root_from_path(leaf_hash: B256, index: u64, path: &[B256]) -> B256 {
     let mut hash = leaf_hash;
 
     for (level, sibling) in path.iter().enumerate() {
@@ -440,16 +435,14 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
             (hash, *sibling)
         };
 
-        hash = poseidon_hash(&[left, right]);
+        hash = sha256_hash(&[left, right]);
     }
 
     hash
 }
 
-/// Packs 117 bytes of leaf data into four field elements, each kept below the
-/// 254-bit field size. Byte handling matches the storage-slot leaf scheme: big-endian
-/// payload bytes are written from index 0 and read back little-endian by
-/// `Fp::from_bytes`.
+/// Packs 117 bytes of leaf data into four 32-byte fields. Byte handling matches
+/// the storage-slot leaf scheme: big-endian payload bytes are written from index 0.
 ///
 /// Field layout:
 /// - field 1: `target` (20) ++ `collection_keys_count` ++ `key_0[0]` ++ `key_1[0]` ++ `value[0]`
@@ -460,7 +453,7 @@ pub fn compute_merkle_root_from_path(leaf_hash: Fp, index: u64, path: &[Fp]) -> 
 /// `collection_keys_count` is hashed so that an unused trailing key, which is
 /// zero, cannot collide with a request that supplied a zero key.
 ///
-/// The o1js `provableRequestLeafHash` must pack identically; the shared test
+/// The Solana `request_leaf_hash` must pack identically; the shared test
 /// vectors pin both implementations.
 pub fn pack_request_leaf_fields(
     target: &Address,
@@ -468,7 +461,7 @@ pub fn pack_request_leaf_fields(
     collection_key_0: &B256,
     collection_key_1: &B256,
     value: &U256,
-) -> Result<[Fp; 4]> {
+) -> [[u8; 32]; 4] {
     let target_bytes = target.as_slice();
     let key_0_bytes = collection_key_0.as_slice();
     let key_1_bytes = collection_key_1.as_slice();
@@ -490,19 +483,18 @@ pub fn pack_request_leaf_fields(
     let mut fourth_field_bytes = [0u8; 32];
     fourth_field_bytes[0..31].copy_from_slice(&value_bytes[1..32]);
 
-    Ok([
-        Fp::from_bytes(&first_field_bytes)?,
-        Fp::from_bytes(&second_field_bytes)?,
-        Fp::from_bytes(&third_field_bytes)?,
-        Fp::from_bytes(&fourth_field_bytes)?,
-    ])
+    [
+        first_field_bytes,
+        second_field_bytes,
+        third_field_bytes,
+        fourth_field_bytes,
+    ]
 }
 
 /// Hashes one verified queue request into a Merkle leaf.
 ///
-/// Packs 117 bytes of leaf data into four field elements via
-/// `pack_request_leaf_fields`, each kept below the 254-bit field size, then
-/// applies Poseidon.
+/// Packs 117 bytes of leaf data into four 32-byte fields via
+/// `pack_request_leaf_fields`, then applies SHA-256.
 ///
 /// Field layout:
 /// - field 1: `target` (20) ++ `collection_keys_count` ++ `key_0[0]` ++ `key_1[0]` ++ `value[0]`
@@ -510,7 +502,7 @@ pub fn pack_request_leaf_fields(
 /// - field 3: `key_1[1..32]`
 /// - field 4: `value[1..32]`
 ///
-/// The o1js `provableRequestLeafHash` must pack identically; the shared test
+/// The Solana `request_leaf_hash` must pack identically; the shared test
 /// vectors pin both implementations.
 pub fn hash_request_leaf(
     target: &Address,
@@ -518,15 +510,15 @@ pub fn hash_request_leaf(
     collection_key_0: &B256,
     collection_key_1: &B256,
     value: &U256,
-) -> Result<Fp> {
+) -> B256 {
     let fields = pack_request_leaf_fields(
         target,
         collection_keys_count,
         collection_key_0,
         collection_key_1,
         value,
-    )?;
-    Ok(poseidon_hash(&fields))
+    );
+    sha256_hash(&fields.map(B256::from))
 }
 
 #[cfg(test)]
@@ -539,8 +531,8 @@ mod request_leaf_tests {
         key_0: B256,
         key_1: B256,
         value: U256,
-    ) -> Fp {
-        hash_request_leaf(&target, count, &key_0, &key_1, &value).unwrap()
+    ) -> B256 {
+        hash_request_leaf(&target, count, &key_0, &key_1, &value)
     }
 
     #[test]
@@ -549,7 +541,7 @@ mod request_leaf_tests {
     }
 
     #[test]
-    fn hashes_maximum_bytes_without_field_overflow() {
+    fn hashes_maximum_bytes() {
         leaf(
             Address::repeat_byte(0xff),
             u8::MAX,
@@ -711,10 +703,10 @@ mod merkle_fixed_tests {
         (target, count, key_0, key_1, value)
     }
 
-    fn build_leaves(pairs: &[RequestLeafArgs]) -> Result<Vec<Fp>> {
+    fn build_leaves(pairs: &[RequestLeafArgs]) -> Result<Vec<B256>> {
         let mut leaves = Vec::with_capacity(pairs.len());
         for (target, count, key_0, key_1, value) in pairs {
-            leaves.push(hash_request_leaf(target, *count, key_0, key_1, value)?);
+            leaves.push(hash_request_leaf(target, *count, key_0, key_1, value));
         }
         Ok(leaves)
     }
@@ -740,7 +732,7 @@ mod merkle_fixed_tests {
         let leaf_hash = leaves
             .get(leaf_index)
             .copied()
-            .unwrap_or_else(|| Fp::from(0));
+            .unwrap_or_else(|| B256::ZERO);
         let recomputed_root =
             compute_merkle_root_from_path(leaf_hash, leaf_index as u64, &path.to_vec());
 
@@ -750,7 +742,7 @@ mod merkle_fixed_tests {
             leaf_index
         );
 
-        println!("Root {:?}", root.to_biguint());
+        println!("Root {:?}", root);
         Ok(())
     }
     #[test]
@@ -797,14 +789,14 @@ mod merkle_fixed_tests {
         let target = Address::ZERO;
         let key_0 = B256::from(code_challenge.to_be_bytes::<32>());
         let key_1 = B256::ZERO;
-        let result = hash_request_leaf(&target, 1, &key_0, &key_1, &value).unwrap();
+        let result = hash_request_leaf(&target, 1, &key_0, &key_1, &value);
 
         // Assert or print result as needed
-        println!("Hash result big int: {:?}", result.to_bigint_positive());
-        println!("Hash result hex: {:?}", result.to_hex());
-        println!("Hash result bytes: {:?}", result.to_bytes());
+        println!("Hash result big int: {:?}", U256::from_be_bytes(result.0));
+        println!("Hash result hex: {:?}", result.to_string());
+        println!("Hash result bytes: {:?}", result.0);
 
-        let bytes = result.to_bytes();
+        let bytes = result.0;
         print!("Hash result (hex): 0x");
         for b in bytes.iter() {
             print!("{:02x}", b);
@@ -822,8 +814,8 @@ mod merkle_fixed_tests {
     #[test]
     fn test_hash_request_leaf_basic() -> Result<()> {
         let (target, count, key_0, key_1, value) = dummy_request(2);
-        let leaf_hash = hash_request_leaf(&target, count, &key_0, &key_1, &value)?;
-        assert_ne!(leaf_hash, Fp::from(0));
+        let leaf_hash = hash_request_leaf(&target, count, &key_0, &key_1, &value);
+        assert_ne!(leaf_hash, B256::ZERO);
         Ok(())
     }
 
@@ -867,7 +859,7 @@ mod merkle_fixed_tests {
             // Change leaf layer verification to use depth instead of depth-1
             let mut expected_padded = leaves.clone();
             expected_padded.extend(std::iter::repeat_n(
-                Fp::from(0),
+                B256::ZERO,
                 padded_size - expected_padded.len(),
             ));
 
@@ -915,14 +907,14 @@ mod merkle_fixed_tests {
         }
     }
 
-    // Brute-force reference: pad with Fp(0), hash every pair, no zeros cache.
-    fn reference_root_bruteforce(leaves: &[Fp], padded_size: usize) -> Fp {
-        let mut level: Vec<Fp> = leaves.to_vec();
-        level.resize(padded_size, Fp::from(0));
+    // Brute-force reference: pad with B256::ZERO, hash every pair, no zeros cache.
+    fn reference_root_bruteforce(leaves: &[B256], padded_size: usize) -> B256 {
+        let mut level: Vec<B256> = leaves.to_vec();
+        level.resize(padded_size, B256::ZERO);
         while level.len() > 1 {
             let mut next = Vec::with_capacity(level.len() / 2);
             for i in (0..level.len()).step_by(2) {
-                next.push(poseidon_hash(&[level[i], level[i + 1]]));
+                next.push(sha256_hash(&[level[i], level[i + 1]]));
             }
             level = next;
         }
@@ -930,19 +922,19 @@ mod merkle_fixed_tests {
     }
 
     // Recursive reference: computes the root of a subtree by recursion.
-    fn reference_root_recursive(leaves: &[Fp], padded_size: usize) -> Fp {
-        fn subtree(leaves: &[Fp], offset: usize, size: usize) -> Fp {
+    fn reference_root_recursive(leaves: &[B256], padded_size: usize) -> B256 {
+        fn subtree(leaves: &[B256], offset: usize, size: usize) -> B256 {
             if size == 1 {
                 return if offset < leaves.len() {
                     leaves[offset]
                 } else {
-                    Fp::from(0)
+                    B256::ZERO
                 };
             }
             let half = size / 2;
             let left = subtree(leaves, offset, half);
             let right = subtree(leaves, offset + half, half);
-            poseidon_hash(&[left, right])
+            sha256_hash(&[left, right])
         }
         subtree(leaves, 0, padded_size)
     }
@@ -1025,18 +1017,19 @@ mod merkle_fixed_tests {
 #[cfg(test)]
 mod merkle_zeros {
     use super::*;
+    use anyhow::Result;
     use std::io::Write;
     use std::{env, path::PathBuf};
 
-    fn calculate_zeros() -> Vec<Fp> {
-        // [Fp; N_MERKLE_ZEROS]
-        let zeros_iter: std::iter::Take<std::iter::Successors<Fp, _>> =
-            std::iter::successors(Some(Fp::from(0)), |last| {
-                Some(poseidon_hash(&[*last, *last]))
+    fn calculate_zeros() -> Vec<B256> {
+        // [B256; N_MERKLE_ZEROS]
+        let zeros_iter: std::iter::Take<std::iter::Successors<B256, _>> =
+            std::iter::successors(Some(B256::ZERO), |last| {
+                Some(sha256_hash(&[*last, *last]))
             })
             .take(N_MERKLE_ZEROS);
 
-        zeros_iter.collect::<Vec<Fp>>()
+        zeros_iter.collect::<Vec<B256>>()
     }
 
     fn find_workspace_root(mut dir: PathBuf) -> Option<PathBuf> {
@@ -1054,7 +1047,7 @@ mod merkle_zeros {
 
     fn save_zeros() -> Result<()> {
         let zeros = calculate_zeros();
-        let bytes: Vec<u8> = zeros.iter().flat_map(|zero| zero.to_bytes()).collect();
+        let bytes: Vec<u8> = zeros.iter().flat_map(|zero| zero.0).collect();
 
         // Determine the current project directory (where Cargo.toml is located)
         let project_dir = env::current_dir().expect("Failed to get current directory");

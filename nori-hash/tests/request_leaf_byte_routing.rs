@@ -4,15 +4,13 @@
 //! pack_request_leaf_fields itself via arithmetic on the documented field
 //! layout. Also renders the checked cases to
 //! `test-vectors/proof-request-queue/request-leaf-vectors.json`, which the
-//! o1js `provableRequestLeafHash` must reproduce every `leaf` value from.
+//! Solana `request_leaf_hash` must reproduce every `leaf` value from.
 //!
 //! Run: `cargo test -p nori-hash --test request_leaf_byte_routing`
 
 mod byte_routing {
     use alloy_primitives::{hex, Address, B256, U256};
-    use mina_curves::pasta::Fp;
-    use nori_hash::merkle_poseidon_fixed::{hash_request_leaf, pack_request_leaf_fields};
-    use o1_utils::FieldHelpers;
+    use nori_hash::merkle_sha256_fixed::{hash_request_leaf, pack_request_leaf_fields};
     use serde_json::{json, Value};
     use std::path::PathBuf;
 
@@ -62,12 +60,12 @@ mod byte_routing {
 
     // Expected pack_request_leaf_fields output for a single-byte case, from
     // the documented field layout.
-    fn expected_fields(byte_index: usize) -> [Fp; 4] {
+    fn expected_fields(byte_index: usize) -> [[u8; 32]; 4] {
         let (field_index, offset) = field_and_offset(byte_index);
         let mut bytes = [0u8; 32];
         bytes[offset] = SINGLE_BYTE_MARKER;
-        let mut fields = [Fp::from(0u64); 4];
-        fields[field_index] = Fp::from_bytes(&bytes).expect("marker byte fits a single field");
+        let mut fields = [[0u8; 32]; 4];
+        fields[field_index] = bytes;
         fields
     }
 
@@ -93,8 +91,7 @@ mod byte_routing {
         let value = U256::from_be_bytes(value_bytes);
 
         let actual =
-            pack_request_leaf_fields(&target, count, &collection_key_0, &collection_key_1, &value)
-                .expect("packing succeeds for a single marker byte");
+            pack_request_leaf_fields(&target, count, &collection_key_0, &collection_key_1, &value);
         let expected = expected_fields(byte_index);
         assert_eq!(
             actual, expected,
@@ -212,8 +209,7 @@ mod byte_routing {
                     &case.collection_key_0,
                     &case.collection_key_1,
                     &case.value,
-                )
-                .expect("leaf hash");
+                );
 
                 json!({
                     "name": case.name,
@@ -224,7 +220,7 @@ mod byte_routing {
                         format!("0x{}", hex::encode(case.collection_key_1.as_slice())),
                     ],
                     "value": format!("0x{}", hex::encode(case.value.to_be_bytes::<32>())),
-                    "leaf": leaf.to_biguint().to_string(),
+                    "leaf": format!("0x{}", hex::encode(leaf.as_slice())),
                 })
             })
             .collect()

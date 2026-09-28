@@ -4,8 +4,5 @@
   "type": "module",
   "scripts": {
     "cross-check": "node cross_check.mjs"
-  },
-  "dependencies": {
-    "o1js": "2.12.0"
   }
 }

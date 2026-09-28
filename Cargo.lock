@@ -1014,7 +1014,6 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-integer",
  "num-traits",
- "rayon",
  "zeroize",
 ]
 
@@ -1073,7 +1072,6 @@ dependencies = [
  "num-bigint 0.4.6",
  "num-traits",
  "paste",
- "rayon",
  "zeroize",
 ]
 
@@ -1158,7 +1156,6 @@ dependencies = [
  "educe",
  "fnv",
  "hashbrown 0.15.5",
- "rayon",
 ]
 
 [[package]]
@@ -1222,7 +1219,6 @@ dependencies = [
  "arrayvec",
  "digest 0.10.7",
  "num-bigint 0.4.6",
- "rayon",
 ]
 
 [[package]]
@@ -1264,7 +1260,6 @@ checksum = "246a225cc6131e9ee4f24619af0f19d67761fff15d7ccc22e42b80846e69449a"
 dependencies = [
  "num-traits",
  "rand 0.8.5",
- "rayon",
 ]
 
 [[package]]
@@ -1918,16 +1913,6 @@ name = "base64ct"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55248b47b0caf0546f7988906588779981c43bb1bc9d0c44087278f80cdb44ba"
-
-[[package]]
-name = "bcs"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85b6598a2f5d564fb7855dc6b06fd1c38cff5a72bd8b863a4d021938497b440a"
-dependencies = [
- "serde",
- "thiserror 1.0.69",
-]
 
 [[package]]
 name = "beef"
@@ -4117,9 +4102,6 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "hex-conservative"
@@ -4983,7 +4965,7 @@ version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
- "spin 0.9.8",
+ "spin",
 ]
 
 [[package]]
@@ -5224,35 +5206,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
-name = "mina-curves"
-version = "0.6.0"
-source = "git+https://github.com/o1-labs/proof-systems#7bbc831eee73124b78babc5022d79d63359a55ca"
-dependencies = [
- "ark-bn254",
- "ark-ec",
- "ark-ff 0.5.0",
- "ark-std 0.5.0",
- "num-bigint 0.4.6",
-]
-
-[[package]]
-name = "mina-poseidon"
-version = "0.6.0"
-source = "git+https://github.com/o1-labs/proof-systems#7bbc831eee73124b78babc5022d79d63359a55ca"
-dependencies = [
- "ark-ec",
- "ark-ff 0.5.0",
- "ark-poly",
- "ark-serialize 0.5.0",
- "mina-curves",
- "o1-utils",
- "rand 0.8.5",
- "rayon",
- "serde",
- "serde_with",
-]
-
-[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5405,9 +5358,6 @@ dependencies = [
  "alloy-sol-types",
  "anyhow",
  "helios-consensus-core",
- "mina-curves",
- "mina-poseidon",
- "o1-utils",
  "rmp-serde",
  "serde_cbor",
  "serde_json",
@@ -5441,11 +5391,8 @@ dependencies = [
  "anyhow",
  "helios-consensus-core",
  "log",
- "mina-curves",
- "mina-poseidon",
  "nori-hash",
  "nori-sp1-helios-primitives",
- "o1-utils",
  "serde_cbor",
  "sp1-zkvm",
  "tree_hash",
@@ -5518,8 +5465,6 @@ checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
  "num-integer",
  "num-traits",
- "rand 0.8.5",
- "serde",
 ]
 
 [[package]]
@@ -5664,30 +5609,6 @@ dependencies = [
  "ruint",
  "serde",
  "smallvec",
-]
-
-[[package]]
-name = "o1-utils"
-version = "0.6.0"
-source = "git+https://github.com/o1-labs/proof-systems#7bbc831eee73124b78babc5022d79d63359a55ca"
-dependencies = [
- "ark-ff 0.5.0",
- "ark-poly",
- "ark-serialize 0.5.0",
- "bcs",
- "hex",
- "num-bigint 0.4.6",
- "num-integer",
- "rand 0.8.5",
- "rayon",
- "rmp-serde",
- "rustversion",
- "serde",
- "serde_json",
- "serde_with",
- "sha2 0.10.9",
- "spin 0.10.0",
- "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -9149,12 +9070,6 @@ name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
-
-[[package]]
-name = "spin"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5fe4ccb98d9c292d56fec89a5e07da7fc4cf0dc11e156b41793132775d3e591"
 
 [[package]]
 name = "spki"

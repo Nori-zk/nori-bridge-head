@@ -15,7 +15,7 @@ use anyhow::{anyhow, Context, Error, Result};
 use futures::FutureExt;
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use log::{debug, error, warn};
-use nori_hash::merkle_poseidon_fixed::MAX_BATCH;
+use nori_hash::merkle_sha256_fixed::MAX_BATCH;
 use nori_sp1_helios_primitives::storage_layout::{
     mapping_entry_location, storage_slot_of_index, struct_word_slot, QUEUE_ENTRY_WORDS,
     QUEUE_HEAD_STORAGE_INDEX, QUEUE_REQUESTS_STORAGE_INDEX,

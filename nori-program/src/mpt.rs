@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, B256, Bytes, FixedBytes, Uint, U256};
+use alloy_primitives::{keccak256, Address, B256, Bytes, FixedBytes, U256};
 use alloy_rlp::Encodable;
 // AUDIT REMEDIATION: Zellic has little confidence in the alloy-trie
 // package as a whole. A general review of alloy-trie is needed. Three
@@ -55,7 +55,7 @@ use alloy_rlp::Encodable;
 // the trie, so the confusion cannot be steered at another account or slot.
 use alloy_trie::{proof, Nibbles, TrieAccount, EMPTY_ROOT_HASH};
 use anyhow::Result;
-use nori_hash::merkle_poseidon_fixed::{
+use nori_hash::merkle_sha256_fixed::{
     compute_merkle_tree_depth_and_size, fold_merkle_left, get_merkle_zeros, hash_request_leaf,
     MAX_BATCH, MAX_TREE_DEPTH,
 };
@@ -64,7 +64,6 @@ use nori_sp1_helios_primitives::storage_layout::{
     QUEUE_ENTRY_WORDS, QUEUE_HEAD_STORAGE_INDEX, QUEUE_REQUESTS_STORAGE_INDEX,
 };
 use nori_sp1_helios_primitives::types::{QueueStorage, TargetSlotProof};
-use o1_utils::FieldHelpers;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -98,13 +97,6 @@ pub enum MptError {
     /// the account's storage root.
     InvalidStorageSlotProof {
         slot_key: B256,
-        reason: String,
-    },
-    /// Hashing a queue entry's request leaf failed.
-    LeafHashError {
-        target: Address,
-        slot_key: B256,
-        value: Uint<256, 4>,
         reason: String,
     },
     /// The number of proven slots requires a Merkle tree deeper than the
@@ -155,14 +147,6 @@ impl fmt::Display for MptError {
                 f,
                 "MPT storage proof failed for slot {:?}: {:?}",
                 slot_key,
-                reason
-            ),
-            MptError::LeafHashError { target, slot_key, value, reason } => write!(
-                f,
-                "MPT error hashing request leaf for target {:?} slot {:?} value {:?}: {:?}",
-                target,
-                slot_key,
-                value,
                 reason
             ),
             MptError::ExceedsMaxTreeDepth {
@@ -415,13 +399,7 @@ pub fn verify_queue(
             &entry.collection_keys[0],
             &entry.collection_keys[1],
             &slot.value,
-        )
-        .map_err(|e| MptError::LeafHashError {
-            target: entry.target,
-            slot_key: entry.slot_key,
-            value: slot.value,
-            reason: e.to_string(),
-        })?;
+        );
 
         merkle_nodes.push(leaf);
     }
@@ -438,7 +416,7 @@ pub fn verify_queue(
     let root = fold_merkle_left(&mut merkle_nodes, padded_size, depth, &get_merkle_zeros());
 
     let mut root_bytes = [0u8; 32];
-    root_bytes.copy_from_slice(&root.to_bytes());
+    root_bytes.copy_from_slice(root.as_slice());
 
     Ok((
         queue_storage.input_cursor + batch,

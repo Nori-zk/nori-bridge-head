@@ -134,7 +134,7 @@ SP1_PROOF_TYPE=groth16
 **Network proving (Mainnet with auction):**
 ```bash
 SP1_PROVER=network
-SP1_PROOF_TYPE=plonk
+SP1_PROOF_TYPE=groth16
 SP1_NETWORK_PRIVATE_KEY=0x...
 SP1_NETWORK_MODE=mainnet
 ```
@@ -142,7 +142,7 @@ SP1_NETWORK_MODE=mainnet
 **Network proving (Reserved capacity):**
 ```bash
 SP1_PROVER=network
-SP1_PROOF_TYPE=plonk
+SP1_PROOF_TYPE=groth16
 SP1_NETWORK_PRIVATE_KEY=0x...
 SP1_NETWORK_MODE=reserved
 ```
@@ -169,4 +169,4 @@ cargo build
 
 ## Nori Contract
 
-For information on how to deploy the source contract see [here](https://github.com/Nori-zk/nori-bridge-sdk/tree/main/contracts/ethereum). 
+For information on how to deploy the source contract see [here](https://github.com/Nori-zk/nori-solana-sdk/tree/develop/contracts/ethereum). 

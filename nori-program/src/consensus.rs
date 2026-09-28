@@ -376,7 +376,6 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    - `InvalidProofRequestQueueAccountProof { address, reason }` → the queue account itself could not be proven against the execution state root
 ///    - `InvalidTargetAccountProof { address, reason }` → a consumer contract named by a queue entry could not be proven present or absent
 ///    - `InvalidStorageSlotProof { slot_key, reason }` → a storage slot proof failed
-///    - `LeafHashError { target, slot_key, value, reason }` → `hash_request_leaf` failed for a queue entry
 ///    - `ExceedsMaxTreeDepth { slots, requested_depth, max_depth }` → the number of queue entries yields a Merkle tree that is too large
 ///    - `CursorAheadOfHead { cursor, head }` → the destination-chain cursor is ahead of the proven queue head
 ///    - `BatchSizeMismatch { expected, supplied }` → the witness supplied a different number of entries than the batch the queue state derives
@@ -406,7 +405,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     let input_queue_cursor = queue_storage.input_cursor;
     // @AUDIT - We should consider whether we want to enforce that there are no best valid updates in the store here.
     // 0. we should not proceed if we have a best valid update in our store
-    // as we have a next_sync_committe non zero assertion in the verifier contract on Mina
+    // as we have a next_sync_committe non zero assertion in the verifier contract on the destination chain
     // if let Some(best) = &store.best_valid_update {
     //     panic!("Best valid update in store: {:?}", best);
     // }

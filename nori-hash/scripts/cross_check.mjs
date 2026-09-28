@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { Field, Poseidon } from 'o1js';
+import { createHash } from 'crypto';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -23,8 +23,12 @@ let failed = 0;
 const failures = [];
 
 for (const { inputs, output: expected } of vectors) {
-    const fields = inputs.map((n) => Field(n));
-    const result = Poseidon.hash(fields).toString();
+    const fields = inputs.map((n) => {
+        const field = Buffer.alloc(32);
+        field.writeBigUInt64BE(BigInt(n), 24);
+        return field;
+    });
+    const result = `0x${createHash('sha256').update(Buffer.concat(fields)).digest('hex')}`;
 
     if (result === expected) {
         passed++;
@@ -48,5 +52,5 @@ if (failed > 0) {
     });
     process.exit(1);
 } else {
-    console.log('All vectors match. Rust and o1js Poseidon are compatible. This is a desperately inadequate evalutation of the space but serves as a sanity check.');
+    console.log('All vectors match. Rust and Node SHA-256 are compatible. This is a desperately inadequate evalutation of the space but serves as a sanity check.');
 }

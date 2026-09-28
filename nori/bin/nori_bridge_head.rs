@@ -39,9 +39,9 @@ async fn main() -> Result<()> {
                 .get_latest_finality_slot_and_store_hash()
                 .await
                 .unwrap();
-        // The cursor lives on Mina and is not readable from here. Zero is only
+        // The cursor lives on the destination chain and is not readable from here. Zero is only
         // correct against a queue that has never been drained; a cold start
-        // against a live bridge must seed this from the Mina contract.
+        // against a live bridge must seed this from the destination chain contract.
         queue_cursor = 0;
     }
 

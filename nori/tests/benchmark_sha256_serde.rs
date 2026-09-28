@@ -20,7 +20,7 @@ pub async fn benchmark_finality_update(
 
     // Encode proof inputs
     println!("Encoding sp1 proof inputs.");
-    let encoded_proof_inputs = serde_cbor::to_vec(&proof_inputs_with_window)?;
+    let encoded_proof_inputs = serde_cbor::to_vec(&proof_inputs_with_window.proof_inputs)?;
 
     // Setup prover client
     println!("Setting up prover client");
@@ -45,6 +45,8 @@ pub async fn benchmark_finality_update(
         "Execution total_syscall_count: {:?}",
         report.total_syscall_count()
     );
+
+    assert_eq!(report.exit_code, 0, "guest exited with code {}", report.exit_code);
 
     Ok(sp1_public_values)
 }

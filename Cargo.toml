@@ -17,12 +17,6 @@ nori-hash = { path = "nori-hash" }
 nori-sp1-helios-primitives = { path = "nori-primitives" }
 nori-sp1-helios-program = { path = "nori-program" }
 
-# o1-js
-mina-poseidon = {git = "https://github.com/o1-labs/proof-systems", package = "mina-poseidon" }
-mina-curves = { git = "https://github.com/o1-labs/proof-systems", package = "mina-curves" }
-o1-utils = { git = "https://github.com/o1-labs/proof-systems", package = "o1-utils" }
-
-
 # sp1-helios
 # sp1-helios-script = { path = "script" }
 sp1-helios-program = { path = "program" }
