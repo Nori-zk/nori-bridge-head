@@ -5351,6 +5351,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nori-elf"
+version = "0.1.0"
+
+[[package]]
 name = "nori-hash"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,8 @@
+[package]
+version = "0.1.0"
+name = "nori-elf"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
