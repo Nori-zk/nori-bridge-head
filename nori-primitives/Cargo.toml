@@ -5,13 +5,15 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = ["helios"]
+helios = ["dep:helios-consensus-core"]
+
 [dependencies]
-serde = { workspace = true }
-nori-hash = { workspace = true }
-helios-consensus-core = { workspace = true }
-alloy-sol-types = { workspace = true }
-alloy-primitives = { workspace = true, features = ["sha3-keccak"] }
-alloy-trie = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+helios-consensus-core = { workspace = true, optional = true }
+alloy-primitives = { workspace = true, features = ["sha3-keccak", "serde"] }
+alloy-trie = { workspace = true, features = ["ethereum", "serde"] }
 anyhow = { workspace = true }
 
 # Example-only; kept out of [dependencies] so the guest build does not pull it in.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 6/10/26 - Let the Solana program use the proof output types without helios
+
+Let the Solana program keep building with the SBF toolchain's rustc 1.89 after the move to helios 0.12.0. The program only needs `ProofOutputs` and `storage_layout` from `nori-sp1-helios-primitives`, but the crate pulled in `helios-consensus-core`, and helios 0.12.0 depends on alloy 2.x, which requires rustc 1.94.1. The helios typed proof input structs are now behind a default `helios` feature, so the program can depend on the crate with `default-features = false`, while the guest and host keep the feature on and compile the same code.
+
+- `nori-primitives/Cargo.toml`: `helios-consensus-core` is optional behind the default `helios` feature. The unused `nori-hash` and `alloy-sol-types` dependencies removed. `serde` `derive`, `alloy-primitives` `serde` and `alloy-trie` `ethereum` and `serde` declared, as they were only enabled through helios.
+- `nori-primitives/src/types.rs`: the helios imports and `ProofInputs`, `ProofInputsWithWindow`, `DualProofInputsWithWindow` and `ConsensusProofInputs` are behind `#[cfg(feature = "helios")]`.
+- `Cargo.lock`: `nori-sp1-helios-primitives` no longer depends on `nori-hash` and `alloy-sol-types`.
+- `nori-elf/nori-sp1-helios-program`, `nori-elf/nori-sp1-helios-program.vk.json`, `nori-elf/nori-sp1-helios-program.pi0.json`: rebuilt. Program vkey `0x00ae90bca776a4411f54e123f44a9a4a7c21628db688a66643e116dbe571fe2f`.
+
+`nori-sp1-helios-primitives` builds with `--no-default-features` without helios or alloy 2.x, and the workspace builds with default features. nbhead, resumed from the existing checkpoint, produced a mock proof advancing the head from slot 11297824 to 11297952 past the fork.
+
 ## 6/10/26 - Follow Ethereum through the Glamsterdam fork
 
 Keep the bridge head proving Ethereum's finalized state after the Glamsterdam (Gloas) fork activated on Sepolia at epoch 353024. THIS IS A POST AUDIT GUEST PROGRAM CHANGE. Glamsterdam's enshrined proposer-builder separation (EIP-7732) moved the execution payload out of the beacon block, so Gloas light client headers no longer carry the execution payload header, and with it the execution state root and block number that the guest commits and verifies the proof request queue against. Only the execution block hash remains, proven against the beacon block by helios during update verification. The guest now takes the RLP encoded execution block header as an input, accepts it only if its keccak256 equals that execution block hash, and reads the state root and block number from it, so the trust chain from the sync committee signature to the state root is unbroken: signature, beacon block, execution block hash, execution header, state root. Pre-Gloas headers keep the audited path unchanged. Helios 0.12.0 is required to verify Gloas light client updates at all, and brings alloy 2.x, which in turn moves SP1 to 6.8.1; the SP1 Groth16 circuit is unchanged (v6.1.0), so the Solana verifier's Groth16 key and vk root still hold and only the program vkey changes.

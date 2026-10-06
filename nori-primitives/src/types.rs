@@ -2,8 +2,11 @@ use crate::storage_layout::{MAX_COLLECTION_KEYS, QUEUE_ENTRY_WORDS};
 use alloy_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use alloy_trie::TrieAccount;
 use anyhow::{bail, Context, Result};
+#[cfg(feature = "helios")]
 use helios_consensus_core::consensus_spec::ConsensusSpec;
+#[cfg(feature = "helios")]
 use helios_consensus_core::types::Forks;
+#[cfg(feature = "helios")]
 use helios_consensus_core::types::{FinalityUpdate, LightClientStore, Update};
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +62,7 @@ pub struct QueueStorage {
     pub targets: Vec<TargetStorageProof>,
 }
 
+#[cfg(feature = "helios")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProofInputs<S: ConsensusSpec> {
     pub updates: Vec<Update<S>>,
@@ -76,6 +80,7 @@ pub struct ProofInputs<S: ConsensusSpec> {
     pub execution_header_rlp: Vec<u8>,
 }
 
+#[cfg(feature = "helios")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ProofInputsWithWindow<S: ConsensusSpec> {
     pub input_slot: u64,
@@ -87,12 +92,14 @@ pub struct ProofInputsWithWindow<S: ConsensusSpec> {
     pub expected_output_queue_cursor: u64,
 }
 
+#[cfg(feature = "helios")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DualProofInputsWithWindow<S: ConsensusSpec> {
     pub current_window: ProofInputsWithWindow<S>,
     pub next_window: Option<ProofInputsWithWindow<S>>
 }
 
+#[cfg(feature = "helios")]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ConsensusProofInputs<S: ConsensusSpec> {
     pub updates: Vec<Update<S>>,

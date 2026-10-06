@@ -5952,11 +5952,9 @@ version = "0.1.0"
 dependencies = [
  "alloy 1.8.3",
  "alloy-primitives",
- "alloy-sol-types",
  "alloy-trie",
  "anyhow",
  "helios-consensus-core",
- "nori-hash",
  "serde",
  "serde_json",
 ]
