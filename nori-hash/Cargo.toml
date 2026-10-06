@@ -5,17 +5,34 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "hash_vectors"
+path = "src/bin/hash_vectors.rs"
+required-features = ["helios"]
+
+[features]
+default = ["helios"]
+# The Helios store modules need these; merkle_sha256_fixed does not, so a
+# build without default features (the TS SDK's request leaf and Merkle hashing) drops them.
+helios = [
+    "dep:helios-consensus-core",
+    "dep:serde_cbor",
+    "dep:alloy-sol-types",
+    "dep:tree_hash",
+    "dep:serde_json",
+    "dep:rmp-serde",
+]
+
 [dependencies]
 alloy-primitives = { workspace = true, features = ["sha3-keccak"] }
 anyhow = { workspace = true }
 sha2-v0-10-8 = { workspace = true }
+helios-consensus-core = { workspace = true, optional = true }
+serde_cbor = { workspace = true, optional = true }
+alloy-sol-types = { workspace = true, optional = true }
+tree_hash = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+rmp-serde = { version = "1.2.0", optional = true }
 
-# The Helios store modules need these; merkle_sha256_fixed does not, so a
-# wasm32 build (the TS SDK's request leaf and Merkle hashing) drops them.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-helios-consensus-core = { workspace = true }
-serde_cbor = { workspace = true }
-alloy-sol-types = { workspace = true }
-tree_hash = { workspace = true }
+[dev-dependencies]
 serde_json = { workspace = true }
-rmp-serde = "1.2.0"

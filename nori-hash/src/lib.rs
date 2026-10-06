@@ -1,8 +1,8 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "helios")]
 pub mod helios;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "helios")]
 pub mod sha256_hash;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "helios")]
 pub mod utils;
 //pub mod merkle_poseidon;
 pub mod merkle_sha256_fixed;

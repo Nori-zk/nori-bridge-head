@@ -1,5 +1,15 @@
 # Changelog
 
+## 6/10/26 - Let the TS SDK hash requests with nori-hash without helios
+
+Let `nori-hash-utils` in nori-solana-sdk join the SDK's Cargo workspace and share its lock. It only needs `merkle_sha256_fixed`, but `nori-hash` pulled in `helios-consensus-core` and the store hashing dependencies on every target but wasm32, and a lock records every target, so sharing the SDK lock would have brought helios 0.12.0 and alloy 2.x into it next to the Solana program. The helios store modules and their dependencies are now behind a default `helios` feature in place of the wasm32 target gate, so `nori-hash-utils` depends on `nori-hash` with `default-features = false`, while the guest and host keep the feature on and compile the same code.
+
+- `nori-hash/Cargo.toml`: `helios-consensus-core`, `serde_cbor`, `alloy-sol-types`, `tree_hash`, `serde_json` and `rmp-serde` are optional behind the default `helios` feature, replacing the `cfg(not(target_arch = "wasm32"))` dependency table. The `hash_vectors` binary requires the `helios` feature. `serde_json` added as a dev-dependency for `tests/request_leaf_byte_routing.rs`.
+- `nori-hash/src/lib.rs`: the `helios`, `sha256_hash` and `utils` modules are behind `#[cfg(feature = "helios")]` in place of `#[cfg(not(target_arch = "wasm32"))]`.
+- `nori-elf/nori-sp1-helios-program`, `nori-elf/nori-sp1-helios-program.vk.json`, `nori-elf/nori-sp1-helios-program.pi0.json`: rebuilt. Program vkey `0x00e51197676aceacae2d0b4810c9f421b5b47a86b55031dcbe034ef4cee2a6a7`.
+
+`nori-hash` builds with `--no-default-features`, including its tests and for wasm32, with `alloy-primitives`, `anyhow` and `sha2` as its only dependencies, and the workspace builds with default features with `Cargo.lock` unchanged. nbhead, resumed from the existing checkpoint, produced a mock proof advancing the head from slot 11298048 to 11298080.
+
 ## 6/10/26 - Let the Solana program use the proof output types without helios
 
 Let the Solana program keep building with the SBF toolchain's rustc 1.89 after the move to helios 0.12.0. The program only needs `ProofOutputs` and `storage_layout` from `nori-sp1-helios-primitives`, but the crate pulled in `helios-consensus-core`, and helios 0.12.0 depends on alloy 2.x, which requires rustc 1.94.1. The helios typed proof input structs are now behind a default `helios` feature, so the program can depend on the crate with `default-features = false`, while the guest and host keep the feature on and compile the same code.
