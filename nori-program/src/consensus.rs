@@ -1,7 +1,9 @@
-use alloy_primitives::B256;
+use alloy_consensus::Header;
+use alloy_primitives::{keccak256, B256};
+use alloy_rlp::Decodable;
 use helios_consensus_core::{
-    apply_finality_update, apply_update, consensus_spec::ConsensusSpec, verify_finality_update,
-    verify_update,
+    apply_finality_update, apply_update, consensus_spec::ConsensusSpec,
+    types::LightClientHeader, verify_finality_update, verify_update,
 };
 use log::debug;
 use nori_hash::sha256_hash::sha256_hash_helios_store;
@@ -24,6 +26,12 @@ pub enum ProgramError {
     InvalidFinalityUpdate { reason: String },
     /// Error when execution root is missing
     MissingExecutionRoot,
+    // POST AUDIT CHANGE: errors for recovering the execution state root from the execution block
+    // header, which Gloas light client headers commit to only by its hash.
+    /// Error when keccak256 of the supplied execution header does not match the finalized header's execution block hash
+    ExecutionHeaderHashMismatch { expected: B256, actual: B256 },
+    /// Error when the supplied execution header is not exactly one RLP encoded block header
+    InvalidExecutionHeader(String),
     /// Error when store hashing fails
     StoreHashingError(String),
     /// Error for MPT specific errors
@@ -50,6 +58,17 @@ impl fmt::Display for ProgramError {
             }
             ProgramError::MissingExecutionRoot => {
                 write!(f, "Missing execution root in proof inputs")
+            }
+            // POST AUDIT CHANGE: messages for the Gloas execution header errors.
+            ProgramError::ExecutionHeaderHashMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "Execution header hash mismatch: expected {:?}, got {:?}",
+                    expected, actual
+                )
+            }
+            ProgramError::InvalidExecutionHeader(reason) => {
+                write!(f, "Invalid execution header: {}", reason)
             }
             ProgramError::StoreHashingError(reason) => {
                 write!(f, "Failed to hash store: {}", reason)
@@ -78,6 +97,43 @@ impl From<MptError> for ProgramError {
 
 impl std::error::Error for ProgramError {}
 
+/// POST AUDIT CHANGE: Returns the execution state root and block number of the finalized header.
+///
+/// Pre-Gloas light client headers carry the execution payload header, so both are read from it
+/// directly as before. Gloas (Glamsterdam) light client headers no longer carry it: the execution
+/// state root and block number are absent and only the execution block hash remains, proven
+/// against the beacon block by helios during update verification. The supplied RLP encoded
+/// execution block header is trusted only if its keccak256 equals that hash, after which the
+/// state root and block number are read from it.
+fn finalized_execution_state_root_and_block_number(
+    finalized_header: &LightClientHeader,
+    execution_header_rlp: &[u8],
+) -> Result<(B256, u64), ProgramError> {
+    if let Ok(execution) = finalized_header.execution() {
+        return Ok((*execution.state_root(), *execution.block_number()));
+    }
+    let execution_block_hash = *finalized_header
+        .execution_block_hash()
+        .map_err(|_| ProgramError::MissingExecutionRoot)?;
+    let actual = keccak256(execution_header_rlp);
+    if actual != execution_block_hash {
+        return Err(ProgramError::ExecutionHeaderHashMismatch {
+            expected: execution_block_hash,
+            actual,
+        });
+    }
+    let mut remaining = execution_header_rlp;
+    let header = Header::decode(&mut remaining)
+        .map_err(|e| ProgramError::InvalidExecutionHeader(e.to_string()))?;
+    if !remaining.is_empty() {
+        return Err(ProgramError::InvalidExecutionHeader(format!(
+            "{} trailing bytes after header",
+            remaining.len()
+        )));
+    }
+    Ok((header.state_root, header.number))
+}
+
 /// Zero-Knowledge Consensus State Transition Proof for Ethereum Light Client Updates with Result type
 ///
 /// Cryptographic state machine processing light client updates with hash chaining.
@@ -96,15 +152,16 @@ impl std::error::Error for ProgramError {}
 /// ```
 ///
 /// # Inputs (All Values Must Be Precomputed Hashes)
-/// | Name                    | Type               | Description                       |
-/// |-------------------------|--------------------|-----------------------------------|
-/// | `updates`               | `Vec<Update>`      | Ordered sync committee updates    |
-/// | `finality_update`       | `FinalityUpdate`   | Finalized header proof            |
-/// | `expected_current_slot` | `u64`              | Current chain slot for validation |
-/// | `store`                 | `LightClientStore` | Full client state                 |
-/// | `genesis_root`          | `B256`             | Genesis block root                |
-/// | `forks`                 | `ForkData`         | Network fork versions             |
-/// | `store_hash`            | `B256`             | SHA-256(store) from last proof    |
+/// | Name                    | Type               | Description                                                      |
+/// |-------------------------|--------------------|------------------------------------------------------------------|
+/// | `updates`               | `Vec<Update>`      | Ordered sync committee updates                                   |
+/// | `finality_update`       | `FinalityUpdate`   | Finalized header proof                                           |
+/// | `expected_current_slot` | `u64`              | Current chain slot for validation                                |
+/// | `store`                 | `LightClientStore` | Full client state                                                |
+/// | `genesis_root`          | `B256`             | Genesis block root                                               |
+/// | `forks`                 | `ForkData`         | Network fork versions                                            |
+/// | `store_hash`            | `B256`             | SHA-256(store) from last proof                                   |
+/// | `execution_header_rlp`  | `Vec<u8>`          | POST AUDIT CHANGE: RLP execution block header, empty pre-Gloas   |
 ///
 /// # Operations (In Exact Execution Order)
 /// 1. **Last Store Hash Validation** (Irreversible Check)
@@ -124,9 +181,16 @@ impl std::error::Error for ProgramError {}
 ///    - Record `output_slot` = `store.finalized_header.beacon().slot`
 ///    - Extract `next_sync_committee_hash` = `store.next_sync_committee.tree_hash_root()`
 ///      (`B256::ZERO` if `next_sync_committee` is `None`)
-///    - Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`
-///      (fails with `MissingExecutionRoot` if execution header is absent)
-///    - Extract `output_block_number` = `store.finalized_header.execution()?.block_number()`
+///    - ~~Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`~~
+///      ~~(fails with `MissingExecutionRoot` if execution header is absent)~~
+///    - ~~Extract `output_block_number` = `store.finalized_header.execution()?.block_number()`~~
+///    - POST AUDIT CHANGE: Extract `execution_state_root` and `output_block_number` via
+///      `finalized_execution_state_root_and_block_number`: from
+///      `store.finalized_header.execution()?` for pre-Gloas headers; for Gloas headers, which no
+///      longer carry them, from `execution_header_rlp` once `keccak256(execution_header_rlp)`
+///      equals `store.finalized_header.execution_block_hash()?`
+///      (fails with `MissingExecutionRoot` if neither the execution header nor the execution
+///      block hash is present)
 ///
 /// 6. **Post-State Hashing**
 ///    - Compute `output_store_hash` = `SHA-256(serde_serialize(store))`, to be validated in the next round
@@ -157,7 +221,13 @@ impl std::error::Error for ProgramError {}
 /// 4. **Invalid Finality**
 ///    `verify_finality_update` fails → Unverifiable final header
 /// 5. **Missing Execution Root**
-///    `store.finalized_header.execution()` is `Err` → Incomplete header data
+///    ~~`store.finalized_header.execution()` is `Err` → Incomplete header data~~
+///    POST AUDIT CHANGE: `store.finalized_header.execution()` and
+///    `store.finalized_header.execution_block_hash()` are both `Err` → Incomplete header data
+/// 6. POST AUDIT CHANGE: **Execution Header Hash Mismatch**
+///    `keccak256(execution_header_rlp) != store.finalized_header.execution_block_hash()` → `ExecutionHeaderHashMismatch`
+/// 7. POST AUDIT CHANGE: **Invalid Execution Header**
+///    `execution_header_rlp` is not exactly one RLP encoded block header → `InvalidExecutionHeader`
 pub fn consensus_program<S: ConsensusSpec>(
     proof_inputs: ConsensusProofInputs<S>,
 ) -> Result<ConsensusProofOutputs, ProgramError> {
@@ -170,6 +240,7 @@ pub fn consensus_program<S: ConsensusSpec>(
         genesis_root,
         forks,
         store_hash: input_store_hash,
+        execution_header_rlp,
     } = proof_inputs;
 
     // 1. Last Store Hash Validation - Calculate SHA-256(serde_serialize(store)) and assert equality with input_store_hash
@@ -240,13 +311,21 @@ pub fn consensus_program<S: ConsensusSpec>(
         Some(next_sync_committee) => next_sync_committee.tree_hash_root(),
         None => B256::ZERO,
     };
-    let execution_state_root_result = store.finalized_header.execution();
-    if execution_state_root_result.is_err() {
-        return Err(ProgramError::MissingExecutionRoot);
-    }
-    let execution = execution_state_root_result.unwrap();
-    let execution_state_root = *execution.state_root();
-    let output_block_number = *execution.block_number();
+    // let execution_state_root_result = store.finalized_header.execution();
+    // if execution_state_root_result.is_err() {
+    //     return Err(ProgramError::MissingExecutionRoot);
+    // }
+    // let execution = execution_state_root_result.unwrap();
+    // let execution_state_root = *execution.state_root();
+    // let output_block_number = *execution.block_number();
+    // POST AUDIT CHANGE: Gloas finalized headers no longer carry the execution state root and block
+    // number, so they are recovered from execution_header_rlp against the execution block hash,
+    // see finalized_execution_state_root_and_block_number.
+    let (execution_state_root, output_block_number) =
+        finalized_execution_state_root_and_block_number(
+            &store.finalized_header,
+            &execution_header_rlp,
+        )?;
     debug!("output_slot, next_sync_committee_hash, execution_state_root and output_block_number captured.");
 
     // 6. Post-State Hashing - Calculate updated store hash to be validated in the next round
@@ -288,16 +367,17 @@ pub fn consensus_program<S: ConsensusSpec>(
 /// ```
 ///
 /// # Inputs (All Values Must Be Precomputed Hashes)
-/// | Name                    | Type               | Description                            |
-/// |-------------------------|--------------------|----------------------------------------|
-/// | `updates`               | `Vec<Update>`      | Ordered sync committee updates         |
-/// | `finality_update`       | `FinalityUpdate`   | Finalized header proof                 |
-/// | `expected_current_slot` | `u64`              | Current chain slot for validation      |
-/// | `store`                 | `LightClientStore` | Full client state                      |
-/// | `genesis_root`          | `B256`             | Genesis block root                     |
-/// | `forks`                 | `ForkData`         | Network fork versions                  |
-/// | `store_hash`            | `B256`             | SHA-256(store) from last proof         |
-/// | `queue_storage`         | `QueueStorage`     | Proof request queue account & entry proofs |
+/// | Name                    | Type               | Description                                                      |
+/// |-------------------------|--------------------|------------------------------------------------------------------|
+/// | `updates`               | `Vec<Update>`      | Ordered sync committee updates                                   |
+/// | `finality_update`       | `FinalityUpdate`   | Finalized header proof                                           |
+/// | `expected_current_slot` | `u64`              | Current chain slot for validation                                |
+/// | `store`                 | `LightClientStore` | Full client state                                                |
+/// | `genesis_root`          | `B256`             | Genesis block root                                               |
+/// | `forks`                 | `ForkData`         | Network fork versions                                            |
+/// | `store_hash`            | `B256`             | SHA-256(store) from last proof                                   |
+/// | `queue_storage`         | `QueueStorage`     | Proof request queue account & entry proofs                       |
+/// | `execution_header_rlp`  | `Vec<u8>`          | POST AUDIT CHANGE: RLP execution block header, empty pre-Gloas   |
 ///
 /// # Operations (In Exact Execution Order)
 /// 1. **Last Store Hash Validation** (Irreversible Check)
@@ -314,8 +394,15 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    - Verify and apply `finality_update`
 ///
 /// 5. **Verify Proof Request Queue**
-///    - Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`
-///      (fails with `MissingExecutionRoot` if execution header is absent)
+///    - ~~Extract `execution_state_root` = `store.finalized_header.execution()?.state_root()`~~
+///      ~~(fails with `MissingExecutionRoot` if execution header is absent)~~
+///    - POST AUDIT CHANGE: Extract `execution_state_root` and `output_block_number` via
+///      `finalized_execution_state_root_and_block_number`: from
+///      `store.finalized_header.execution()?` for pre-Gloas headers; for Gloas headers, which no
+///      longer carry them, from `execution_header_rlp` once `keccak256(execution_header_rlp)`
+///      equals `store.finalized_header.execution_block_hash()?`
+///      (fails with `MissingExecutionRoot` if neither the execution header nor the execution
+///      block hash is present)
 ///    - Extract `proof_request_queue_address` from `queue_storage.proof_request_queue_address`
 ///    - Verify the queue account, its `head`, every queued entry, and each entry's target
 ///      account and storage word via `verify_queue`
@@ -370,7 +457,9 @@ pub fn consensus_program<S: ConsensusSpec>(
 /// 4. **Invalid Finality**
 ///    `verify_finality_update` fails → Unverifiable final header
 /// 5. **Missing Execution Root**
-///    `store.finalized_header.execution()` is `Err` → Incomplete header data
+///    ~~`store.finalized_header.execution()` is `Err` → Incomplete header data~~
+///    POST AUDIT CHANGE: `store.finalized_header.execution()` and
+///    `store.finalized_header.execution_block_hash()` are both `Err` → Incomplete header data
 /// 6. **Invalid MPT Proof**
 ///    `verify_queue` may fail due to:
 ///    - `InvalidProofRequestQueueAccountProof { address, reason }` → the queue account itself could not be proven against the execution state root
@@ -383,6 +472,10 @@ pub fn consensus_program<S: ConsensusSpec>(
 ///    Any of these returns an `MptError`, wrapped as `ProgramError::MptError`
 /// 7. **Non-Checkpoint Output Slot**
 ///    `output_slot % 32 != 0` (checked after `updates`/`finality_update` are applied) → `NonCheckpointOutputSlot`
+/// 8. POST AUDIT CHANGE: **Execution Header Hash Mismatch**
+///    `keccak256(execution_header_rlp) != store.finalized_header.execution_block_hash()` → `ExecutionHeaderHashMismatch`
+/// 9. POST AUDIT CHANGE: **Invalid Execution Header**
+///    `execution_header_rlp` is not exactly one RLP encoded block header → `InvalidExecutionHeader`
 ///
 pub fn consensus_mpt_program<S: ConsensusSpec>(
     proof_inputs: ProofInputs<S>,
@@ -398,6 +491,7 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
         forks,
         store_hash: input_store_hash,
         queue_storage,
+        execution_header_rlp,
     } = proof_inputs;
     // The queue is the account the storage proofs anchor on, so it is the
     // address committed to the destination chain.
@@ -492,13 +586,21 @@ pub fn consensus_mpt_program<S: ConsensusSpec>(
     // Should do an assertion here to ensure we have increased our head (we do check this downstream later)
 
     // 5. Verify Proof Request Queue - execution_state_root, proof_request_queue_address, MPT proofs
-    let execution_state_root_result = store.finalized_header.execution();
-    if execution_state_root_result.is_err() {
-        return Err(ProgramError::MissingExecutionRoot);
-    }
-    let execution = execution_state_root_result.unwrap();
-    let execution_state_root = *execution.state_root();
-    let output_block_number = *execution.block_number();
+    // let execution_state_root_result = store.finalized_header.execution();
+    // if execution_state_root_result.is_err() {
+    //     return Err(ProgramError::MissingExecutionRoot);
+    // }
+    // let execution = execution_state_root_result.unwrap();
+    // let execution_state_root = *execution.state_root();
+    // let output_block_number = *execution.block_number();
+    // POST AUDIT CHANGE: Gloas finalized headers no longer carry the execution state root and block
+    // number, so they are recovered from execution_header_rlp against the execution block hash,
+    // see finalized_execution_state_root_and_block_number.
+    let (execution_state_root, output_block_number) =
+        finalized_execution_state_root_and_block_number(
+            &store.finalized_header,
+            &execution_header_rlp,
+        )?;
     if debug_print {
         println!("Verifying proof request queue.");
     }

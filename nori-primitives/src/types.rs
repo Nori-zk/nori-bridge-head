@@ -69,6 +69,11 @@ pub struct ProofInputs<S: ConsensusSpec> {
     pub forks: Forks,
     pub store_hash: B256,
     pub queue_storage: QueueStorage,
+    // POST AUDIT CHANGE: Gloas light client headers no longer carry the execution payload header,
+    // so the execution state root and block number are absent from them; only the execution block
+    // hash remains. This is the RLP encoded execution block header for the finalized header, which
+    // carries them. Empty for pre-Gloas finalized headers.
+    pub execution_header_rlp: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -97,6 +102,11 @@ pub struct ConsensusProofInputs<S: ConsensusSpec> {
     pub genesis_root: B256,
     pub forks: Forks,
     pub store_hash: B256,
+    // POST AUDIT CHANGE: Gloas light client headers no longer carry the execution payload header,
+    // so the execution state root and block number are absent from them; only the execution block
+    // hash remains. This is the RLP encoded execution block header for the finalized header, which
+    // carries them. Empty for pre-Gloas finalized headers.
+    pub execution_header_rlp: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

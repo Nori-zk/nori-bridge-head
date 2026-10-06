@@ -15,13 +15,14 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
-sp1-zkvm = "6.1.0"
+sp1-zkvm = "6.8.1"
 helios-consensus-core = { workspace = true }
 serde_cbor = { workspace = true }
 alloy-sol-types = { workspace = true }
 alloy-primitives = { workspace = true, features = ["sha3-keccak"] }
 alloy-trie = { workspace = true }
 alloy-rlp = { workspace = true }
+alloy-consensus = { workspace = true }
 tree_hash = { workspace = true }
 anyhow = { workspace = true }
 nori-sp1-helios-primitives = { workspace = true }

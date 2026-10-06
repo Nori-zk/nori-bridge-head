@@ -8,6 +8,7 @@ use alloy::{
     providers::{Provider, ProviderBuilder, RootProvider},
     rpc::types::EIP1186AccountProofResponse,
 };
+use alloy_consensus::Header;
 use alloy_primitives::{keccak256, Address, Bytes, FixedBytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{Nibbles, TrieAccount};
@@ -40,6 +41,21 @@ pub struct ExecutionHttpProxy<S: ConsensusSpec> {
     _marker: PhantomData<S>,
     validation_timeout: Duration,
     chunk_limit: usize,
+}
+
+// POST AUDIT CHANGE: cloned into the consensus provider multiplex closures, which must be 'static,
+// to fetch the execution block header that Gloas finalized headers commit to only by hash.
+impl<S: ConsensusSpec> Clone for ExecutionHttpProxy<S> {
+    fn clone(&self) -> Self {
+        ExecutionHttpProxy {
+            principal_provider: self.principal_provider.clone(),
+            backup_providers: self.backup_providers.clone(),
+            proof_queue_address: self.proof_queue_address,
+            _marker: PhantomData,
+            validation_timeout: self.validation_timeout,
+            chunk_limit: self.chunk_limit,
+        }
+    }
 }
 
 impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
@@ -121,6 +137,38 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
 
     pub fn try_from_env() -> Self {
         ExecutionHttpProxy::from_env().unwrap()
+    }
+
+    /// POST AUDIT CHANGE: Fetches the execution block header for `block_hash`.
+    ///
+    /// Gloas light client headers no longer carry the execution state root and block number, only
+    /// the execution block hash. This header carries them; the guest accepts its RLP encoding only
+    /// if its keccak256 equals that hash. The same check is made here so a provider returning the
+    /// wrong header fails over to the next one instead of producing an unprovable input.
+    pub async fn get_execution_header(&self, block_hash: B256) -> Result<Header> {
+        query_with_fallback(
+            &self.principal_provider,
+            &self.backup_providers,
+            |provider| {
+                async move {
+                    let header: Option<Header> = provider
+                        .raw_request("eth_getBlockByHash".into(), (block_hash, false))
+                        .await?;
+                    let header = header
+                        .ok_or_else(|| anyhow!("Execution block {block_hash} not found"))?;
+                    let actual = header.hash_slow();
+                    if actual != block_hash {
+                        return Err(anyhow!(
+                            "Execution header hash mismatch: expected {block_hash}, got {actual}"
+                        ));
+                    }
+                    Ok(header)
+                }
+                .boxed()
+            },
+            self.validation_timeout,
+        )
+        .await
     }
 
     /// eth_getProof for `storage_keys`, split into requests of at most
@@ -433,6 +481,9 @@ impl<S: ConsensusSpec> ExecutionHttpProxy<S> {
             forks: validated_consensus_proof_inputs.forks,
             store_hash: validated_consensus_proof_inputs.store_hash,
             queue_storage,
+            // POST AUDIT CHANGE: the RLP execution block header Gloas finalized headers need, which
+            // the consensus proxy fetched and validated with the consensus inputs.
+            execution_header_rlp: validated_consensus_proof_inputs.execution_header_rlp,
         };
 
         let consensus_mpt_proof_input_clone = consensus_mpt_proof_input.clone();

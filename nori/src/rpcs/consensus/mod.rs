@@ -3,12 +3,13 @@ use nori_hash::sha256_hash::sha256_hash_helios_store;
 use nori_sp1_helios_primitives::types::{ConsensusProofInputs, ProofInputsWithWindow};
 use nori_sp1_helios_program::consensus::consensus_program;
 use alloy_primitives::{FixedBytes, B256};
+use alloy_rlp::Encodable;
 use anyhow::{anyhow, Error, Result};
 use futures::FutureExt;
 use helios_consensus_core::{
-    apply_update, calc_sync_period,
+    apply_finality_update, apply_update, calc_sync_period,
     consensus_spec::ConsensusSpec,
-    types::{BeaconBlock, FinalityUpdate, Forks, LightClientHeader, LightClientStore, Update},
+    types::{FinalityUpdate, Forks, LightClientHeader, LightClientStore, Update},
     verify_update,
 };
 use helios_ethereum::{
@@ -26,6 +27,28 @@ use tree_hash::TreeHash;
 pub const MAX_REQUEST_LIGHT_CLIENT_UPDATES: u8 = 128;
 const CONSENSUS_RPCS_ENV_VAR: &str = "NORI_SOURCE_CONSENSUS_HTTP_RPCS";
 pub const CONSENSUS_PROVIDER_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[derive(serde::Deserialize)]
+struct BeaconHeaderResponse {
+    data: BeaconHeaderData,
+}
+
+#[derive(serde::Deserialize)]
+struct BeaconHeaderData {
+    root: B256,
+}
+
+/// Fetch the block root of a slot from the beacon API
+async fn get_block_root(consensus_rpc: &Url, slot: u64) -> Result<B256> {
+    let req = format!(
+        "{}/eth/v1/beacon/headers/{}",
+        consensus_rpc.as_str().trim_end_matches('/'),
+        slot
+    );
+    let body = reqwest::get(&req).await?.error_for_status()?.text().await?;
+    let res: BeaconHeaderResponse = serde_json::from_str(&body)?;
+    Ok(res.data.root)
+}
 
 pub struct Client<S: ConsensusSpec, R: ConsensusRpc<S>> {
     inner: Inner<S, R>,
@@ -86,15 +109,10 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
 
     /// Bootstrap the client from a slot
     pub async fn bootstrap_from_slot(consensus_rpc: &Url, slot: u64) -> Result<Self> {
-        let client: Client<S, R> = Client::new(consensus_rpc)?;
-
-        // Fetching the block of a slot
-        let block: BeaconBlock<S> =
-            client.inner.rpc.get_block(slot).await.map_err(|e| {
-                Error::msg(format!("Failed to fetch block for slot {}: {}", slot, e))
-            })?;
-
-        let checkpoint = B256::from_slice(block.tree_hash_root().as_ref());
+        // Fetching the block root of a slot
+        let checkpoint = get_block_root(consensus_rpc, slot).await.map_err(|e| {
+            Error::msg(format!("Failed to fetch block for slot {}: {}", slot, e))
+        })?;
 
         let bootstrap_client: Client<S, R> =
             Client::bootstrap_from_checkpoint(consensus_rpc, checkpoint).await?;
@@ -114,15 +132,11 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
 
     /// Get current checkpoint
     pub async fn get_current_checkpoint(&self) -> Result<B256> {
-        let slot = self.get_current_finalizer_header_beacon_slot();
-        // Fetching the block
-        let block: BeaconBlock<S> =
-            self.inner.rpc.get_block(slot).await.map_err(|e| {
-                Error::msg(format!("Failed to fetch block for slot {}: {}", slot, e))
-            })?;
+        // The finalized header's tree hash root is the block root
+        let header = self.inner.store.finalized_header.beacon();
 
         // Returning the tree hash root as B256
-        Ok(B256::from_slice(block.tree_hash_root().as_ref()))
+        Ok(B256::from_slice(header.tree_hash_root().as_ref()))
     }
 
     /// Get latest checkpoint
@@ -423,11 +437,42 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> Client<S, R> {
             genesis_root: *genesis_root,
             forks: forks.clone(),
             store_hash,
+            // POST AUDIT CHANGE: Gloas finalized headers no longer carry the execution state root
+            // and block number. Fetching their execution block header needs the execution RPCs, so
+            // ConsensusHttpProxy::prepare_consensus_mpt_proof_inputs fills this in; empty here.
+            execution_header_rlp: Vec::new(),
         };
         debug!("Built sp1 proof inputs.");
 
         Ok(proof_inputs)
     }
+}
+
+/// POST AUDIT CHANGE: RLP execution block header of the finalized header the consensus program reaches.
+///
+/// Gloas light client headers no longer carry the execution state root and block number, only the
+/// execution block hash, so the program needs this header to recover them (empty for pre-Gloas
+/// headers, which still carry them). The finalized header is found by applying `updates` and
+/// `finality_update` to a copy of `store` in the order the program does; verifying them is left to
+/// the program run that follows.
+async fn get_finalized_execution_header_rlp<S: ConsensusSpec>(
+    consensus_proof_inputs: &ConsensusProofInputs<S>,
+    execution_proxy: &ExecutionHttpProxy<S>,
+) -> Result<Vec<u8>> {
+    let mut store = consensus_proof_inputs.store.clone();
+    for update in &consensus_proof_inputs.updates {
+        apply_update(&mut store, update);
+    }
+    apply_finality_update(&mut store, &consensus_proof_inputs.finality_update);
+    let Ok(execution_block_hash) = store.finalized_header.execution_block_hash() else {
+        return Ok(Vec::new());
+    };
+    let header = execution_proxy
+        .get_execution_header(*execution_block_hash)
+        .await?;
+    let mut execution_header_rlp = Vec::new();
+    header.encode(&mut execution_header_rlp);
+    Ok(execution_header_rlp)
 }
 
 // Ok now need the multiplexing logic so we can run multiple operations over multiple RPCS
@@ -520,6 +565,8 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
     ) -> Result<ProofInputsWithWindow<S>> {
         // TODO move this function out of here its a bit strange to have the consensus and execution rpcs here
         // Deserves it own location
+        // POST AUDIT CHANGE: each provider attempt fetches the Gloas execution block header, see below.
+        let execution_proxy = self.execution_proxy.clone();
         let (
             input_slot,
             output_slot,
@@ -529,12 +576,24 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
             expected_output_block_number,
         ) = multiplex(
             |url| {
+                // POST AUDIT CHANGE: owned per attempt, as the attempt future must be 'static.
+                let execution_proxy = execution_proxy.clone();
                 async move {
                     // Fetch proof_inputs
-                    let consensus_proof_inputs = Client::<S, R>::prepare_consensus_proof_inputs(
+                    // let consensus_proof_inputs = Client::<S, R>::prepare_consensus_proof_inputs(
+                    //     &url, input_slot, store_hash,
+                    // )
+                    // .await?;
+                    // POST AUDIT CHANGE: Gloas finalized headers no longer carry the execution state
+                    // root and block number, so the program needs the execution block header they
+                    // commit to by hash; it is fetched from the execution RPCs and added here.
+                    let mut consensus_proof_inputs = Client::<S, R>::prepare_consensus_proof_inputs(
                         &url, input_slot, store_hash,
                     )
                     .await?;
+                    consensus_proof_inputs.execution_header_rlp =
+                        get_finalized_execution_header_rlp(&consensus_proof_inputs, &execution_proxy)
+                            .await?;
 
                     // Run the CPU-heavy program and slot validation inside spawn_blocking
                     let (
@@ -618,14 +677,32 @@ impl<S: ConsensusSpec, R: ConsensusRpc<S> + std::fmt::Debug> ConsensusHttpProxy<
         .await?;
 
         // Input finalized block number.
-        let input_block_number = *validated_consensus_proof_inputs
-            .store
-            .finalized_header
-            .execution()
-            .map_err(|_| {
-                anyhow::Error::msg("Failed to get input finalized execution header".to_string())
-            })?
-            .block_number();
+        // let input_block_number = *validated_consensus_proof_inputs
+        //     .store
+        //     .finalized_header
+        //     .execution()
+        //     .map_err(|_| {
+        //         anyhow::Error::msg("Failed to get input finalized execution header".to_string())
+        //     })?
+        //     .block_number();
+        // POST AUDIT CHANGE: Gloas input finalized headers no longer carry the block number, only the
+        // execution block hash, so it is read from the execution block header fetched by that hash.
+        let input_finalized_header = &validated_consensus_proof_inputs.store.finalized_header;
+        let input_block_number = match input_finalized_header.execution() {
+            Ok(execution) => *execution.block_number(),
+            Err(_) => {
+                let execution_block_hash =
+                    *input_finalized_header.execution_block_hash().map_err(|_| {
+                        anyhow::Error::msg(
+                            "Failed to get input finalized execution header".to_string(),
+                        )
+                    })?;
+                self.execution_proxy
+                    .get_execution_header(execution_block_hash)
+                    .await?
+                    .number
+            }
+        };
 
         let validated_consensus_mpt_proof_input_with_window = self.execution_proxy
             .prepare_consensus_mpt_proof_inputs(
