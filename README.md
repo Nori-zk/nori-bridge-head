@@ -169,4 +169,4 @@ cargo build
 
 ## Nori Contract
 
-For information on how to deploy the source contract see [here](https://github.com/Nori-zk/nori-solana-sdk/tree/develop/contracts/ethereum). 
+For information on how to deploy the source contract see [here](https://github.com/Nori-zk/nori-tempo-sdk/tree/develop/ethereum). 

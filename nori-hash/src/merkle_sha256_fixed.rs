@@ -453,7 +453,7 @@ pub fn compute_merkle_root_from_path(leaf_hash: B256, index: u64, path: &[B256])
 /// `collection_keys_count` is hashed so that an unused trailing key, which is
 /// zero, cannot collide with a request that supplied a zero key.
 ///
-/// The Solana `request_leaf_hash` must pack identically; the shared test
+/// The Tempo bridge's `requestLeafHash` must pack identically; the shared test
 /// vectors pin both implementations.
 pub fn pack_request_leaf_fields(
     target: &Address,
@@ -502,7 +502,7 @@ pub fn pack_request_leaf_fields(
 /// - field 3: `key_1[1..32]`
 /// - field 4: `value[1..32]`
 ///
-/// The Solana `request_leaf_hash` must pack identically; the shared test
+/// The Tempo bridge's `requestLeafHash` must pack identically; the shared test
 /// vectors pin both implementations.
 pub fn hash_request_leaf(
     target: &Address,

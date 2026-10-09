@@ -4,7 +4,7 @@
 //! pack_request_leaf_fields itself via arithmetic on the documented field
 //! layout. Also renders the checked cases to
 //! `test-vectors/proof-request-queue/request-leaf-vectors.json`, which the
-//! Solana `request_leaf_hash` must reproduce every `leaf` value from.
+//! Tempo bridge's `requestLeafHash` must reproduce every `leaf` value from.
 //!
 //! Run: `cargo test -p nori-hash --test request_leaf_byte_routing`
 
